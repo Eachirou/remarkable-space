@@ -1,0 +1,761 @@
+package server
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+)
+
+// ---- 字体 active / apply ----
+//
+// reMarkable 系统通过 fontconfig 扫描 ~/.local/share/fonts/ (= FontsActiveDir)
+// 下的真实字体文件来发现可用字体, 不跟随符号链接. 因此启用流程:
+//   1. 把 FontsActiveDir 里现存的 .ttf/.otf 全部"归档"回 FontsDir 仓库
+//      (仓库里没同名的就移过去, 有同名就直接删 active 副本).
+//   2. 把 FontsDir/<name> 硬链接 (失败 fallback 到拷贝) 到 FontsActiveDir/<name>.
+//   3. fc-cache + systemctl restart xochitl.
+//
+// detectActiveFont 直接读 FontsActiveDir 第一个 .ttf/.otf 文件名作为激活态.
+
+func (s *Server) activeFont(w http.ResponseWriter, r *http.Request) {
+	name := s.detectActiveFont()
+	writeJSON(w, http.StatusOK, map[string]any{"name": name})
+}
+
+func (s *Server) detectActiveFont() string {
+	entries, err := os.ReadDir(s.cfg.FontsActiveDir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+		if _, ok := allowedFontExts[ext]; !ok {
+			continue
+		}
+		return e.Name()
+	}
+	return ""
+}
+
+func (s *Server) applyFont(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	applied, err := s.applyFontInternal(name)
+	if err != nil {
+		httpError(w, applyFontStatus(err), err.Error())
+		return
+	}
+	go func() {
+		if path, err := exec.LookPath("fc-cache"); err == nil {
+			_ = s.fontCmd(path, "-f").Run()
+		}
+		time.Sleep(500 * time.Millisecond)
+		if path, err := exec.LookPath("systemctl"); err == nil {
+			markIntentionalRestart()
+			_ = exec.Command(path, "restart", "xochitl").Run()
+		}
+	}()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"applied": applied,
+		"restart": true,
+	})
+}
+
+// applyFontInternal 执行字体启用的所有文件系统操作, 不重启 xochitl, 不刷 fc-cache.
+// 返回应用的字体 basename. 调用方负责后续的 fc-cache + xochitl 重启.
+func (s *Server) applyFontInternal(name string) (string, error) {
+	src, err := safeJoin(s.cfg.FontsDir, name)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(src)
+	if err != nil || info.IsDir() {
+		return "", &applyErr{code: http.StatusNotFound, msg: "字体文件不存在"}
+	}
+	ext := strings.ToLower(filepath.Ext(src))
+	if _, ok := allowedFontExts[ext]; !ok {
+		return "", &applyErr{code: http.StatusBadRequest, msg: "仅支持 .ttf/.otf"}
+	}
+
+	if err := os.MkdirAll(s.cfg.FontsActiveDir, 0o755); err != nil {
+		return "", fmt.Errorf("创建激活目录失败: %w", err)
+	}
+	if err := s.archiveActiveFonts(); err != nil {
+		return "", fmt.Errorf("归档旧字体失败: %w", err)
+	}
+	dst := filepath.Join(s.cfg.FontsActiveDir, filepath.Base(src))
+	if err := linkOrCopyFile(src, dst); err != nil {
+		return "", fmt.Errorf("拷贝字体到激活目录失败: %w", err)
+	}
+
+	// 3.28 起 xochitl 不再走 fontconfig fallback: 系统预装 NotoSansSC 等 Variable Font,
+	// Qt 找中文字符直接命中系统内置字体, ~/.local/share/fonts/ 里的用户字体不生效.
+	// 通过写 fontconfig alias, 把 Noto Sans / Noto Sans SC / sans-serif 都 alias 到用户字体,
+	// Qt 请求这些家族名时 fontconfig 返回用户字体路径, 从根源上生效.
+	//
+	// 时序: 必须先删旧 alias + 刷一次 cache (让 fontconfig 在无 alias 干扰下认识新字体),
+	// pickMatchableFamily 的 fc-match 验证才准确; 选出 family 写 alias 后再刷一次让其生效.
+	removeUserFontAlias()
+	s.refreshFontCache()
+	if err := s.writeUserFontAlias(dst); err != nil {
+		log.Printf("write font alias failed: %v", err)
+	}
+	s.refreshFontCache()
+	return filepath.Base(src), nil
+}
+
+// markIntentionalRestart 在主动重启 xochitl 前打时间戳, 让 precheck.sh 的
+// crashloop 熔断不把这次启动算成崩溃。
+//
+// 坑: 熔断规则是"600 秒内第 3 次启动 = crashloop", 但它只数次数, 分不清崩溃
+// 和用户操作。实测开机 1 次 + 连续应用两次字体 = 3 次 → 误熔断 → 注入全摘 →
+// 高级面板凭空消失, 用户完全不知道发生了什么。
+const intentionalRestartMark = "/home/root/rmkit-cn/.intentional_restart"
+
+func markIntentionalRestart() {
+	_ = os.WriteFile(intentionalRestartMark,
+		[]byte(strconv.FormatInt(time.Now().Unix(), 10)), 0o644)
+}
+
+// fontHome 是执行 fc-* 命令时要用的 HOME。
+//
+// 坑: upload-server 由 systemd 拉起, 环境里 HOME=/root。fontconfig 的用户字体
+// 目录是 $HOME/.local/share/fonts —— HOME=/root 时它根本不扫 /home/root 下的
+// 激活目录, fc-match 于是回退到系统 Noto, pickMatchableFamily 判定"没有 family
+// 能命中"→ alias 永远写不出来 → 用户字体一直不生效。
+// 实测: HOME=/root 时 fc-match "LXGW WenKai GB Screen" 返回 NotoSans-VariableFont,
+//
+//	HOME=/home/root 时才返回 /home/root/.local/share/fonts/霞露文楷.ttf。
+func (s *Server) fontHome() string {
+	// FontsActiveDir 形如 /home/root/.local/share/fonts, 回推两层得到 HOME
+	if d := strings.TrimSuffix(s.cfg.FontsActiveDir, "/.local/share/fonts"); d != s.cfg.FontsActiveDir && d != "" {
+		return d
+	}
+	return "/home/root"
+}
+
+// fontCmd 构造带正确 HOME 的 fc-* 命令。
+func (s *Server) fontCmd(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	cmd.Env = append(os.Environ(), "HOME="+s.fontHome())
+	return cmd
+}
+
+// fontAliasConfPath 是 fontconfig alias 配置文件, 决定 Noto Sans SC 等家族名映射到用户字体.
+const fontAliasConfPath = "/etc/fonts/conf.d/99-rmkit-cn-user-font.conf"
+
+// fontAliasBackupPath 是 alias 的持久副本.
+// /etc 是 upperdir 在 tmpfs (/var/volatile) 上的 overlay: 写进去当场生效, 一重启
+// 整层蒸发。字体文件本身在 /home 下不受影响, 但 alias 没了字体就不生效 —— 表现为
+// "重启后字体变回默认, 要去高级面板重新应用一次" (用户实测)。
+// 这里留一份到 /home, 由 precheck.sh 在 xochitl 启动前拷回 /etc。
+const fontAliasBackupPath = "/home/root/rmkit-cn/etc/99-rmkit-cn-user-font.conf"
+
+// fontAliasTargets 3.28+ xochitl 请求的字体家族名, 需要全部 alias 到用户字体.
+// NotoSans/EBGaramond = 拉丁, NotoSansSC/NotoSansCJKSC = 中文, sans-serif = 兜底.
+var fontAliasTargets = []string{
+	"Noto Sans SC",
+	"Noto Sans",
+	"Noto Sans CJK SC",
+	"EB Garamond",
+	"sans-serif",
+	"serif",
+}
+
+// readFontFamilies 用 fc-query 读 .ttf/.otf 的全部 family 候选名.
+// 一个字体常有多个 family (英文名 + 中文本地化名), 解析 `family: "xxx"(s) "yyy"(s)` 行
+// 里所有引号内字符串. 不用 `-f %{family[0]}` — 老版本 fontconfig 不支持 array 索引,
+// 会把 N 个别名全拼在一起.
+func (s *Server) readFontFamilies(path string) ([]string, error) {
+	out, err := s.fontCmd("fc-query", path).Output()
+	if err != nil {
+		return nil, fmt.Errorf("fc-query 失败: %w", err)
+	}
+	seen := map[string]bool{}
+	var families []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "family:") {
+			continue
+		}
+		for rest := line; ; {
+			i := strings.Index(rest, "\"")
+			if i < 0 {
+				break
+			}
+			j := strings.Index(rest[i+1:], "\"")
+			if j < 0 {
+				break
+			}
+			// fc-query 会把 "-" 转义成 "\-", 还原
+			f := strings.ReplaceAll(rest[i+1:i+1+j], "\\", "")
+			if f != "" && !seen[f] {
+				seen[f] = true
+				families = append(families, f)
+			}
+			rest = rest[i+1+j+1:]
+		}
+	}
+	if len(families) == 0 {
+		return nil, fmt.Errorf("字体无 family name")
+	}
+	return families, nil
+}
+
+// pickMatchableFamily 从候选 family 里选出 fc-match 真正能命中 fontPath 的那个.
+// 带 "-" 的英文 family 名在部分 fontconfig 版本下匹配失败 (fallback 到别的字体),
+// 而中文本地化名反而可靠 — 所以不猜, 逐个实测: fc-match 返回的 file 与 fontPath
+// 是同一个文件 (硬链接 inode 相同也算) 才算命中.
+func (s *Server) pickMatchableFamily(fontPath string, families []string) (string, error) {
+	target, err := os.Stat(fontPath)
+	if err != nil {
+		return "", err
+	}
+	for _, f := range families {
+		out, err := s.fontCmd("fc-match", "-f", "%{file}", f).Output()
+		if err != nil {
+			continue
+		}
+		matched := strings.TrimSpace(string(out))
+		if matched == "" {
+			continue
+		}
+		if mi, err := os.Stat(matched); err == nil && os.SameFile(target, mi) {
+			return f, nil
+		}
+	}
+	return "", fmt.Errorf("没有 family 名能被 fc-match 命中 (候选: %s)", strings.Join(families, ", "))
+}
+
+// writeUserFontAlias 读 fontPath 的 family 候选并选出可匹配的那个, 写 fontconfig alias
+// 让所有系统字体家族名都指向它.
+func (s *Server) writeUserFontAlias(fontPath string) error {
+	families, err := s.readFontFamilies(fontPath)
+	if err != nil {
+		return err
+	}
+	family, err := s.pickMatchableFamily(fontPath, families)
+	if err != nil {
+		return err
+	}
+	var buf strings.Builder
+	buf.WriteString(`<?xml version="1.0"?>` + "\n")
+	buf.WriteString(`<!DOCTYPE fontconfig SYSTEM "fonts.dtd">` + "\n")
+	buf.WriteString(`<!-- rmkit-cn: 用户字体 alias, family = ` + family + ` -->` + "\n")
+	buf.WriteString(`<fontconfig>` + "\n")
+	for _, t := range fontAliasTargets {
+		buf.WriteString("  <alias binding=\"strong\">\n")
+		buf.WriteString("    <family>" + xmlEscape(t) + "</family>\n")
+		buf.WriteString("    <prefer><family>" + xmlEscape(family) + "</family></prefer>\n")
+		buf.WriteString("  </alias>\n")
+	}
+	buf.WriteString(`</fontconfig>` + "\n")
+	if err := os.MkdirAll(filepath.Dir(fontAliasConfPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(fontAliasConfPath, []byte(buf.String()), 0o644); err != nil {
+		return err
+	}
+	// 持久副本失败不算致命: 本次应用已经生效, 只是重启后需要重新应用.
+	if err := os.MkdirAll(filepath.Dir(fontAliasBackupPath), 0o755); err != nil {
+		log.Printf("字体 alias 持久副本目录创建失败: %v", err)
+		return nil
+	}
+	if err := os.WriteFile(fontAliasBackupPath, []byte(buf.String()), 0o644); err != nil {
+		log.Printf("字体 alias 持久副本写入失败: %v", err)
+	}
+	return nil
+}
+
+// removeUserFontAlias 卸载/切回默认时删掉 alias 配置, 让系统 fallback 到 Noto Sans SC.
+func removeUserFontAlias() {
+	_ = os.Remove(fontAliasConfPath)
+	_ = os.Remove(fontAliasBackupPath)
+}
+
+// refreshFontCache 清 fontconfig 缓存并重建 (让 xochitl 下次拉字体读到新配置).
+func (s *Server) refreshFontCache() {
+	// cache-9 是 fontconfig 3.x 的 cache 版本, 直接删所有以 .cache-9 结尾的.
+	entries, err := os.ReadDir("/var/cache/fontconfig")
+	if err == nil {
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".cache-9") {
+				_ = os.Remove("/var/cache/fontconfig/" + e.Name())
+			}
+		}
+	}
+	if path, err := exec.LookPath("fc-cache"); err == nil {
+		_ = s.fontCmd(path, "-f").Run()
+	}
+}
+
+func xmlEscape(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
+	return r.Replace(s)
+}
+
+type applyErr struct {
+	code int
+	msg  string
+}
+
+func (e *applyErr) Error() string { return e.msg }
+
+func applyFontStatus(err error) int {
+	if ae, ok := err.(*applyErr); ok {
+		return ae.code
+	}
+	return http.StatusInternalServerError
+}
+
+// archiveActiveFonts 把 FontsActiveDir 里所有 .ttf/.otf 挪回 FontsDir 仓库.
+// 仓库已存在同名则直接删 active 副本 (仓库版本权威).
+// 仓库不存在则 rename (跨设备失败时 fallback copy+rm).
+func (s *Server) archiveActiveFonts() error {
+	entries, err := os.ReadDir(s.cfg.FontsActiveDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+		if _, ok := allowedFontExts[ext]; !ok {
+			continue
+		}
+		src := filepath.Join(s.cfg.FontsActiveDir, e.Name())
+		dst := filepath.Join(s.cfg.FontsDir, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			// 仓库已有同名: 直接删 active 副本
+			_ = os.Remove(src)
+			continue
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		// 仓库无同名: 移过去
+		if err := os.Rename(src, dst); err != nil {
+			// 跨文件系统 fallback
+			if cerr := copyFile(src, dst); cerr != nil {
+				return cerr
+			}
+			_ = os.Remove(src)
+		}
+	}
+	return nil
+}
+
+func linkOrCopyFile(src, dst string) error {
+	_ = os.Remove(dst) // 防止 link 失败 (目标已存在)
+	if err := os.Link(src, dst); err == nil {
+		return nil
+	}
+	return copyFile(src, dst)
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ---- 壁纸 active / apply / preview ----
+
+const sleepScreenKey = "SleepScreenPath"
+
+// activeScreen 解析 xochitl.conf, 返回当前 SleepScreenPath 指向的文件 basename
+// (仅当文件落在 ScreensDir 内时报告, 否则返回空; 这样未配置或指系统默认时都返回空).
+func (s *Server) activeScreen(w http.ResponseWriter, r *http.Request) {
+	name := s.detectActiveScreen()
+	writeJSON(w, http.StatusOK, map[string]any{"name": name})
+}
+
+func (s *Server) detectActiveScreen() string {
+	path := readSleepScreenPath(s.cfg.XochitlConf)
+	if path == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(s.cfg.ScreensDir, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	return filepath.Base(path)
+}
+
+func (s *Server) applyScreen(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	applied, err := s.applyScreenInternal(name)
+	if err != nil {
+		httpError(w, applyFontStatus(err), err.Error())
+		return
+	}
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		if path, err := exec.LookPath("systemctl"); err == nil {
+			markIntentionalRestart()
+			_ = exec.Command(path, "restart", "xochitl").Run()
+		}
+	}()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"applied": applied,
+		"restart": true,
+	})
+}
+
+// applyScreenInternal 执行壁纸启用的文件系统/conf 操作, 不重启 xochitl. 返回 basename.
+func (s *Server) applyScreenInternal(name string) (string, error) {
+	target, err := safeJoin(s.cfg.ScreensDir, name)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(target)
+	if err != nil || info.IsDir() {
+		return "", &applyErr{code: http.StatusNotFound, msg: "壁纸文件不存在"}
+	}
+	ext := strings.ToLower(filepath.Ext(target))
+	if _, ok := allowedScreenExts[ext]; !ok {
+		return "", &applyErr{code: http.StatusBadRequest, msg: "仅支持 .png"}
+	}
+	if err := writeSleepScreenPath(s.cfg.XochitlConf, target); err != nil {
+		return "", fmt.Errorf("更新配置失败: %w", err)
+	}
+	return filepath.Base(target), nil
+}
+
+// applyAll 一次性应用 (可选的) 字体 + 壁纸, 只重启一次 xochitl.
+// body: {"font": "name.ttf", "screen": "name.png"}, 任一字段可省/为空.
+func (s *Server) applyAll(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Font   string `json:"font"`
+		Screen string `json:"screen"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	body.Font = strings.TrimSpace(body.Font)
+	body.Screen = strings.TrimSpace(body.Screen)
+
+	if body.Font == "" && body.Screen == "" {
+		httpError(w, http.StatusBadRequest, "font 和 screen 至少需要一个")
+		return
+	}
+
+	resp := map[string]any{}
+	fontTouched := false
+	if body.Font != "" {
+		applied, err := s.applyFontInternal(body.Font)
+		if err != nil {
+			httpError(w, applyFontStatus(err), err.Error())
+			return
+		}
+		resp["font"] = applied
+		fontTouched = true
+	}
+	if body.Screen != "" {
+		applied, err := s.applyScreenInternal(body.Screen)
+		if err != nil {
+			httpError(w, applyFontStatus(err), err.Error())
+			return
+		}
+		resp["screen"] = applied
+	}
+	resp["restart"] = true
+
+	log.Printf("applyAll: font=%q screen=%q -> %v (will restart xochitl)", body.Font, body.Screen, resp)
+	go func() {
+		if fontTouched {
+			if path, err := exec.LookPath("fc-cache"); err == nil {
+				if err := exec.Command(path, "-f").Run(); err != nil {
+					log.Printf("applyAll: fc-cache failed: %v", err)
+				}
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+		path, err := exec.LookPath("systemctl")
+		if err != nil {
+			log.Printf("applyAll: systemctl not in PATH: %v", err)
+			return
+		}
+		markIntentionalRestart()
+		if err := exec.Command(path, "restart", "xochitl").Run(); err != nil {
+			log.Printf("applyAll: systemctl restart xochitl failed: %v", err)
+		} else {
+			log.Printf("applyAll: xochitl restart issued")
+		}
+	}()
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) previewScreen(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	target, err := safeJoin(s.cfg.ScreensDir, name)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := os.Stat(target); err != nil {
+		httpError(w, http.StatusNotFound, "壁纸文件不存在")
+		return
+	}
+	w.Header().Set("Cache-Control", "max-age=60")
+	http.ServeFile(w, r, target)
+}
+
+// ---- KOReader 启动 ----
+//
+// 参考 xovi-apploader (Marvin-Brouwer/rmpp-appload library.cpp::ExternalApplication::launch):
+// 它启动 KOReader 等外部应用时直接 QProcess.start(), 不停 xochitl. KOReader 自己接管屏幕,
+// 退出后 xochitl 自动恢复. 关键: 必须从环境里清掉 LD_PRELOAD, 否则 xovi.so 会被注入到
+// KOReader 进程里导致符号解析失败.
+//
+// 我们这里直接 fire-and-forget: 起一个独立进程组的 koreader.sh, HTTP 立即返回.
+// 不等待退出, 也不需要清理 (xochitl 仍在跑).
+
+const koreaderScript = "/home/root/xovi/exthome/appload/koreader/koreader.sh"
+
+func (s *Server) launchKoreader(w http.ResponseWriter, r *http.Request) {
+	if _, err := os.Stat(koreaderScript); err != nil {
+		httpError(w, http.StatusNotFound, "未检测到 KOReader: "+koreaderScript)
+		return
+	}
+
+	cmd := exec.Command(koreaderScript)
+	cmd.Dir = filepath.Dir(koreaderScript)
+	// RMPP 上 KOReader 必须经 qtfb-shim 转发到 xochitl 内嵌的 QTFB server.
+	// 清掉 xochitl 继承下来的 LD_PRELOAD (xovi.so + ime_hook.so), 单独把
+	// qtfb-shim.so 注入给 KOReader, 并设置 N_RGB565 (KOReader device.lua 强校验).
+	shimPath := filepath.Join(filepath.Dir(koreaderScript), "libs/qtfb-shim.so")
+	env := os.Environ()
+	cleaned := env[:0]
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "LD_PRELOAD=") ||
+			strings.HasPrefix(kv, "QTFB_SHIM_MODE=") {
+			continue
+		}
+		cleaned = append(cleaned, kv)
+	}
+	cleaned = append(cleaned,
+		"LD_PRELOAD="+shimPath,
+		"QTFB_SHIM_MODE=N_RGB565",
+	)
+	cmd.Env = cleaned
+	// 独立进程组, 让 KOReader 不随 upload-server 退出而中止
+	cmd.SysProcAttr = newSessionLeader()
+
+	if err := cmd.Start(); err != nil {
+		httpError(w, http.StatusInternalServerError, "启动 KOReader 失败: "+err.Error())
+		return
+	}
+	// 防止僵尸: 后台 wait, 不阻塞 HTTP
+	go func() { _ = cmd.Wait() }()
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"launched": "koreader",
+		"pid":      cmd.Process.Pid,
+	})
+}
+
+// ---- xochitl.conf 解析 ----
+
+func readSleepScreenPath(confPath string) string {
+	f, err := os.Open(confPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	scan := bufio.NewScanner(f)
+	for scan.Scan() {
+		line := scan.Text()
+		if strings.HasPrefix(line, sleepScreenKey+"=") {
+			return strings.TrimPrefix(line, sleepScreenKey+"=")
+		}
+	}
+	return ""
+}
+
+// writeSleepScreenPath 原子地更新 xochitl.conf 里 [General] section 下的 SleepScreenPath=.
+// xochitl 用 QSettings 解析 INI, key 必须落在 [General] 里; 直接 append 到文件末尾会落到最后一个 section
+// (比如 [Wifi]), 导致 xochitl 读不到.
+func writeSleepScreenPath(confPath, value string) error {
+	if err := os.MkdirAll(filepath.Dir(confPath), 0o755); err != nil {
+		return fmt.Errorf("mkdir conf dir: %w", err)
+	}
+
+	var existing []byte
+	if b, err := os.ReadFile(confPath); err == nil {
+		existing = b
+	} else if os.IsNotExist(err) {
+		existing = []byte("[General]\n")
+	} else {
+		return fmt.Errorf("read conf: %w", err)
+	}
+
+	lines := strings.Split(string(existing), "\n")
+	// 末尾 split 出来的空字符串会让我们多写一个 \n, 单独处理
+	trailingNewline := strings.HasSuffix(string(existing), "\n")
+	if trailingNewline {
+		lines = lines[:len(lines)-1]
+	}
+
+	// 找到 [General] section 的范围 [generalStart, generalEnd)
+	// generalStart: [General] 行的下一行; generalEnd: 下一个 [section] 行 (或 len(lines))
+	generalStart := -1
+	generalEnd := len(lines)
+	for i, line := range lines {
+		t := strings.TrimSpace(line)
+		if t == "[General]" {
+			generalStart = i + 1
+			continue
+		}
+		if generalStart >= 0 && strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") {
+			generalEnd = i
+			break
+		}
+	}
+
+	// 没有 [General]: 在文件最前面建一个, 写入 key
+	if generalStart < 0 {
+		newLines := []string{"[General]", sleepScreenKey + "=" + value}
+		newLines = append(newLines, lines...)
+		lines = newLines
+	} else {
+		// 在 [General] 段内找现存的 key, 替换; 找不到则在段末追加
+		replaced := false
+		for i := generalStart; i < generalEnd; i++ {
+			if strings.HasPrefix(lines[i], sleepScreenKey+"=") {
+				lines[i] = sleepScreenKey + "=" + value
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			// 在段末插入 (generalEnd 位置)
+			lines = append(lines[:generalEnd], append([]string{sleepScreenKey + "=" + value}, lines[generalEnd:]...)...)
+		}
+	}
+
+	out := strings.Join(lines, "\n") + "\n"
+
+	tmp := confPath + ".tmp"
+	if err := os.WriteFile(tmp, []byte(out), 0o644); err != nil {
+		return fmt.Errorf("write tmp: %w", err)
+	}
+	if err := os.Rename(tmp, confPath); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
+// weReadLauncher 是 RemarkableWeRead (微信读书 reMarkable 版, 3.28+ 走 systemd takeover) 的启动器:
+// 它 link + start remarkable-weread-app.service, 该服务会停掉 xochitl 独占屏幕, 退出后自动拉回。
+const weReadLauncher = "/home/root/.local/opt/remarkable-weread/bin/start-remarkable-weread.sh"
+
+// launchWeRead 启动微信读书 reMarkable 版 (高级面板"应用"区入口)。
+func (s *Server) launchWeRead(w http.ResponseWriter, r *http.Request) {
+	if _, err := os.Stat(weReadLauncher); err != nil {
+		httpError(w, http.StatusNotFound, "未安装微信读书 reMarkable 版: "+weReadLauncher)
+		return
+	}
+	cmd := exec.Command("/bin/sh", weReadLauncher)
+	env := os.Environ()
+	cleaned := env[:0]
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "LD_PRELOAD=") { // 不把 xochitl 的注入库带给 systemctl
+			continue
+		}
+		cleaned = append(cleaned, kv)
+	}
+	cmd.Env = cleaned
+	cmd.SysProcAttr = newSessionLeader()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		httpError(w, http.StatusInternalServerError, "启动微信读书失败: "+strings.TrimSpace(string(out)))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"launched": "weread"})
+}
+
+// singleSlotAndroidLauncher 是单槽 Android 的启动器 (2026-09-06 起): 不切槽, 在本槽置
+// /.boot-android-mode 标志 + 把 /boot/fitImage.ahab 指向 android 内核后重启,
+// /sbin/init 包装见到标志就先复位再 exec rm-android-init-ss。脚本自带本槽组件齐全性检查。
+const singleSlotAndroidLauncher = "/home/root/boot-android.sh"
+
+// launchAndroid 进入 Android. 优先单槽启动器 (本槽重启, 不切槽); 没有单槽启动器时
+// 退回旧的双槽机制: rootdev --switch 切到 Android 槽并重启.
+func (s *Server) launchAndroid(w http.ResponseWriter, r *http.Request) {
+	if _, err := os.Stat(singleSlotAndroidLauncher); err == nil {
+		// 前置检查同步跑 (--check 只验组件不重启), 失败原因直接回给面板
+		if out, err := exec.Command("/bin/sh", singleSlotAndroidLauncher, "--check").CombinedOutput(); err != nil {
+			httpError(w, http.StatusConflict, "本槽 Android 组件检查未通过: "+strings.TrimSpace(string(out)))
+			return
+		}
+		cmd := exec.Command("/bin/sh", singleSlotAndroidLauncher)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			httpError(w, http.StatusInternalServerError, "启动单槽 Android 失败: "+err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte("booting android on current slot"))
+		return
+	}
+	if _, err := os.Stat("/usr/sbin/rootdev"); err != nil {
+		httpError(w, http.StatusNotFound, "未检测到 rootdev, 无法切换分区")
+		return
+	}
+	cmd := exec.Command("/bin/sh", "-c", "sync; /usr/sbin/rootdev --switch && sleep 1 && reboot")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		httpError(w, http.StatusInternalServerError, "启动切换失败: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+	_, _ = w.Write([]byte("switching to android"))
+}
+
+// capabilities 告诉界面"这台机器上哪些入口该显示"。
+//
+// 起因: 高级面板里的「微信读书」「Android」两张卡是硬编码的, 没有任何判断,
+// 于是 rm2 (armv7, 两者都不支持) 上也会画出来, 点了只能报错。
+// 判据一律用"东西在不在盘上", 不用架构 —— 架构对了但没装, 同样不该显示。
+func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
+	exists := func(p string) bool { _, err := os.Stat(p); return err == nil }
+	// Android 只在 aarch64 上有产物 (reDroid arm64); 而且必须真的装了。
+	// 不能拿 /usr/sbin/rootdev 判断 —— 那是 reMarkable 自带的 A/B 工具, 所有机型都有,
+	// 用它会让 rm2 也显示 Android 入口。
+	android := runtime.GOARCH == "arm64" &&
+		(exists(singleSlotAndroidLauncher) || exists("/home/root/android-system"))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"weread":  exists(weReadLauncher),
+		"android": android,
+		// 「空间」启动台: 外壳文件不在就别画入口 (rm2 上的安装包就没带)
+		"space": exists("/home/root/rmkit-cn/space/shell/Space.qml"),
+	})
+}

@@ -1,20 +1,31 @@
 [Unit]
-Description=reMarkable 空间 (SPACE) 启动台后端
-# 内置应用和用户数据都在 /home 下, 冷启动时 /home 可能还没挂好
+Description=reMarkable 空间 (SPACE) 后端
+# 字体、锁屏图、空间应用与数据都在 /home 下, 冷启动时 /home 可能还没挂好
 After=home.mount network.target
-Wants=network.target
+# 顶替 rmkit-cn 的同名服务, 两个都起会抢 8080
+Conflicts=rmkit-cn-upload.service
 
 [Service]
 Type=simple
-ExecStart=/home/root/remarkable-space/bin/space-server \
-  -listen 127.0.0.1:8081 \
-  -root /home/root/rmkit-cn/space \
-  -proxy http://127.0.0.1:8080
+User=root
+# fontconfig 按 $HOME/.local/share/fonts 找用户字体; systemd 默认给 root 的 HOME=/root,
+# 而设备用户数据全在 /home/root (xochitl 同款), 不设置的话 fc-match/fc-cache 看不到用户字体。
+Environment=HOME=/home/root
+WorkingDirectory=/home/root/remarkable-space
+# 监听 0.0.0.0: 手机扫码上传要从 Wi-Fi 侧访问, 只听回环会连不上
+ExecStart=/home/root/remarkable-space/space-server \
+  -listen 0.0.0.0:8080 \
+  -static /home/root/remarkable-space/static \
+  -fonts /home/root/.local/share/rmkit-cn/fonts \
+  -screens /home/root/.local/share/rmkit-cn/screens \
+  -staging /tmp/rmkit_upload \
+  -fonts-active /home/root/.local/share/fonts \
+  -xochitl-conf /home/root/.config/remarkable/xochitl.conf \
+  -space /home/root/rmkit-cn/space \
+  -space-apps /home/root/.local/share/rmkit-cn/space/apps \
+  -space-data /home/root/.local/share/rmkit-cn/space/data
 Restart=on-failure
 RestartSec=5
-# 和 rmkit-cn 的 upload-server 一样, 关掉 QML 磁盘缓存无关; 这里只是普通 HTTP 服务
-StandardOutput=journal
-StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

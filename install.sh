@@ -1,20 +1,24 @@
 #!/bin/sh
-# 「空间」安装器 — 把外壳、内置应用、后端推到设备。
+# 「空间」安装器 — 前台 (外壳 + 内置应用) 与后台 (space-server) 一起装。
 #
-# 与 rmkit-cn 的关系: 本脚本只装空间自己的东西。空间里那些"系统功能入口"应用的
-# 启动动作仍由 rmkit-cn 的后端执行, space-server 会把不认识的 /apps/* 转发过去。
-# 所以设备上要先装好 rmkit-cn, 否则蓝牙/输入法/上传那几个入口点了没反应。
+# space-server 顶替 rmkit-cn 的 upload-server: 同样监听 8080, 路由逐条兼容,
+# 装的时候会停掉并禁用 rmkit-cn-upload.service。
+#
+# 仍然依赖 rmkit-cn 当底座 —— 注入链 (qmldiff/.so/中文汉化/输入法后端 ime-http)
+# 还在它那边, 高级面板里的「空间」入口也由它注入。底座冻结不动, 只装一次。
+#
+# 设备上的数据路径一律沿用 rmkit-cn 时期的位置 (~/.local/share/rmkit-cn/...),
+# 换名字就等于丢用户的字体、锁屏图、已装应用和应用数据。
 #
 # 用法: DEVICE_IP=10.11.99.1 sh install.sh
 set -eu
 DEVICE_IP=${DEVICE_IP:-10.11.99.1}
 DEVICE_USER=${DEVICE_USER:-root}
-SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
-SCP="scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+SSHOPT="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 D="$DEVICE_USER@$DEVICE_IP"
 HERE=$(cd "$(dirname "$0")" && pwd)
 
-ARCH=$($SSH "$D" "uname -m")
+ARCH=$(ssh $SSHOPT "$D" "uname -m")
 case "$ARCH" in
   aarch64) BIN=space-server-aarch64 ;;
   armv7l)  BIN=space-server-armv7 ;;
@@ -23,19 +27,60 @@ esac
 [ -f "$HERE/dist/$BIN" ] || { echo "✗ 缺 dist/$BIN, 先跑 make" >&2; exit 1; }
 echo "设备 $DEVICE_IP 架构 $ARCH → $BIN"
 
+ssh $SSHOPT "$D" "[ -d /home/root/rmkit-cn ]" \
+  || { echo "✗ 设备上没装 rmkit-cn, 空间依赖它的注入链与面板入口" >&2; exit 1; }
+
 echo "→ 推外壳与内置应用"
-$SSH "$D" "mkdir -p /home/root/rmkit-cn/space /home/root/remarkable-space/bin \
-           /home/root/.local/share/rmkit-cn/space/apps \
-           /home/root/.local/share/rmkit-cn/space/data"
-tar -C "$HERE" -cf - shell kit apps | $SSH "$D" "tar -C /home/root/rmkit-cn/space -xf -"
+ssh $SSHOPT "$D" "mkdir -p /home/root/rmkit-cn/space /home/root/remarkable-space \
+                  /home/root/.local/share/rmkit-cn/space/apps \
+                  /home/root/.local/share/rmkit-cn/space/data"
+tar -C "$HERE" -cf - shell kit apps | ssh $SSHOPT "$D" "tar -C /home/root/rmkit-cn/space -xf -"
 
-echo "→ 推后端与矢量底图"
-$SCP "$HERE/dist/$BIN" "$D:/home/root/remarkable-space/bin/space-server.new"
-$SCP "$HERE/data/geo.json" "$D:/home/root/remarkable-space/bin/geo.json"
-$SCP "$HERE/systemd/remarkable-space.service" "$D:/etc/systemd/system/remarkable-space.service"
+echo "→ 推后端 / 静态页 / 矢量底图"
+tar -C "$HERE" -cf - static | ssh $SSHOPT "$D" "tar -C /home/root/remarkable-space -xf -"
+scp $SSHOPT "$HERE/dist/$BIN" "$D:/home/root/remarkable-space/space-server.new"
+scp $SSHOPT "$HERE/data/geo.json" "$D:/home/root/remarkable-space/geo.json"
+scp $SSHOPT "$HERE/systemd/remarkable-space.service" "$D:/tmp/remarkable-space.service"
 
-echo "→ 启用服务"
-$SSH "$D" "cd /home/root/remarkable-space/bin && chmod +x space-server.new && mv space-server.new space-server \
-           && systemctl daemon-reload && systemctl enable --now remarkable-space \
-           && sleep 2 && systemctl is-active remarkable-space"
-echo "✓ 完成。高级面板里的「空间」入口会在下次打开时自动出现 (rmkit-cn 按 Space.qml 是否存在判断)。"
+echo "→ 换服务 (/etc 是 tmpfs overlay, 必须 upper + ext4 lower 双写, 否则重启即失)"
+ssh $SSHOPT "$D" 'sh -s' <<'REMOTE'
+set -eu
+U=/etc/systemd/system
+unit=remarkable-space.service
+old=rmkit-cn-upload.service
+
+mkdir -p /tmp/lc && mount --bind / /tmp/lc 2>/dev/null || true
+mount -o remount,rw /tmp/lc 2>/dev/null || true
+L=/tmp/lc/etc/systemd/system
+
+mkdir -p $U/multi-user.target.wants $L/multi-user.target.wants
+for d in $U $L; do
+  cp /tmp/remarkable-space.service $d/$unit
+  chmod 644 $d/$unit
+  # systemctl enable 建的 symlink 落在 overlay upper 上, 重启就丢; 两层都手工建
+  ln -sf $U/$unit $d/multi-user.target.wants/$unit
+  # 旧服务的自启 symlink 两层都要撤, 否则重启后它又起来抢 8080
+  rm -f $d/multi-user.target.wants/$old
+done
+sync; umount -l /tmp/lc 2>/dev/null || true; rmdir /tmp/lc 2>/dev/null || true
+rm -f /tmp/remarkable-space.service
+
+systemctl stop $old 2>/dev/null || true
+systemctl disable $old 2>/dev/null || true
+
+cd /home/root/remarkable-space
+chmod +x space-server.new && mv space-server.new space-server
+systemctl daemon-reload
+systemctl restart $unit
+REMOTE
+
+echo "→ 自检"
+ssh $SSHOPT "$D" 'sleep 2
+systemctl is-active remarkable-space >/dev/null || { journalctl -u remarkable-space -n 25 --no-pager; exit 1; }
+echo "  服务: $(systemctl is-active remarkable-space) / $(systemctl is-enabled remarkable-space)"
+echo "  旧服务: $(systemctl is-active rmkit-cn-upload.service) / $(systemctl is-enabled rmkit-cn-upload.service 2>&1)"
+for p in /space/apps /qr-info /fonts /screens; do
+  code=$(wget -q -S -O /dev/null "http://127.0.0.1:8080$p" 2>&1 | sed -n "s|.*HTTP/1.1 \([0-9]*\).*|\1|p" | head -n 1)
+  echo "  $p → ${code:-连不上}"
+done'
+echo "✓ 完成"

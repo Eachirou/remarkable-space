@@ -1,71 +1,96 @@
-// space-server — 「空间」启动台的后端。
+// space-server — 「空间」的后端, 一个进程把前台要用的服务全带齐:
+// 文件上传、蓝牙音频、字体/锁屏图应用、AI、截图、二维码, 以及空间自己的
+// 应用注册表/绿色安装/应用托管。
 //
-// 原来这套代码编译在 rmkit-cn 的 upload-server 里 (internal/space)。拆出来独立成进程,
-// 这样空间可以自己迭代、自己发版, 不必跟着 rmkit-cn 走。
+// 它顶替 rmkit-cn 的 upload-server (同样监听 8080, 路由逐条兼容), 安装时会停掉
+// rmkit-cn-upload.service。rmkit-cn 只剩注入链 (qmldiff/.so/汉化/输入法后端) 当底座。
 //
-// 与 rmkit-cn 的关系: 空间里那些"系统功能入口"应用 (蓝牙/输入法/上传/个性化/
-// 切 Android/微信读书…) 的启动动作仍然要由 rmkit-cn 的后端执行 —— 它掌握 systemd、
-// rootdev、xovi 这些东西。所以本进程把自己不认识的 /apps/* 请求原样转发过去,
-// 转发目标由 -proxy 指定。空间自己的接口全在 /space/* 下, 不会撞。
+// 设备上的数据路径一律沿用 rmkit-cn 时期的位置 —— 字体、锁屏图、空间应用与应用数据
+// 都在 ~/.local/share/rmkit-cn/ 下, 改名就等于丢用户数据。
 package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 
-	"github.com/boangs/remarkable-space/server"
+	"github.com/boangs/remarkable-space/internal/server"
 )
 
-func deviceArch() string {
-	switch runtime.GOARCH {
-	case "arm64":
-		return "aarch64"
-	case "arm":
-		return "armv7"
-	}
-	return runtime.GOARCH
-}
-
 func main() {
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = "/home/root"
-	}
 	var (
-		listen   = flag.String("listen", "127.0.0.1:8081", "监听地址")
-		root     = flag.String("root", "/home/root/rmkit-cn/space", "内置应用所在目录 (下含 apps/)")
-		userDir  = flag.String("user-apps", filepath.Join(home, ".local/share/rmkit-cn/space/apps"), "绿色安装的应用目录")
-		dataDir  = flag.String("data", filepath.Join(home, ".local/share/rmkit-cn/space/data"), "应用私有数据目录")
-		baseURL  = flag.String("base-url", "", "给应用的 HTTP 基址, 空=用监听地址")
-		store    = flag.String("store", "", "应用商店索引 URL, 空=不提供商店")
-		proxyURL = flag.String("proxy", "http://127.0.0.1:8080", "不认识的 /apps/* 转发到哪 (rmkit-cn 后端)")
+		listen         = flag.String("listen", ":8080", "监听地址")
+		staticDir      = flag.String("static", "", "静态资源目录 (默认: <二进制所在目录>/static)")
+		fontsDir       = flag.String("fonts", "", "字体存放目录 (默认: $HOME/.local/share/rmkit-cn/fonts)")
+		screensDir     = flag.String("screens", "", "锁屏图存放目录 (默认: $HOME/.local/share/rmkit-cn/screens)")
+		stagingDir     = flag.String("staging", "/tmp/rmkit_upload", "文档上传暂存目录")
+		fontsActiveDir = flag.String("fonts-active", "", "字体激活符号链接目录 (默认: $HOME/.local/share/fonts)")
+		xochitlConf    = flag.String("xochitl-conf", "", "xochitl 配置路径 (默认: $HOME/.config/remarkable/xochitl.conf)")
+		spaceDir       = flag.String("space", "/home/root/rmkit-cn/space", "「空间」内置应用目录 (含 shell/ kit/ apps/)")
+		spaceUserDir   = flag.String("space-apps", "", "「空间」用户应用目录 (默认: $HOME/.local/share/rmkit-cn/space/apps)")
+		spaceDataDir   = flag.String("space-data", "", "「空间」应用数据目录 (默认: $HOME/.local/share/rmkit-cn/space/data)")
+		spaceStore     = flag.String("space-store", "https://boangs.com/rmkit-space/index.json", "「空间」应用商店索引 URL (空 = 关闭商店)")
 	)
 	flag.Parse()
 
-	h := server.New(filepath.Join(*root, "apps"), *userDir, *dataDir, deviceArch(), *baseURL)
-	h.StoreURL = *store
-
-	mux := http.NewServeMux()
-	h.Mount(mux)
-
-	// 系统功能入口的启动动作由 rmkit-cn 执行 (它管 systemd / rootdev / xovi)
-	if *proxyURL != "" {
-		if u, err := url.Parse(*proxyURL); err == nil {
-			rp := httputil.NewSingleHostReverseProxy(u)
-			mux.Handle("/apps/", rp)
+	if *staticDir == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			log.Fatalf("os.Executable: %v", err)
 		}
+		*staticDir = filepath.Join(filepath.Dir(exe), "static")
 	}
 
-	h.AutoStart() // 清单里声明了 autostart 的应用后台
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("home dir: %v", err)
+	}
+	if *fontsDir == "" {
+		*fontsDir = filepath.Join(home, ".local/share/rmkit-cn/fonts")
+	}
+	if *screensDir == "" {
+		*screensDir = filepath.Join(home, ".local/share/rmkit-cn/screens")
+	}
+	if *fontsActiveDir == "" {
+		*fontsActiveDir = filepath.Join(home, ".local/share/fonts")
+	}
+	if *xochitlConf == "" {
+		*xochitlConf = filepath.Join(home, ".config/remarkable/xochitl.conf")
+	}
+	if *spaceUserDir == "" {
+		*spaceUserDir = filepath.Join(home, ".local/share/rmkit-cn/space/apps")
+	}
+	if *spaceDataDir == "" {
+		*spaceDataDir = filepath.Join(home, ".local/share/rmkit-cn/space/data")
+	}
 
-	log.Printf("space-server 监听 %s  内置=%s  用户=%s", *listen, *root, *userDir)
-	if err := http.ListenAndServe(*listen, mux); err != nil {
-		log.Fatal(err)
+	srv, err := server.New(server.Config{
+		StaticDir:      *staticDir,
+		FontsDir:       *fontsDir,
+		ScreensDir:     *screensDir,
+		DocStagingDir:  *stagingDir,
+		FontsActiveDir: *fontsActiveDir,
+		XochitlConf:    *xochitlConf,
+		SpaceDir:       *spaceDir,
+		SpaceUserDir:   *spaceUserDir,
+		SpaceDataDir:   *spaceDataDir,
+		SpaceBaseURL:   "http://127.0.0.1:8080",
+		SpaceStore:     *spaceStore,
+	})
+	if err != nil {
+		log.Fatalf("server.New: %v", err)
+	}
+	server.StartAudioDaemon() // 蓝牙音频 (装了 rmkit-audio 才生效)
+	srv.Space().AutoStart()   // 「空间」里声明了 autostart 的应用后台
+
+	fmt.Printf("space-server listening on %s\n", *listen)
+	fmt.Printf("  static = %s\n  fonts  = %s\n  screens = %s\n  staging = %s\n  fonts-active = %s\n  xochitl-conf = %s\n",
+		*staticDir, *fontsDir, *screensDir, *stagingDir, *fontsActiveDir, *xochitlConf)
+
+	if err := http.ListenAndServe(*listen, srv.Routes()); err != nil {
+		log.Fatalf("listen: %v", err)
 	}
 }

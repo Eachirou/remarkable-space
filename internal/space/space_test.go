@@ -1,4 +1,4 @@
-package server
+package space
 
 import (
 	"archive/zip"
