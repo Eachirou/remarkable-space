@@ -5,7 +5,7 @@
 //   - upload-server 只把本包挂到 /space/ 路径下, 不参与应用逻辑。
 //   - 应用自己的后端 (如播放器) 由应用包自带, 在 manifest 里声明, 本包按需拉起/收掉,
 //     应用前端直接访问自己的后端端口, 不经过 upload-server。
-package space
+package server
 
 import (
 	"encoding/json"

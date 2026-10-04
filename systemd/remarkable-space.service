@@ -1,0 +1,20 @@
+[Unit]
+Description=reMarkable 空间 (SPACE) 启动台后端
+# 内置应用和用户数据都在 /home 下, 冷启动时 /home 可能还没挂好
+After=home.mount network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/root/remarkable-space/bin/space-server \
+  -listen 127.0.0.1:8081 \
+  -root /home/root/rmkit-cn/space \
+  -proxy http://127.0.0.1:8080
+Restart=on-failure
+RestartSec=5
+# 和 rmkit-cn 的 upload-server 一样, 关掉 QML 磁盘缓存无关; 这里只是普通 HTTP 服务
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
