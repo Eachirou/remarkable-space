@@ -1,0 +1,178 @@
+# 单槽 Android (RMPPM) 设备端安装: 载荷已由助手放到 $STAGE, 本脚本把它们落到本槽。
+# 设计要点 (与 2026-09-06 跑通的手工安装一致):
+#   - 只动当前槽 rootfs 的 /boot /lib/modules /usr/bin /sbin/init 与 rootfs 下层 /etc;
+#     Android 系统与数据放共享的 /home, rootfs 只多 ~27MB。
+#   - /sbin/init 换成包装脚本: 无标志 = 原样 exec systemd (出厂行为), 有标志 = 先复位再进 Android。
+#     原链接备份为 /sbin/init.systemd-orig, 卸载即还原。
+#   - 出厂链接 /boot/fitImage.ahab 全程不动, 直到用户点"进 Android" (boot-android.sh) 才临时指向
+#     android 内核, 而包装脚本开机第一件事就是把它改回来 —— 任何失败都回到 reMarkable。
+# env: STAGE (载荷目录) REPLACE_SYSTEM (1=覆盖已有 /home/root/android-system)
+set -e
+STAGE=${STAGE:-/tmp/rmkit-android-stage}
+fail() { echo "  ✗ $*"; exit 1; }
+
+[ -d "$STAGE" ] || fail "载荷目录 $STAGE 不存在"
+[ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ] || fail "当前不是 reMarkable 系统 (PID1 非 systemd), 请先回原厂系统"
+STOCK=$(readlink /boot/fitImage.ahab 2>/dev/null || true)
+case "$STOCK" in
+  ""|fitImage.ahab-android) fail "无法确定出厂内核 (/boot/fitImage.ahab -> '$STOCK')" ;;
+esac
+[ -f "/boot/$STOCK" ] || fail "出厂内核文件 /boot/$STOCK 不存在"
+echo "  出厂内核: $STOCK"
+
+mount -o remount,rw / 2>/dev/null || true
+
+echo "  → 1/8 内核"
+cp "$STAGE/fitImage.ahab-android" /boot/fitImage.ahab-android.new
+sync; mv /boot/fitImage.ahab-android.new /boot/fitImage.ahab-android
+
+echo "  → 2/8 内核模块"
+T=$(mktemp -d /tmp/rmkit-mod.XXXXXX)
+tar -xzf "$STAGE/modules.tar.gz" -C "$T"
+DEP=$(find "$T" -name modules.dep | head -n 1)
+[ -n "$DEP" ] || fail "模块包里没有 modules.dep"
+MODDIR=$(dirname "$DEP"); MODNAME=$(basename "$MODDIR")
+rm -rf "/lib/modules/$MODNAME"
+mv "$MODDIR" "/lib/modules/$MODNAME"
+rm -rf "$T"
+# extra/ 里有随包附带的模块 (ashmem_linux: 微信读书等自带旧 CursorWindow 的应用需要), 重算依赖表
+depmod "$MODNAME" 2>/dev/null || depmod -b / "$MODNAME" 2>/dev/null || true
+echo "    /lib/modules/$MODNAME ($(find /lib/modules/$MODNAME -name '*.ko*' | wc -l) 个模块, ashmem=$(grep -c ashmem /lib/modules/$MODNAME/modules.dep))"
+
+echo "  → 3/8 宿主二进制"
+for b in rm-android-init-ss rm-touch-relay rm-epd-bridge rm-native-controls rm-wifi-config; do
+  [ -f "$STAGE/$b" ] || fail "载荷缺 $b"
+  cp "$STAGE/$b" "/usr/bin/$b.new"; chmod 755 "/usr/bin/$b.new"; mv "/usr/bin/$b.new" "/usr/bin/$b"
+done
+cp "$STAGE/propset" /home/root/propset; chmod 755 /home/root/propset
+
+echo "  → 4/8 rootfs 下层 /etc (Android 模式没有 overlay, 必须写到 ext4 本体)"
+LOWER=/tmp/rmkit-lower
+# 上次中途失败可能留下叠层挂载, 先清干净再挂
+while mountpoint -q $LOWER 2>/dev/null; do umount -l $LOWER || break; done
+mkdir -p $LOWER && mount --bind / $LOWER && mount -o remount,rw,bind $LOWER
+for base in $LOWER/etc /etc; do
+  mkdir -p $base/paperhome $base/systemd/system/sysinit.target.wants
+  cp "$STAGE/udhcpd-usb.conf" $base/paperhome/udhcpd-usb.conf
+  [ -f "$STAGE/udhcpd-usb1.conf" ] && cp "$STAGE/udhcpd-usb1.conf" $base/paperhome/udhcpd-usb1.conf
+  sed "s|@STOCK_KERNEL@|$STOCK|g" "$STAGE/android-kernel-revert.service.tmpl" > $base/systemd/system/android-kernel-revert.service
+  ln -sf /etc/systemd/system/android-kernel-revert.service $base/systemd/system/sysinit.target.wants/android-kernel-revert.service
+done
+sync; umount -l $LOWER 2>/dev/null || true; rmdir $LOWER 2>/dev/null || true
+systemctl daemon-reload
+
+echo "  → 5/8 挂载点与扩展数据目录"
+mkdir -p /android /android-data; chmod 755 /android /android-data
+D=/home/root/native-android-data-v1
+mkdir -p "$D"; chmod 771 "$D"
+[ -e "$D/.paper-expanded-data-v1" ] || echo "provisioned $(date -u +%FT%TZ) rmkit-desktop" > "$D/.paper-expanded-data-v1"
+
+echo "  → 6/8 Android 系统 (/home/root/android-system)"
+if [ -f "$STAGE/android-system.tar.gz" ]; then
+  if [ -d /home/root/android-system ] && [ "${REPLACE_SYSTEM:-0}" != "1" ]; then
+    echo "    已存在, 保留 (勾选'覆盖 Android 系统'可重装)"
+  else
+    rm -rf /home/root/android-system.new
+    mkdir -p /home/root/android-system.new
+    tar -xzf "$STAGE/android-system.tar.gz" -C /home/root/android-system.new --numeric-owner
+    # 包根目录可能是 android-system/ 也可能直接是 system/ 等
+    if [ -d /home/root/android-system.new/android-system ]; then
+      mv /home/root/android-system.new/android-system /home/root/android-system.tmp
+      rm -rf /home/root/android-system.new; mv /home/root/android-system.tmp /home/root/android-system.new
+    fi
+    [ -e /home/root/android-system.new/system/bin/init ] || fail "Android 系统包里没有 system/bin/init"
+    rm -rf /home/root/android-system.old
+    [ -d /home/root/android-system ] && mv /home/root/android-system /home/root/android-system.old
+    mv /home/root/android-system.new /home/root/android-system
+    rm -rf /home/root/android-system.old
+    echo "    已解包"
+  fi
+else
+  [ -e /home/root/android-system/system/bin/init ] || fail "载荷不含 Android 系统包, 设备上也没有 /home/root/android-system"
+  echo "    载荷不含系统包, 沿用设备上已有的"
+fi
+
+echo "  → 6b/8 Android 系统内的两处修补 (幂等)"
+S=/home/root/android-system
+# redroid 自带的 memfd 自愈会在 ashmem 节点晚出现时把 sys.use_memfd 翻回 1 → 微信读书秒退; ashmem 由宿主提供, 关掉自愈
+if grep -q '^\[ -c /dev/ashmem \] || setprop sys.use_memfd 1' $S/vendor/bin/post-fs-data.redroid.sh 2>/dev/null; then
+  sed -i 's|^\[ -c /dev/ashmem \] \|\| setprop sys.use_memfd 1|# [rmkit] memfd 自愈已关闭 (ashmem 由宿主 modprobe 提供)\n# [ -c /dev/ashmem ] \|\| setprop sys.use_memfd 1|' $S/vendor/bin/post-fs-data.redroid.sh
+fi
+# devtmpfs 把 /dev/ashmem 建成 0600, 应用打不开同样分配失败; 调优脚本开机兜底放开
+if [ -f $S/system/bin/paper-tuning.sh ] && ! grep -q 'chmod 666 /dev/ashmem' $S/system/bin/paper-tuning.sh; then
+  sed -i '1a\
+# [rmkit] ashmem 节点权限兜底 (CursorWindow 分配失败 = 微信读书秒退)\
+[ -c /dev/ashmem ] \&\& chmod 666 /dev/ashmem' $S/system/bin/paper-tuning.sh
+fi
+# Android 的联网探测默认打 google, 国内不可达会判 partialConnectivity 不走 Wi-Fi; 换国内 URL
+if [ -f $S/system/bin/paper-tuning.sh ] && ! grep -q captive_portal_http_url $S/system/bin/paper-tuning.sh; then
+  printf '%s\n' '' '# [rmkit] 联网探测换国内可达 URL' \
+    '/system/bin/settings put global captive_portal_http_url http://connect.rom.miui.com/generate_204' \
+    '/system/bin/settings put global captive_portal_https_url https://connect.rom.miui.com/generate_204' \
+    '/system/bin/settings put global captive_portal_fallback_url http://www.google.cn/generate_204' >> $S/system/bin/paper-tuning.sh
+fi
+# 亮屏设置写入加固 (不插线进 Android 一会儿"死机" = 熄屏): 老版 paper-tuning.sh 单次 put 可能静默失败
+if [ -f $S/system/bin/paper-tuning.sh ] && ! grep -q 'put_verified' $S/system/bin/paper-tuning.sh; then
+  sed -i 's|^\$S put system screen_off_timeout 2147483647$|put_verified() { for _t in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do $S put "$1" "$2" "$3" 2>/dev/null; [ "$($S get "$1" "$2" 2>/dev/null)" = "$3" ] \&\& { echo "ok $1 $2=$3"; return 0; }; sleep 3; done; echo "FAIL $1 $2"; return 1; }\nput_verified system screen_off_timeout 2147483647|; s|^\$S put secure sleep_timeout -1$|put_verified secure sleep_timeout -1|; s|^\$S put global stay_on_while_plugged_in 3$|put_verified global stay_on_while_plugged_in 3|' $S/system/bin/paper-tuning.sh
+fi
+# 媒体库开机会把共享进 Android 的整个 /home/root (含系统树几千个 .so) 当媒体扫一遍;
+# 那 10 秒密集读盘正好压在 Android 枚举输入设备的时间窗上, 慢一点的机器就认不到触摸屏 →
+# 桌面不重绘 → 画面定格, 看起来像死机。.nomedia 让媒体库整棵树跳过。
+[ -e /home/root/.nomedia ] || touch /home/root/.nomedia
+# 触摸自愈: Android 的输入系统只在开机枚举一次设备, 漏了就永远漏 (新装机 /data 全新时启动负载重, 很容易踩)。
+# 开机后自检中继设备在不在, 不在就重启一次框架让它重新扫描。
+# 正常启动不会触发; 用属性做一次性标记, 不会反复重启。
+if [ -d $S/system/bin ]; then
+  cat > $S/system/bin/paper-touchheal.sh <<'HEALSH'
+#!/system/bin/sh
+[ "$(getprop paper.touchheal.done)" = "1" ] && exit 0
+sleep 25
+# 判据用"中继设备在不在输入列表里", 不能用窗口配置的 -touch:
+# redroid 自带的 vinput 也报 TOUCH, 会让配置显示 finger, 掩盖真实故障。
+N=$(dumpsys input 2>/dev/null | grep -c "rm Android touch relay")
+setprop paper.touchheal.done 1
+if [ "$N" = "0" ]; then
+  log -t paper-touchheal "touch relay not registered, restarting framework"
+  echo "$(date) relay missing, restarting framework" >> /data/local/tmp/paper-touchheal.log
+  stop; sleep 3; start
+else
+  echo "$(date) touch relay ok" >> /data/local/tmp/paper-touchheal.log
+fi
+HEALSH
+  chmod 755 $S/system/bin/paper-touchheal.sh
+  mkdir -p $S/system/etc/init
+  cat > $S/system/etc/init/paper-touchheal.rc <<'HEALRC'
+service paper-touchheal /system/bin/sh /system/bin/paper-touchheal.sh
+    class late_start
+    user root
+    group root log
+    oneshot
+    disabled
+
+on property:sys.boot_completed=1
+    start paper-touchheal
+HEALRC
+  chmod 644 $S/system/etc/init/paper-touchheal.rc
+fi
+echo "    paper-tuning 亮屏加固: $(grep -c 'put_verified' $S/system/bin/paper-tuning.sh 2>/dev/null) 处"
+echo "    post-fs-data 自愈: $(grep -c '^# \[ -c /dev/ashmem' $S/vendor/bin/post-fs-data.redroid.sh 2>/dev/null) 处已关; paper-tuning chmod: $(grep -c 'chmod 666 /dev/ashmem' $S/system/bin/paper-tuning.sh 2>/dev/null)"
+echo "    媒体库跳过标记: $([ -e /home/root/.nomedia ] && echo 有 || echo 无); 触摸自愈: $([ -f $S/system/bin/paper-touchheal.sh ] && echo 已装 || echo 无)"
+
+echo "  → 7/8 /sbin/init 包装"
+if [ -L /sbin/init ] && [ ! -e /sbin/init.systemd-orig ]; then
+  cp -P /sbin/init /sbin/init.systemd-orig
+fi
+[ -e /sbin/init.systemd-orig ] || fail "/sbin/init 不是 symlink 且没有备份, 拒绝覆盖"
+sed "s|@STOCK_KERNEL@|$STOCK|g" "$STAGE/init-wrapper.tmpl.sh" > /sbin/init.new
+chmod 755 /sbin/init.new
+sh -n /sbin/init.new || fail "init 包装语法错误"
+grep -q "exec /lib/systemd/systemd" /sbin/init.new || fail "init 包装缺 systemd 回落路径"
+mv /sbin/init.new /sbin/init
+sync
+
+echo "  → 8/8 启动器与自检"
+cp "$STAGE/boot-android.sh" /home/root/boot-android.sh; chmod 755 /home/root/boot-android.sh
+sync
+sh /home/root/boot-android.sh --check
+rm -rf "$STAGE"
+echo "  ✓ 单槽 Android 安装完成 (本槽 $(rootdev 2>/dev/null), 出厂链接仍指向 $STOCK)"
