@@ -105,6 +105,18 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 		p.DeployRime = true
 		p.imeBin = ar.rimeBin
 	}
+	// 第四条门槛: librime 版是 cgo 链 C++ 的, 目前用 chiappa 的 cortex-a55 SDK (ARMv8.2)
+	// 编译, 里面内联了 LSE 原子指令且没有运行时回退。Paper Pro (ferrari) 是 Cortex-A53
+	// = ARMv8.0, 执行即 SIGILL —— 2026-10-04 实测 ime-http 起来就 code=dumped status=4/ILL。
+	// 纯 Go 版没这个问题 (Go 的 LSE 带运行时检测), 所以这里回落到它, 代价是没有整句输入。
+	// librime 用 ARMv8.0 基线重编后可以去掉这一段。
+	if p.DeployRime && info.Arch == "aarch64" && !info.HasLSE {
+		p.DeployRime = false
+		p.imeBin = ar.imeBin
+		p.Warnings = append(p.Warnings,
+			"这台 CPU 不支持 LSE 原子指令 (Cortex-A53), 而 librime 版输入法后端是按 ARMv8.2 编的, 会 SIGILL; "+
+				"已回落到纯 Go 引擎 —— 拼音可用, 没有整句输入")
+	}
 	// install.sh 375-394: 必备产物
 	for _, f := range []string{"space-dist/" + ar.spaceBin, "dist/" + p.imeBin, "dist/" + ar.imeHook, "dist/" + ar.qmdTool,
 		"vendor/extensions/xovi-message-broker-" + ar.ext + ".so", "dist/reMarkable_zh_CN.qm", "qmd/zh_CN.rcc"} {

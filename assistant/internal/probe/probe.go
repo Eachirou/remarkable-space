@@ -23,6 +23,10 @@ type Info struct {
 	ErrcntA    int    `json:"errcntA"`
 	ErrcntB    int    `json:"errcntB"`
 	Secboot    string `json:"secboot"` // unlocked / locked / 空 (非 i.MX93)
+	// HasLSE: CPU 支持 ARMv8.1 的 LSE 原子指令 (cpuinfo Features 里的 atomics)。
+	// Paper Pro (ferrari, Cortex-A53) 没有; Paper Pro Move (chiappa, A55) 有。
+	// 用 ARMv8.1+ 编出来的二进制在没有它的机器上执行即 SIGILL。
+	HasLSE bool `json:"hasLSE"`
 
 	RootFreeMB int `json:"rootFreeMB"`
 	HomeFreeMB int `json:"homeFreeMB"`
@@ -50,6 +54,7 @@ echo next=$(rootdev --next-boot 2>/dev/null)
 echo erra=$(cat /sys/devices/platform/lpgpr/roota_errcnt 2>/dev/null)
 echo errb=$(cat /sys/devices/platform/lpgpr/rootb_errcnt 2>/dev/null)
 echo secboot=$(cat /sys/devices/platform/lpgpr/secboot 2>/dev/null)
+grep -q " atomics" /proc/cpuinfo 2>/dev/null && echo lse=1
 echo rootfree=$(df -kP / 2>/dev/null | awk 'END{print $4}')
 echo homefree=$(df -kP /home 2>/dev/null | awk 'END{print $4}')
 [ -f /home/root/xovi/xovi.so ] && echo xovi=1
@@ -85,6 +90,7 @@ func Run(ctx context.Context, c *sshx.Client) (Info, error) {
 		ErrcntA:          atoi(kv["erra"]),
 		ErrcntB:          atoi(kv["errb"]),
 		Secboot:          kv["secboot"],
+		HasLSE:           kv["lse"] == "1",
 		RootFreeMB:       atoi(kv["rootfree"]) / 1024,
 		HomeFreeMB:       atoi(kv["homefree"]) / 1024,
 		HaveXovi:         kv["xovi"] == "1",
