@@ -9,9 +9,21 @@ reMarkable 上的启动台：首页小组件 + 应用注册表 + 绿色安装 + 
 |---|---|---|
 | `shell/` | `space/shell/` | 外壳 `Space.qml`：标签页、小组件挂载、应用创建销毁、给应用的 `space` API |
 | `kit/` | `space/kit/` | 共享 QML 组件（`SRow` / `STile` / `SButton` …）与图标 |
-| `apps/` | `space/apps/` | 内置应用。每个目录一个 `manifest.json` + `main.qml`（可选 `widget.qml`） |
+| `apps/` | `space/apps/` | **内置**应用，随安装器部署。每个目录一个 `manifest.json` + `main.qml`（可选 `widget.qml`） |
 | `server/` | `upload-server-go/internal/space/` | 后端 Go 包：注册表、安装、后台托管、最近在读、天气地图渲染 |
 | `data/geo.json` | 随后端部署 | 天气地图的矢量底图（Natural Earth，公共领域，已简化） |
+
+## 内置 vs 第三方
+
+本仓库只放**内置应用** —— 随安装器一起部署到 `/home/root/rmkit-cn/space/apps/`，
+多数是系统功能的入口（蓝牙、输入法、上传、个性化、切 Android 等）。
+
+**后续新开发的应用一律走第三方**：独立源码、打包成 zip、通过应用商店分发，
+绿色安装到 `~/.local/share/rmkit-cn/space/apps/`，不进这个仓库。
+已经这么做的有「音乐」和「计划」。
+
+这样分的好处是外壳和应用彻底解耦：外壳不认任何具体应用，应用也不必跟着外壳的
+发布节奏走，各自迭代。
 
 ## 设计约定
 
