@@ -59,14 +59,16 @@ for d in $U $L; do
   chmod 644 $d/$unit
   # systemctl enable 建的 symlink 落在 overlay upper 上, 重启就丢; 两层都手工建
   ln -sf $U/$unit $d/multi-user.target.wants/$unit
-  # 旧服务的自启 symlink 两层都要撤, 否则重启后它又起来抢 8080
+  # 旧服务两层都要撤自启并 mask。只 disable 不够: 以后重装 rmkit-cn 底座, 它的
+  # 安装器会把自启 symlink 又建回来, 两个进程抢 8080。mask 指向 /dev/null,
+  # 谁 enable/start 都起不来。
   rm -f $d/multi-user.target.wants/$old
+  ln -sf /dev/null $d/$old
 done
 sync; umount -l /tmp/lc 2>/dev/null || true; rmdir /tmp/lc 2>/dev/null || true
 rm -f /tmp/remarkable-space.service
 
 systemctl stop $old 2>/dev/null || true
-systemctl disable $old 2>/dev/null || true
 
 cd /home/root/remarkable-space
 chmod +x space-server.new && mv space-server.new space-server
@@ -78,7 +80,7 @@ echo "→ 自检"
 ssh $SSHOPT "$D" 'sleep 2
 systemctl is-active remarkable-space >/dev/null || { journalctl -u remarkable-space -n 25 --no-pager; exit 1; }
 echo "  服务: $(systemctl is-active remarkable-space) / $(systemctl is-enabled remarkable-space)"
-echo "  旧服务: $(systemctl is-active rmkit-cn-upload.service) / $(systemctl is-enabled rmkit-cn-upload.service 2>&1)"
+echo "  旧服务: $(systemctl is-active rmkit-cn-upload.service) / $(systemctl is-enabled rmkit-cn-upload.service 2>&1)  (应为 inactive / masked)"
 for p in /space/apps /qr-info /fonts /screens; do
   code=$(wget -q -S -O /dev/null "http://127.0.0.1:8080$p" 2>&1 | sed -n "s|.*HTTP/1.1 \([0-9]*\).*|\1|p" | head -n 1)
   echo "  $p → ${code:-连不上}"
