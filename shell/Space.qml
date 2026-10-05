@@ -91,6 +91,16 @@ Rectangle {
     property string toastText: ""
     property string busyText: ""
     property var confirmApp: null
+    // 通用确认框。原来只为"重启进 Android"这类 launch.confirm 服务, 删应用也得问一句,
+    // 所以拆出一条独立的: 文案 + 一个点"确定"才跑的回调。
+    property string askText: ""
+    property var askAction: null
+    function ask(text, action) { askText = text; askAction = action }
+    function askDone(ok) {
+        var fn = askAction
+        askText = ""; askAction = null
+        if (ok && fn) fn()
+    }
 
     // ─── 给应用的 API ─────────────────────────────────────────────────
     QtObject {
@@ -198,6 +208,20 @@ Rectangle {
     function installedVersion(id) {
         for (var i = 0; i < apps.length; i++) if (apps[i].id === id) return apps[i].version || "?"
         return ""
+    }
+
+    // 删除已装的应用。后端会连它的编译模块一起收走; 应用的数据目录保留 —— 误删之后
+    // 重新装回来, 任务/歌单/进度都还在。内置应用后端会拒绝, 这里也不给删除按钮。
+    function uninstallApp(app) {
+        request("DELETE", baseUrl + "/space/apps/" + app.id, null, function (st, r) {
+            if (st !== 200) {
+                showToast((r && r.error) ? r.error : ("删除失败 (" + st + ")"))
+                return
+            }
+            showToast((app.name || app.id) + " 已删除")
+            reload()
+            loadStore(false)
+        })
     }
 
     function installFromStore(item) {
@@ -875,6 +899,16 @@ Rectangle {
                                     font.pixelSize: space.fpx(22); color: "#26251F"; elide: Text.ElideRight; Layout.fillWidth: true
                                 }
                             }
+                            // 装过的才给删除按钮; 内置应用不在商店里, 不用担心误删
+                            Kit.SButton {
+                                ui: space.fs
+                                visible: storeRow.installed !== ""
+                                text: "删除"
+                                onClicked: space.ask(
+                                    "删除「" + (storeRow.modelData.name || storeRow.modelData.id) + "」？\n"
+                                    + "应用数据会保留，重新安装后还在。",
+                                    function () { space.uninstallApp(storeRow.modelData) })
+                            }
                             Kit.SButton {
                                 ui: space.fs
                                 enabled: storeRow.installed !== storeRow.modelData.version
@@ -1039,7 +1073,7 @@ Rectangle {
 
     // ─── 确认框 (重启进 Android 之类) ────────────────────────────────────
     Rectangle {
-        visible: space.confirmApp !== null
+        visible: space.confirmApp !== null || space.askText !== ""
         anchors.fill: parent
         z: 10
         color: "#88000000"
@@ -1057,15 +1091,22 @@ Rectangle {
                 spacing: 40
                 Text {
                     Layout.fillWidth: true
-                    text: space.confirmApp ? space.confirmApp.launch.confirm : ""
+                    text: space.askText !== "" ? space.askText
+                          : (space.confirmApp ? space.confirmApp.launch.confirm : "")
                     font.pixelSize: space.fpx(30)
                     wrapMode: Text.WordWrap
                 }
                 RowLayout {
                     Layout.alignment: Qt.AlignRight
                     spacing: 24
-                    Kit.SButton { ui: space.fs; text: "取消"; onClicked: space.confirmApp = null }
-                    Kit.SButton { ui: space.fs; text: "确定"; primary: true; onClicked: space.launch(space.confirmApp) }
+                    Kit.SButton {
+                        ui: space.fs; text: "取消"
+                        onClicked: { if (space.askText !== "") space.askDone(false); else space.confirmApp = null }
+                    }
+                    Kit.SButton {
+                        ui: space.fs; text: "确定"; primary: true
+                        onClicked: { if (space.askText !== "") space.askDone(true); else space.launch(space.confirmApp) }
+                    }
                 }
             }
         }

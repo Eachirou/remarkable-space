@@ -41,12 +41,19 @@ tar -C "$HERE" -cf - static | ssh $SSHOPT "$D" "tar -C /home/root/remarkable-spa
 scp $SSHOPT "$HERE/dist/$BIN" "$D:/home/root/remarkable-space/space-server.new"
 scp $SSHOPT "$HERE/data/geo.json" "$D:/home/root/remarkable-space/geo.json"
 scp $SSHOPT "$HERE/systemd/remarkable-space.service" "$D:/tmp/remarkable-space.service"
+scp $SSHOPT "$HERE/systemd/zz-space.conf" "$D:/tmp/zz-space.conf"
 
 echo "→ 换服务 (/etc 是 tmpfs overlay, 必须 upper + ext4 lower 双写, 否则重启即失)"
 ssh $SSHOPT "$D" 'sh -s' <<'REMOTE'
 set -eu
 U=/etc/systemd/system
 unit=remarkable-space.service
+# 内容没变就别重启 xochitl
+if cmp -s /tmp/zz-space.conf $U/xochitl.service.d/zz-space.conf 2>/dev/null; then
+  SPACE_DROPIN_CHANGED=0
+else
+  SPACE_DROPIN_CHANGED=1
+fi
 old=rmkit-cn-upload.service
 
 mkdir -p /tmp/lc && mount --bind / /tmp/lc 2>/dev/null || true
@@ -54,9 +61,15 @@ mount -o remount,rw /tmp/lc 2>/dev/null || true
 L=/tmp/lc/etc/systemd/system
 
 mkdir -p $U/multi-user.target.wants $L/multi-user.target.wants
+mkdir -p $U/xochitl.service.d $L/xochitl.service.d
 for d in $U $L; do
   cp /tmp/remarkable-space.service $d/$unit
   chmod 644 $d/$unit
+  # 空间自己的 xochitl 环境 (编译应用的模块搜索路径)。单独一个 drop-in, 不动底座那份 ——
+  # systemd 会把 xochitl.service.d/ 下所有 .conf 合并, 所以空间加能力不必让用户先去
+  # 更新那个已经冻结的公开底座。
+  cp /tmp/zz-space.conf $d/xochitl.service.d/zz-space.conf
+  chmod 644 $d/xochitl.service.d/zz-space.conf
   # systemctl enable 建的 symlink 落在 overlay upper 上, 重启就丢; 两层都手工建
   ln -sf $U/$unit $d/multi-user.target.wants/$unit
   # 旧服务两层都要撤自启并 mask。只 disable 不够: 以后重装 rmkit-cn 底座, 它的
@@ -66,7 +79,7 @@ for d in $U $L; do
   ln -sf /dev/null $d/$old
 done
 sync; umount -l /tmp/lc 2>/dev/null || true; rmdir /tmp/lc 2>/dev/null || true
-rm -f /tmp/remarkable-space.service
+rm -f /tmp/remarkable-space.service /tmp/zz-space.conf
 
 systemctl stop $old 2>/dev/null || true
 
@@ -74,6 +87,12 @@ cd /home/root/remarkable-space
 chmod +x space-server.new && mv space-server.new space-server
 systemctl daemon-reload
 systemctl restart $unit
+# drop-in 改了要 xochitl 重启才生效。只在它确实变过时才重启 —— 界面重启代价不小,
+# 而且短时间内反复重启会触发 systemd 的启动限制。
+if [ "${SPACE_DROPIN_CHANGED:-0}" = 1 ]; then
+  echo "  → xochitl 重启一次 (让新的模块搜索路径生效)"
+  systemctl restart xochitl 2>/dev/null || true
+fi
 REMOTE
 
 echo "→ 自检"

@@ -13,6 +13,7 @@ package deploy
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -316,6 +317,24 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 	}
 	log("✓ 侧栏入口已切到「空间」")
 
+	// 空间自己的 xochitl drop-in。单独一个文件, 不动底座那份 zz-rmkit-cn.conf ——
+	// systemd 会把 xochitl.service.d/ 下所有 .conf 合并, 所以空间加能力不必让用户
+	// 先去更新那个已经冻结的公开底座。/etc 是 tmpfs overlay, 老规矩双写 ext4 lower,
+	// 只写上层的话重启就没了。
+	if b.Has(spaceDropinSrc) {
+		conf, err := b.ReadAll(spaceDropinSrc)
+		if err != nil {
+			return err
+		}
+		if err := c.WriteFile(ctx, "/tmp/zz-space.conf", bytes.NewReader(conf), "644"); err != nil {
+			return err
+		}
+		if err := c.RunScript(ctx, spaceDropinScript, nil); err != nil {
+			return fmt.Errorf("装空间的 xochitl drop-in 失败: %w", err)
+		}
+		log("✓ 空间 drop-in 已装 (编译应用的模块搜索路径)")
+	}
+
 	if p.DeployRime { // install.sh 575-612
 		log("部署 rime 词库 (整句输入)...")
 		if err := c.RunScript(ctx, scripts.RimeSetup, nil); err != nil {
@@ -347,6 +366,23 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 func Uninstall(ctx context.Context, c *sshx.Client) error {
 	return c.RunScript(ctx, scripts.Uninstall, nil)
 }
+
+// spaceDropinSrc 是载荷包里空间那份 xochitl drop-in 的路径。
+const spaceDropinSrc = "space-systemd/zz-space.conf"
+
+// spaceDropinScript 把它双写到 /etc 与 ext4 lower。与底座的 drop-in 并存, 互不覆盖。
+const spaceDropinScript = `set -eu
+mkdir -p /tmp/lc && mount --bind / /tmp/lc 2>/dev/null || true
+mount -o remount,rw /tmp/lc 2>/dev/null || true
+for d in /etc/systemd/system /tmp/lc/etc/systemd/system; do
+  mkdir -p "$d/xochitl.service.d"
+  cp /tmp/zz-space.conf "$d/xochitl.service.d/zz-space.conf"
+  chmod 644 "$d/xochitl.service.d/zz-space.conf"
+done
+sync; umount -l /tmp/lc 2>/dev/null || true; rmdir /tmp/lc 2>/dev/null || true
+rm -f /tmp/zz-space.conf
+systemctl daemon-reload
+`
 
 // writeTar 按 install.sh 547 的方式打包: uid/gid 0, 路径以 ./ 开头, gzip。
 func writeTar(w io.Writer, b *bundle.Bundle, files []FileEntry) error {

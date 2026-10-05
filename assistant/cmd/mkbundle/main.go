@@ -151,6 +151,9 @@ func main() {
 			"space/geo.json":       "data/geo.json",
 			// 空间后端的 unit 混进底座的 systemd/ 一起走设备端阶段 1 的双写
 			"systemd/remarkable-space.service": "systemd/remarkable-space.service",
+			// 空间自己的 xochitl drop-in 单独放: 它要落到 xochitl.service.d/ 而不是
+			// unit 目录, 底座阶段 1 的循环只认 .service/.path/.timer, 混在一起会被漏掉。
+			"space-systemd/zz-space.conf": "systemd/zz-space.conf",
 		} {
 			p := filepath.Join(*spaceRepo, local)
 			if _, err := os.Stat(p); err != nil {
