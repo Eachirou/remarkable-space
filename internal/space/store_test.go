@@ -142,3 +142,37 @@ func TestStoreStaysStaticWithoutAPI(t *testing.T) {
 		t.Fatalf("状态码 = %d, 上游命中 %d 次", rec.Code, hits)
 	}
 }
+
+// 手动刷新要连票一起重来。
+//
+// 票是自包含的, 授权列表是签票那一刻的快照。用户刚买完回来点刷新, 只换索引不换票的话
+// 还是看到"需购买", 得干等票过期 —— 那几分钟里他只会以为没生效。
+func TestRefreshRenewsTicket(t *testing.T) {
+	f := newFakeStore()
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+
+	h := &Handler{StoreAPI: srv.URL}
+	h.SetupAuth(filepath.Join(t.TempDir(), "device.json"))
+	h.auth.identity = DeviceIdentity{MachineID: "m1", Code: DeviceCode("m1")}
+
+	get := func(q string) {
+		rec := httptest.NewRecorder()
+		h.store(rec, httptest.NewRequest(http.MethodGet, "/space/store"+q, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("取索引 %d: %s", rec.Code, rec.Body)
+		}
+	}
+	get("")
+	if f.tickets != 1 {
+		t.Fatalf("第一次就换了 %d 次票", f.tickets)
+	}
+	get("") // 缓存期内, 不该动
+	if f.tickets != 1 {
+		t.Errorf("缓存期内又换票了 (%d 次)", f.tickets)
+	}
+	get("?refresh=1")
+	if f.tickets != 2 {
+		t.Errorf("手动刷新没有重新换票 (还是 %d 次), 刚买的应用要等票过期才解锁", f.tickets)
+	}
+}

@@ -172,7 +172,14 @@ func (h *Handler) store(w http.ResponseWriter, r *http.Request) {
 	}
 	h.storeMu.Lock()
 	defer h.storeMu.Unlock()
-	if h.storeBody == nil || time.Since(h.storeAt) > storeCacheTTL || r.URL.Query().Get("refresh") == "1" {
+	refresh := r.URL.Query().Get("refresh") == "1"
+	if refresh && h.auth != nil {
+		// 票是自包含的, 授权列表是签票那一刻的快照。用户刚买完回来点刷新, 只换索引
+		// 不换票的话还是看到"需购买", 得等票过期 (默认 5 分钟) —— 那几分钟里他只会
+		// 以为没生效。手动刷新就连票一起重来。
+		h.auth.Invalidate()
+	}
+	if h.storeBody == nil || time.Since(h.storeAt) > storeCacheTTL || refresh {
 		body, err := h.fetchIndex()
 		if err != nil {
 			fail(w, http.StatusBadGateway, err.Error())

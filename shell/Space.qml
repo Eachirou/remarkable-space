@@ -93,6 +93,19 @@ Rectangle {
         })
     }
 
+    // 商店里买不到的那些 (服务端标了 locked = 这台设备还没有授权)。
+    // 下载地址由服务端按设备发, 没授权就根本没有 zip —— 所以这里不是"点了没反应",
+    // 而是压根不该让它看起来能装。
+    function buyPrompt(app) {
+        var lines = ["「" + (app.name || app.id) + "」还没有购买。"]
+        if (app.price) lines.push("价格：" + app.price)
+        lines.push("")
+        lines.push("本机设备码：" + (space.deviceCode !== "" ? space.deviceCode : "（读不到）"))
+        lines.push(app.buy ? app.buy : "把设备码发给作者。")
+        lines.push("开通后在本页点右上角刷新，就能装了。")
+        space.ask(lines.join("\n"), null)
+    }
+
     function heroWidgetEnabled() { return space.heroChoice === "" }
     function heroImageUrl() {
         if (space.heroChoice !== "" && space.heroChoice !== "none")
@@ -123,10 +136,12 @@ Rectangle {
     // 所以拆出一条独立的: 文案 + 一个点"确定"才跑的回调。
     property string askText: ""
     property var askAction: null
-    function ask(text, action) { askText = text; askAction = action }
+    // action 为 null 时就是一条提示 (只有"知道了"), 不是在问要不要做什么。
+    property bool askNotice: false
+    function ask(text, action) { askText = text; askAction = action; askNotice = !action }
     function askDone(ok) {
         var fn = askAction
-        askText = ""; askAction = null
+        askText = ""; askAction = null; askNotice = false
         if (ok && fn) fn()
     }
 
@@ -1007,6 +1022,9 @@ Rectangle {
                                 Text { text: storeRow.modelData.name || storeRow.modelData.id; font.pixelSize: space.fpx(28); elide: Text.ElideRight; Layout.fillWidth: true }
                                 Text {
                                     text: (storeRow.modelData.description || "") + "  v" + (storeRow.modelData.version || "")
+                                          + (storeRow.modelData.locked === true
+                                             ? "　· 需购买" + (storeRow.modelData.price ? " " + storeRow.modelData.price : "")
+                                             : "")
                                     font.pixelSize: space.fpx(22); color: "#26251F"; elide: Text.ElideRight; Layout.fillWidth: true
                                 }
                             }
@@ -1022,10 +1040,16 @@ Rectangle {
                             }
                             Kit.SButton {
                                 ui: space.fs
-                                enabled: storeRow.installed !== storeRow.modelData.version
-                                text: storeRow.installed === "" ? "获取" : (storeRow.installed === storeRow.modelData.version ? "已安装" : "更新")
-                                primary: storeRow.installed === ""
-                                onClicked: space.installFromStore(storeRow.modelData)
+                                readonly property bool locked: storeRow.modelData.locked === true
+                                enabled: locked || storeRow.installed !== storeRow.modelData.version
+                                text: locked ? "购买"
+                                      : (storeRow.installed === "" ? "获取"
+                                         : (storeRow.installed === storeRow.modelData.version ? "已安装" : "更新"))
+                                primary: locked || storeRow.installed === ""
+                                onClicked: {
+                                    if (locked) space.buyPrompt(storeRow.modelData)
+                                    else space.installFromStore(storeRow.modelData)
+                                }
                             }
                         }
                         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: "#C4BFB6" }
@@ -1232,10 +1256,11 @@ Rectangle {
                     spacing: 24
                     Kit.SButton {
                         ui: space.fs; text: "取消"
+                        visible: !space.askNotice
                         onClicked: { if (space.askText !== "") space.askDone(false); else space.confirmApp = null }
                     }
                     Kit.SButton {
-                        ui: space.fs; text: "确定"; primary: true
+                        ui: space.fs; text: space.askNotice ? "知道了" : "确定"; primary: true
                         onClicked: { if (space.askText !== "") space.askDone(true); else space.launch(space.confirmApp) }
                     }
                 }
