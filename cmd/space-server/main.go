@@ -42,6 +42,12 @@ func main() {
 	)
 	flag.Parse()
 
+	// 环境变量兜底: service 文件由 install.sh 生成, 重装会覆盖, 手改的参数会丢。
+	// 放 drop-in 里一行 Environment= 就不会被覆盖, 也不必把整条 ExecStart 抄一遍。
+	if *spaceStoreAPI == "" {
+		*spaceStoreAPI = os.Getenv("SPACE_STORE_API")
+	}
+
 	if *staticDir == "" {
 		exe, err := os.Executable()
 		if err != nil {

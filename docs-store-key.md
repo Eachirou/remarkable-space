@@ -78,3 +78,30 @@ curl -s -o /dev/null -w '%{http_code}\n' https://boangs.com/rmkit-space/index.js
 curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Space-Key: <密钥>' \
      https://boangs.com/rmkit-space/index.json
 ```
+
+## 握手模式 (store-server)
+
+上面那把密钥是最外层的粗筛。真正的授权走三步握手, 服务端是另一个仓库
+(`boangs/remarkable-space-store`, 私有), 部署和运维看它的 README。
+
+设备侧打开握手:
+
+```ini
+# /etc/systemd/system/remarkable-space.service.d/10-store-api.conf
+[Service]
+Environment=SPACE_STORE_API=https://boangs.com/rmkit-space/api
+```
+
+**放 drop-in 不要改主 service 文件** —— 后者由 install.sh 生成, 重装会把改动冲掉。
+RMPP 的 `/etc` 是 tmpfs overlay (upperdir 在 /var/volatile), 写完要双写到下层
+才扛得过重启:
+
+```sh
+mount --bind / /tmp/lowerroot && mount -o remount,rw /tmp/lowerroot
+mkdir -p /tmp/lowerroot/etc/systemd/system/remarkable-space.service.d
+cp /etc/systemd/system/remarkable-space.service.d/10-store-api.conf /tmp/lowerroot/etc/...
+sync && umount /tmp/lowerroot
+```
+
+**上线顺序**: 先让设备都切到握手并确认正常, **最后**才在 nginx 里把静态
+`index.json` 和 zip 直链 404 掉。反了的话, 所有还没切的设备当场看不到商店。
