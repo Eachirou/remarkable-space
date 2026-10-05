@@ -42,6 +42,20 @@ type Launch struct {
 	Confirm string `json:"confirm,omitempty"` // 非空则先弹确认框 (重启类操作)
 }
 
+// Module 声明应用以编译后的 QML 模块形式发布 (而不是明文 .qml 文件)。
+//
+// 为什么要这个: 明文发布的应用解压就是源码, 付费应用等于白送。编译成 QML 模块后,
+// 包里只有 .so —— qmlcachegen 把 QML 做成 AOT 函数, 不是压缩也不是打包 (实测 112KB 的
+// main.qml 变成 8380 个 AOT 符号, 源码的注释/属性行/函数定义都搜不到)。
+//
+// 模块装到固定的 qmlmods 目录 —— QML_IMPORT_PATH 是 xochitl 启动时定下的, 不可能
+// 每装一个应用就改一次环境变量再重启。
+type Module struct {
+	URI    string `json:"uri"`              // import 的模块名, 如 Plan; 同时是 qmlmods 下的目录名
+	Main   string `json:"main,omitempty"`   // 界面入口类型名, 如 Main
+	Widget string `json:"widget,omitempty"` // 首页小组件类型名, 如 Widget
+}
+
 // Manifest 是应用清单 (manifest.json)。
 type Manifest struct {
 	ID          string   `json:"id"`                    // 唯一标识: 小写字母/数字/-/_ , 1-32 位, 也是目录名
@@ -60,9 +74,15 @@ type Manifest struct {
 	MinShell    int      `json:"min_shell,omitempty"`   // 需要的最低外壳契约版本
 	Service     *Service `json:"service,omitempty"`
 	Launch      *Launch  `json:"launch,omitempty"`
+	Module      *Module  `json:"module,omitempty"` // 编译发布: 与 entry/widget 二选一
 }
 
 var idRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// QML 模块名与类型名都必须大写字母开头 —— 这是 QML 的硬规矩, 小写的不会被注册成类型。
+// URI 允许 . 分段 (如 Space.Plan), 目录按段拆开。
+var moduleURIRe = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*(\.[A-Z][A-Za-z0-9]*)*$`)
+var qmlTypeRe = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 
 var categoryOrder = map[string]int{
 	"system": 0, "settings": 1, "reader": 2, "tool": 3, "game": 4, "other": 5,
@@ -79,8 +99,27 @@ func (m *Manifest) Validate() error {
 	if strings.TrimSpace(m.Version) == "" {
 		return errors.New("version 不能为空")
 	}
-	if m.Entry == "" && m.Launch == nil {
-		return errors.New("entry (界面 QML) 与 launch (外部启动) 至少要有一个")
+	if m.Entry == "" && m.Launch == nil && m.Module == nil {
+		return errors.New("entry (界面 QML)、module (编译模块) 与 launch (外部启动) 至少要有一个")
+	}
+	if m.Module != nil {
+		if !moduleURIRe.MatchString(m.Module.URI) {
+			return fmt.Errorf("module.uri %q 不合法 (QML 模块名: 大写字母开头, 只能字母数字, 可用 . 分段)", m.Module.URI)
+		}
+		if m.Module.Main == "" && m.Module.Widget == "" {
+			return errors.New("module 至少要声明 main 或 widget 之一")
+		}
+		for _, f := range []struct{ name, val string }{{"module.main", m.Module.Main}, {"module.widget", m.Module.Widget}} {
+			if f.val != "" && !qmlTypeRe.MatchString(f.val) {
+				return fmt.Errorf("%s %q 不合法 (QML 类型名: 大写字母开头, 只能字母数字)", f.name, f.val)
+			}
+		}
+		if m.Entry != "" || m.Widget != "" {
+			return errors.New("module 与 entry/widget 不能同时声明 (前者是编译发布, 后者是明文发布)")
+		}
+		if m.Module.Widget != "" && m.WidgetSize == "" {
+			m.WidgetSize = "half"
+		}
 	}
 	for _, f := range []struct{ name, val string }{{"entry", m.Entry}, {"widget", m.Widget}} {
 		if f.val != "" && !isRelativeInside(f.val) {

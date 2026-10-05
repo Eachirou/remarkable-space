@@ -9,6 +9,7 @@ package server
 //   3. 读 960×1696×4 字节 RGBA 数据
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"image"
@@ -36,10 +37,29 @@ func xochitlPID() (int, error) {
 	return pid, nil
 }
 
+// fbGeometry 按机型给帧缓冲几何: 可见宽高, 外加每行的真实跨距 (stride)。
+// 两台 Paper Pro 的屏不一样大, 写死一个另一台就读出错位的图 —— 算法本身通用,
+// 只有几何是机型相关的。3.28 起 /sys/class/graphics/fb0 不存在, 只能靠设备树型号认。
+//
+// Paper Pro 的 1620 在帧里补齐到 32 的倍数 = 1632, 按 1620 读会每行偏 12 像素,
+// 整幅图斜着撕开。stride 是 2026-10-04 实测出来的: 把帧按若干候选宽度切行, 算相邻
+// 行的平均差异, 1632 是 5.87 而 1620 是 20.00, 其余候选都在 14 以上。
+func fbGeometry() (visW, h, stride int) {
+	b, err := os.ReadFile("/proc/device-tree/model")
+	if err == nil {
+		switch m := string(bytes.TrimRight(b, "\x00")); {
+		case strings.Contains(m, "Chiappa"): // Paper Pro Move
+			return 960, 1696, 960
+		case strings.Contains(m, "Ferrari"): // Paper Pro
+			return 1620, 2160, 1632
+		}
+	}
+	return 960, 1696, 960
+}
+
 func rmppScreenshot() (image.Image, error) {
-	// RMPPM Chiappa: 960×1696 RGBA8 portrait
-	const fbW, fbH = 960, 1696
-	const frameSize = uint64(fbW * fbH * 4)
+	fbW, fbH, fbStride := fbGeometry()
+	frameSize := uint64(fbStride * fbH * 4)
 
 	pid, err := xochitlPID()
 	if err != nil {
@@ -118,15 +138,16 @@ func rmppScreenshot() (image.Image, error) {
 	if _, err := f.Seek(frameOff, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("seek frame: %w", err)
 	}
-	buf := make([]byte, fbW*fbH*4)
+	buf := make([]byte, fbStride*fbH*4)
 	if _, err := io.ReadFull(f, buf); err != nil {
 		return nil, fmt.Errorf("read frame: %w", err)
 	}
 
+	// 按 stride 走行, 只取每行左边 fbW 列 —— 右边那几列是对齐填充, 不是画面
 	img := image.NewNRGBA(image.Rect(0, 0, fbW, fbH))
 	for y := 0; y < fbH; y++ {
 		for x := 0; x < fbW; x++ {
-			off := (y*fbW + x) * 4
+			off := (y*fbStride + x) * 4
 			img.SetNRGBA(x, y, color.NRGBA{
 				R: buf[off], G: buf[off+1], B: buf[off+2], A: buf[off+3],
 			})

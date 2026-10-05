@@ -29,7 +29,11 @@ type Registry struct {
 	BuiltinDir string // /home/root/rmkit-cn/space/apps
 	UserDir    string // /home/root/.local/share/rmkit-cn/space/apps
 	DataDir    string // /home/root/.local/share/rmkit-cn/space/data
-	Arch       string // aarch64 / armv7
+	// ModuleDir 放编译发布的应用的 QML 模块, 固定一个目录: QML_IMPORT_PATH 是 xochitl
+	// 启动时定下的, 不可能每装一个应用就改环境变量再重启。安装时把包里的 qml/<URI>/
+	// 搬到这里, 卸载时一并删。
+	ModuleDir string // /home/root/.local/share/rmkit-cn/space/qmlmods
+	Arch      string // aarch64 / armv7
 }
 
 // List 返回全部应用, 按 类别 → order → 名字 排序。
@@ -114,6 +118,12 @@ func (r *Registry) build(appDir, dirName string, builtin bool) App {
 	}
 	if m.Widget != "" {
 		a.WidgetURL = fileURL(filepath.Join(appDir, m.Widget))
+	}
+	if m.Module != nil && a.Error == "" {
+		// 模块装没装到位, 这里就能看出来 —— 否则要等用户点开才报 "module is not installed"
+		if _, err := os.Stat(filepath.Join(r.ModuleDir, moduleDirName(m.Module.URI), "qmldir")); err != nil {
+			a.Error = "模块 " + m.Module.URI + " 没装到 " + r.ModuleDir + " (重新安装本应用可修复)"
+		}
 	}
 	a.IconURL = resolveIcon(appDir, m.Icon)
 	if m.Service != nil && m.Service.Port > 0 {

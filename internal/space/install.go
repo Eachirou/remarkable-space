@@ -47,6 +47,14 @@ func (r *Registry) InstallZip(zr *zip.Reader, sup *Supervisor) (App, error) {
 		_ = os.RemoveAll(tmp)
 		return App{}, err
 	}
+	// 编译发布的应用: 把包里的 qml/<URI>/ 搬进固定的模块目录, 否则 import 找不到。
+	// 放完整个应用目录之后再搬, 失败就把应用一起回滚 —— 半装的状态更难排查。
+	if m.Module != nil {
+		if err := r.installModule(final, m); err != nil {
+			_ = os.RemoveAll(final)
+			return App{}, err
+		}
+	}
 	a, ok := r.Get(m.ID)
 	if !ok {
 		return App{}, errors.New("安装后在注册表里找不到应用 (目录扫描失败)")
@@ -104,7 +112,86 @@ func (r *Registry) Uninstall(id string, sup *Supervisor) error {
 	if sup != nil {
 		_ = sup.Stop(id)
 	}
-	return os.RemoveAll(dir)
+	// 先记下模块名再删应用目录 —— 清单没了就不知道该收哪个模块
+	var modDir string
+	if m, err := LoadManifest(dir); err == nil && m.Module != nil {
+		modDir = filepath.Join(r.ModuleDir, moduleDirName(m.Module.URI))
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	if modDir != "" {
+		_ = os.RemoveAll(modDir)
+	}
+	return nil
+}
+
+// moduleDirName 把 QML 模块 URI 转成目录名。URI 可以分段 (Space.Plan), 对应
+// 嵌套目录 —— 这是 QML 的查找规则, 不是我们定的。
+func moduleDirName(uri string) string {
+	return filepath.Join(strings.Split(uri, ".")...)
+}
+
+// installModule 把应用包里的 qml/<URI>/ 搬到模块目录。
+// 包里为什么是 qml/<URI>/: 这是 qt_add_qml_module 的 OUTPUT_DIRECTORY 布局, 原样带过来,
+// 应用开发者不用额外摆放。
+func (r *Registry) installModule(appDir string, m *Manifest) error {
+	if r.ModuleDir == "" {
+		return errors.New("后端没有配置模块目录, 装不了编译发布的应用")
+	}
+	name := moduleDirName(m.Module.URI)
+	src := filepath.Join(appDir, "qml", name)
+	if _, err := os.Stat(filepath.Join(src, "qmldir")); err != nil {
+		return fmt.Errorf("应用包里缺 qml/%s/qmldir (声明了 module 就得带编译好的模块)", name)
+	}
+	dst := filepath.Join(r.ModuleDir, name)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	_ = os.RemoveAll(dst)
+	if err := os.Rename(src, dst); err != nil {
+		// 跨设备时 rename 会失败 (模块目录与应用目录可能不在同一文件系统), 退回复制
+		if err := copyTree(src, dst); err != nil {
+			return fmt.Errorf("装模块 %s 失败: %w", m.Module.URI, err)
+		}
+		_ = os.RemoveAll(src)
+	}
+	// 模块搬走后 qml/ 就空了 (URI 分段时还剩几层空壳), 顺手收掉, 别留在应用目录里
+	for d := filepath.Dir(src); strings.HasPrefix(d, appDir+string(filepath.Separator)); d = filepath.Dir(d) {
+		if os.Remove(d) != nil {
+			break // 非空就停, Remove 对非空目录会失败
+		}
+	}
+	return nil
+}
+
+// copyTree 递归复制目录, 保留可执行位 (.so 要能被 dlopen)。
+func copyTree(src, dst string) error {
+	return filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		in, err := os.Open(p)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+		if err != nil {
+			return err
+		}
+		defer out.Close()
+		_, err = io.Copy(out, in)
+		return err
+	})
 }
 
 // findManifest 在 zip 里定位 manifest.json, 返回它所在的前缀 ("" 或 "dir/") 和解析结果。

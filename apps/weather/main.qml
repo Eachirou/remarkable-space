@@ -19,8 +19,17 @@ Item {
     }
     readonly property real fs: space.fontScale
     readonly property real un: space.unit
+    // 纵向单独一套 —— Paper Pro 宽是 Move 的 1.70 倍, 高却只有 1.27 倍。顶栏、温度行
+    // 这些纵向位置再按 un 放大, 顶部就白占掉一大截 (实测 header 吃了 442px), 把插画上面
+    // 那条白带挤没, 太阳只好缩成一小团。纵向位置与高度一律用 vu。
+    readonly property real vn: space.vunit !== undefined ? space.vunit : space.unit
     function f(n) { return Math.round(n * root.fs) }
     function u(n) { return Math.round(n * root.un) }
+    function vu(n) { return Math.round(n * root.vn) }
+    // Paper Pro (宽屏) 的纵向预算格外紧: 画按屏宽等比铺开, 宽 1.70 倍就高 1.70 倍,
+    // 而屏幕只高 1.27 倍。顶栏这些固定开销在它上面得比 vu 再收一档, 否则文字会被
+    // 推到画的天空上。Move 上一律走原值, 版式不动。
+    readonly property bool wide: space.largeScreen === true
 
     // ── 整屏常驻一个刷新波形标记 ──────────────────────────────────────────
 // 症状: 进出本应用时, 只有插画那一块被整块闪黑重刷, 四周走的是另一种波形,
@@ -57,8 +66,11 @@ Item {
     // XHR 每次真读盘, 改完重开应用就生效, 你可以自己去编辑那个文件。
     property var phrases: null
     function loadPhrases() {
-        root.space.request("GET", root.img("phrases.json"), null, function (st, r) {
-            if (st === 200 && r) root.phrases = r
+        var u = root.img("phrases.json")
+        root.space.request("GET", u, null, function (st, r) {
+            // file:// 读成功时 status 是 0 不是 200, 所以只看有没有解析出东西
+            if (r) root.phrases = r
+            else console.warn("[weather] phrases 读不到 (st=" + st + ") " + u)
         })
     }
     // 分组判断放在这里而不是 weather.js: .js 是相对 import, 不带 ?t= 令牌,
@@ -76,12 +88,17 @@ Item {
         if (d.code <= 1) return "clear"
         return "cloudy"
     }
-    function todayLine() {
-        var k = root.wx ? root.adviceKind(root.wx) : ""
-        if (!root.phrases || !k || !root.phrases[k] || !root.phrases[k].length)
-            return root.wx ? root.wx.advice : ""      // 兜底: 老版整句
-        var l = root.phrases[k]
-        var d = root.now
+    // 今日一句。写成绑定而不是函数, 有两个原因:
+    //   · 函数里引用的属性不进依赖图 —— phrases 是异步读进来的, 等它到了, 挂在
+    //     text: todayLine() 上的绑定不会重算, 界面永远停在"还没读到"那一版。
+    //   · 日期取 space.localNow() (设备时区), 原来写的 root.now 这个属性压根不存在,
+    //     对 undefined 取 getFullYear 直接抛异常, 整条绑定求值失败 → 那行空白。
+    readonly property string adviceLine: {
+        if (!root.wx) return ""
+        var k = root.adviceKind(root.wx)
+        var l = (root.phrases && root.phrases[k]) ? root.phrases[k] : null
+        if (!l || !l.length) return root.wx.advice || ""   // 兜底: 老版整句
+        var d = root.space.localNow()
         var seed = d.getFullYear() * 400 + d.getMonth() * 32 + d.getDate()
         return l[seed % l.length]
     }
@@ -164,18 +181,18 @@ Item {
     Item {
         id: header
         anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
-        height: root.u(260)
+        height: root.wide ? root.vu(190) : root.vu(260)
 
         Image {
             id: backBtn
-            x: root.u(28); y: root.u(60)
+            x: root.u(28); y: root.wide ? root.vu(46) : root.vu(60)
             width: root.f(34); height: width; sourceSize.width: width; sourceSize.height: width
             source: root.img("i-back.svg"); fillMode: Image.PreserveAspectFit
             MouseArea { anchors.fill: parent; anchors.margins: -root.u(18); onClicked: root.tab === "home" ? space.exit() : root.tab = "home" }
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            y: root.u(64)
+            y: root.wide ? root.vu(48) : root.vu(64)
             text: root.tab === "home" ? "" : (root.tab === "forecast" ? "预报" : root.tab === "map" ? "天气地图" : root.tab === "city" ? "城市管理" : "设置")
             font.pixelSize: root.f(30); font.weight: Font.Medium; color: root.ink
         }
@@ -185,7 +202,7 @@ Item {
             // 两边互相依赖, 居中会算偏。
             visible: root.tab === "home"
             anchors.left: parent.left; anchors.right: parent.right
-            y: root.u(118)
+            y: root.wide ? root.vu(78) : root.vu(118)
             spacing: 2
             // 城市名自己居中, 定位图标挂在它左边。
             // 图标若和文字一起算进居中范围, 文字就会被推得偏右, 看着不齐。
@@ -261,7 +278,7 @@ Item {
                 id: sceneBox
                 anchors.top: parent.top
                 anchors.left: parent.left; anchors.right: parent.right
-                anchors.bottom: statRow.top; anchors.bottomMargin: root.u(14)
+                anchors.bottom: statRow.top; anchors.bottomMargin: root.vu(14)
                 clip: true
                 Image {
                     id: sceneImg
@@ -273,7 +290,13 @@ Item {
                     // 上面空出来的白底正好垫大号温度 —— 两者不重叠, 所以不需要
                     // 任何渐隐或蒙版 (老素材是竖幅铺底、文字压在画上才需要)。
                     width: parent.width
-                    height: useFallback ? parent.height : Math.round(parent.width * sh / sw)
+                    // 宽屏上按原比例算出来的高度会吃掉整块 (1620 宽 → 786 高), 文字只好
+                    // 压到画的天空里。给个占比上限, Stretch 下等于轻微压扁 —— 实测 5%
+                    // 左右, 看不出来, 却把画顶边压低了近百像素, 文字和太阳都有地方了。
+                    height: useFallback ? parent.height
+                            : (root.wide ? Math.min(Math.round(parent.width * sh / sw),
+                                                    Math.round(parent.height * 0.60))
+                                         : Math.round(parent.width * sh / sw))
                     x: 0
                     y: useFallback ? 0 : Math.max(0, parent.height - height)
                     fillMode: useFallback ? Image.PreserveAspectFit : Image.Stretch
@@ -305,18 +328,31 @@ Item {
                 readonly property string kind: root.wx ? W.sceneKind(root.wx.code) : ""
                 readonly property var haveArt: ["clear", "cloudy", "rain", "snow", "storm"]
                 z: -1
-                // 晴天单独一套边距: 太阳是孤零零一个圆, 贴着右上角显得突兀,
-                // 往左往下收一点, 顶边压到温度行 (sceneBox.top + 43) 之下。
-                // 其它几张带云、是扁的, 贴右上正合适。
+                // 这张图 z:-1 压在最底层, 而山水画 (sceneImg) 贴着 sceneBox 底边、按屏宽
+                // 等比放大。屏越宽画越高, 吃掉的纵向空间越多 —— Paper Pro 上画高 701 而
+                // Move 上只有 413, 固定边距的太阳下半就被画盖掉了 (实测只剩 54%)。
+                // 所以按"画上面那条白带"来放: 贴着画的顶边往上摆, 高度不超过白带。
+                readonly property real band: sceneBox.height - (sceneImg.visible ? sceneImg.height : 0)
+                readonly property real topGap: kind === "clear" ? root.vu(28) : root.vu(22)
+                // 白带有多少就用多少 (不超过设计尺寸): 屏宽时画高、白带窄, 自动缩;
+                // 纵向宽裕时就按设计值铺开, 不会一直缩在角上。
+                // 尺寸按字号比例 (f) 而不是版式比例 (u): 它旁边就是大号温度, 两者的相对
+                // 大小才是眼睛看到的东西。u 在 Paper Pro 上是 1.70 倍而 f 只有 1.245 倍,
+                // 按 u 放大太阳就比温度大出一圈 —— 两台看上去是两个设计。
+                readonly property real artH: kind === "clear"
+                        ? Math.max(root.f(90), Math.min(root.f(215), band - topGap - root.vu(14)))
+                        : Math.max(root.f(120), Math.min(root.f(310), band - topGap - root.vu(10)))
                 anchors.top: sceneBox.top
-                anchors.topMargin: kind === "clear" ? root.u(76) : root.u(36)
+                anchors.topMargin: topGap
                 anchors.right: parent.right
                 anchors.rightMargin: kind === "clear" ? root.u(64) : root.u(20)
                 // 框按图形定, 不是一刀切 520: PreserveAspectFit 会把图在框里居中,
                 // 太阳是正方的只占 246 宽, 在 520 的框里左右各空 137 —— 看着就离右边远。
                 // 给它一个贴合的窄框, 它才真正靠右。扁的那几张本来就能撑满 520。
-                width: kind === "clear" ? root.u(230) : root.u(520)
-                height: kind === "clear" ? root.u(215) : root.u(310)
+                // 宽度跟着高度走: 太阳是正方的, 宽框钉死 230 的话 PreserveAspectFit 会
+                // 被宽度卡住 —— 白带再宽它也长不大 (实测白带 573 而太阳只有 391)。
+                width: kind === "clear" ? Math.max(root.f(230), artH) : root.f(520)
+                height: artH
                 // day !== false 而不是 day === true: 离线时读的 last.json 可能是
                 // 老格式 (没存 day 字段), 那种情况下按白天处理, 总比不显示强。
                 visible: !!root.wx && root.wx.day !== false
@@ -330,7 +366,7 @@ Item {
             // 温度 + 天气文字
             RowLayout {
                 // 上移 5mm: 屏幕 229 DPI, 1mm ≈ 9px, 所以 88 - 45 = 43
-                anchors.top: sceneBox.top; anchors.topMargin: root.u(43)
+                anchors.top: sceneBox.top; anchors.topMargin: root.wide ? root.vu(8) : root.vu(43)
                 anchors.left: parent.left; anchors.right: parent.right
                 ColumnLayout {
                     Layout.leftMargin: root.u(70)
@@ -363,8 +399,8 @@ Item {
             Rectangle {
                 id: statRow
                 anchors.left: parent.left; anchors.right: parent.right
-                anchors.bottom: adviceRule.top; anchors.bottomMargin: root.u(20)
-                height: root.u(150)
+                anchors.bottom: adviceRule.top; anchors.bottomMargin: root.vu(20)
+                height: root.vu(150)
                 color: "transparent"
                 RowLayout {
                     anchors.fill: parent; anchors.topMargin: root.u(16); anchors.bottomMargin: root.u(6)
@@ -413,12 +449,12 @@ Item {
             Text {
                 id: adviceText
                 anchors.left: parent.left; anchors.right: parent.right
-                anchors.bottom: parent.bottom; anchors.bottomMargin: root.u(20)
+                anchors.bottom: parent.bottom; anchors.bottomMargin: root.vu(20)
                 // 高度写死一行: 文字空着时高度归零会把上面那条细线拽下去,
                 // 数据回来又弹回去, 等于多刷一次屏。
                 height: root.f(36) * 1.5
                 verticalAlignment: Text.AlignVCenter
-                text: root.wx ? root.todayLine() : ""
+                text: root.adviceLine
                 font.pixelSize: root.f(36); color: root.ink; wrapMode: Text.WordWrap
             }
         }

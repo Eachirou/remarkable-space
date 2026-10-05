@@ -174,7 +174,8 @@ func TestSupervisorStartStop(t *testing.T) {
 
 func TestDataGetPut(t *testing.T) {
 	tmp := t.TempDir()
-	h := New(filepath.Join(tmp, "b"), filepath.Join(tmp, "u"), filepath.Join(tmp, "d"), "aarch64", "")
+	h := New(filepath.Join(tmp, "b"), filepath.Join(tmp, "u"), filepath.Join(tmp, "d"),
+		filepath.Join(tmp, "m"), "aarch64", "")
 	mux := http.NewServeMux()
 	h.Mount(mux)
 	do := func(method, path, body string) *httptest.ResponseRecorder {

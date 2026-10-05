@@ -170,6 +170,10 @@ ExecStartPre=-/bin/sh /home/root/rmkit-cn/bin/precheck.sh
 Environment="QML_DISABLE_DISK_CACHE=1"
 Environment="QML_XHR_ALLOW_FILE_WRITE=1"
 Environment="QML_XHR_ALLOW_FILE_READ=1"
+# 「空间」编译发布的应用: 模块 (.so) 装在这个固定目录, QML 靠 import 找它。
+# 路径必须在 xochitl 启动时就定下 —— 绿色安装随时发生, 装一个应用就改环境变量
+# 再重启整个界面不现实, 所以写死位置, 后端只管往里放。
+Environment="QML_IMPORT_PATH=/home/root/.local/share/rmkit-cn/space/qmlmods"
 Environment="LD_PRELOAD=$PRELOAD"
 Environment="QT_RESOURCE_REBUILDER_PATH=/home/root/xovi/exthome/qt-resource-rebuilder/zh_CN.rcc"
 EOF

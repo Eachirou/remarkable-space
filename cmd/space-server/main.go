@@ -26,12 +26,14 @@ func main() {
 		staticDir      = flag.String("static", "", "静态资源目录 (默认: <二进制所在目录>/static)")
 		fontsDir       = flag.String("fonts", "", "字体存放目录 (默认: $HOME/.local/share/rmkit-cn/fonts)")
 		screensDir     = flag.String("screens", "", "锁屏图存放目录 (默认: $HOME/.local/share/rmkit-cn/screens)")
+		musicDir       = flag.String("music", "", "音乐存放目录 (默认: $HOME/.local/share/rmkit-cn/music)")
 		stagingDir     = flag.String("staging", "/tmp/rmkit_upload", "文档上传暂存目录")
 		fontsActiveDir = flag.String("fonts-active", "", "字体激活符号链接目录 (默认: $HOME/.local/share/fonts)")
 		xochitlConf    = flag.String("xochitl-conf", "", "xochitl 配置路径 (默认: $HOME/.config/remarkable/xochitl.conf)")
 		spaceDir       = flag.String("space", "/home/root/rmkit-cn/space", "「空间」内置应用目录 (含 shell/ kit/ apps/)")
 		spaceUserDir   = flag.String("space-apps", "", "「空间」用户应用目录 (默认: $HOME/.local/share/rmkit-cn/space/apps)")
 		spaceDataDir   = flag.String("space-data", "", "「空间」应用数据目录 (默认: $HOME/.local/share/rmkit-cn/space/data)")
+		spaceModDir    = flag.String("space-modules", "", "「空间」编译应用的 QML 模块目录 (默认: $HOME/.local/share/rmkit-cn/space/qmlmods; 要与 xochitl 的 QML_IMPORT_PATH 一致)")
 		spaceStore     = flag.String("space-store", "https://boangs.com/rmkit-space/index.json", "「空间」应用商店索引 URL (空 = 关闭商店)")
 	)
 	flag.Parse()
@@ -54,6 +56,9 @@ func main() {
 	if *screensDir == "" {
 		*screensDir = filepath.Join(home, ".local/share/rmkit-cn/screens")
 	}
+	if *musicDir == "" {
+		*musicDir = filepath.Join(home, ".local/share/rmkit-cn/music")
+	}
 	if *fontsActiveDir == "" {
 		*fontsActiveDir = filepath.Join(home, ".local/share/fonts")
 	}
@@ -66,17 +71,22 @@ func main() {
 	if *spaceDataDir == "" {
 		*spaceDataDir = filepath.Join(home, ".local/share/rmkit-cn/space/data")
 	}
+	if *spaceModDir == "" {
+		*spaceModDir = filepath.Join(home, ".local/share/rmkit-cn/space/qmlmods")
+	}
 
 	srv, err := server.New(server.Config{
 		StaticDir:      *staticDir,
 		FontsDir:       *fontsDir,
 		ScreensDir:     *screensDir,
+		MusicDir:       *musicDir,
 		DocStagingDir:  *stagingDir,
 		FontsActiveDir: *fontsActiveDir,
 		XochitlConf:    *xochitlConf,
 		SpaceDir:       *spaceDir,
 		SpaceUserDir:   *spaceUserDir,
 		SpaceDataDir:   *spaceDataDir,
+		SpaceModDir:    *spaceModDir,
 		SpaceBaseURL:   "http://127.0.0.1:8080",
 		SpaceStore:     *spaceStore,
 	})

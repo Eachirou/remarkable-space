@@ -25,10 +25,17 @@ Rectangle {
     // 以 Paper Pro Move 竖屏短边 954px 为 1.0; Paper Pro (1620x2160) 竖屏约 1.7。横屏时短边不变, 版式靠宽度自适应。
     // 两台机器 DPI 接近 (229 / 264), 所以字号只温和放大 (fs), 边距/卡片高度按 unit 放大, 列数按内容宽度算。
     readonly property real unit: Math.max(0.6, Math.min(width, height) / 954)
+    // 纵向另算一套。两台机器高宽比差很多 —— Move 954x1696 (1:1.78), Paper Pro 1620x2160
+    // (1:1.33)。尺寸全跟着短边走的话, Paper Pro 上宽度放大 1.70 倍而可用高度只有 1.27 倍,
+    // 首页纵向超出约 230px, 要滚一截才看得全。
+    // 所以卡片高度、行距、上下留白改用 vpx: 元素该多大还多大 (字号图标仍按 unit), 只压纵向。
+    // 下限 0.75 是给横屏留的 —— 横屏高度骤减, 再按比例压就没法看, 那种情况让它滚。
+    readonly property real vunit: Math.max(0.75, Math.min(unit, height / 1696))
     readonly property real fs: 1 + (unit - 1) * 0.35
     readonly property bool largeScreen: unit > 1.4
     readonly property int margin: Math.round(64 * unit)
-    function px(n) { return Math.round(n * unit) }      // 版式尺寸
+    function px(n) { return Math.round(n * unit) }      // 版式尺寸 (横向与元素)
+    function vpx(n) { return Math.round(n * vunit) }   // 纵向尺寸: 卡片高度、行距、上下留白
     function fpx(n) { return Math.round(n * fs) }       // 字号
     function cols(contentWidth, minTile) { return Math.max(2, Math.floor(contentWidth / (minTile * fs))) }
 
@@ -94,6 +101,9 @@ Rectangle {
         readonly property bool largeScreen: space.largeScreen
         readonly property string screenMode: space.screenMode   // ui / content, 整个空间统一, 应用别自己挂
         readonly property real unit: space.unit           // 版式缩放基准 (Move 竖屏 = 1)
+        // 纵向另算一套: Paper Pro 宽是 Move 的 1.70 倍而高只有 1.27 倍, 纵向尺寸
+        // 再跟着 unit 走就会把一屏撑爆。卡片高度、上下留白、纵向间距用它。
+        readonly property real vunit: space.vunit
         readonly property real fontScale: space.fs        // 字号缩放基准
         readonly property real screenWidth: space.width
         readonly property real screenHeight: space.height
@@ -133,7 +143,12 @@ Rectangle {
             if (x.readyState !== 4) return
             var r = null
             try { r = JSON.parse(x.responseText) } catch (e) { r = null }
-            if (cb) cb(x.status, r)
+            // file:// 读成功时 XHR 的 status 是 0 而不是 200 —— 本地文件没有 HTTP 状态行。
+            // 应用读自带的 json 资源 (如天气的 phrases.json) 走的就是 file://, 调用方
+            // 一律按 200 判断, 不折算的话那些资源永远读不到, 还只会静默走兜底分支。
+            var st = x.status
+            if (st === 0 && url.indexOf("file:") === 0 && x.responseText) st = 200
+            if (cb) cb(st, r)
         }
         x.open(method, url)
         var hasBody = body !== null && body !== undefined
@@ -200,12 +215,18 @@ Rectangle {
         for (var i = 0; i < apps.length; i++) if (pred(apps[i])) out.push(apps[i])
         return out
     }
+    // 应用有没有首页小组件 —— 明文发布看 widgetUrl, 编译发布看 module.widget。
+    // 四处筛选都走这里, 免得加了新发布形态就漏一处。
+    function hasWidget(a) {
+        return !!a && (!!a.widgetUrl || !!(a.module && a.module.widget))
+    }
+
     function heroWidgetApp() {
-        var l = filterApps(function(a) { return a.widgetUrl && a.widget_size === "hero" && !a.error })
+        var l = filterApps(function(a) { return space.hasWidget(a) && a.widget_size === "hero" && !a.error })
         return l.length ? l[0] : null
     }
     function halfWidgetApps() {
-        return filterApps(function(a) { return a.widgetUrl && a.widget_size !== "hero" && !a.error })
+        return filterApps(function(a) { return space.hasWidget(a) && a.widget_size !== "hero" && !a.error })
     }
     // "应用" = 非设置类 (设置类只出现在"设置"标签)
     function isSetting(a) { return a.category === "settings" || a.category === "system" }
@@ -218,12 +239,12 @@ Rectangle {
     function settingsApps() { return filterApps(isSetting) }
     // 声明了 widget_slot 的小组件由外壳指定位置 (如 "plan" → 今日计划那张卡)
     function slotWidgetApp(slot) {
-        var l = filterApps(function(a) { return a.widgetUrl && a.widget_slot === slot && !a.error })
+        var l = filterApps(function(a) { return space.hasWidget(a) && a.widget_slot === slot && !a.error })
         return l.length ? l[0] : null
     }
     // 没指定位置的半宽小组件, 统一进「正在进行」
     function plainWidgetApps() {
-        return filterApps(function(a) { return a.widgetUrl && a.widget_size !== "hero" && !a.widget_slot && !a.error })
+        return filterApps(function(a) { return space.hasWidget(a) && a.widget_size !== "hero" && !a.widget_slot && !a.error })
     }
 
     function openById(id) {
@@ -233,7 +254,30 @@ Rectangle {
 
     function open(app) {
         if (app.error) { showToast(app.error); return }
-        if (!app.entryUrl) { launch(app); return }
+        // 有界面就挂界面, 没有才当外部程序。界面有两种形态: 明文的 entryUrl,
+        // 或编译发布的 module.main —— 后者包里没有 .qml, 判断时漏掉它就会被误当成
+        // "外部程序", 报"这个应用没有入口"。
+        if (!app.entryUrl && !(app.module && app.module.main)) { launch(app); return }
+        // 开发模式下先把列表拉一遍再开: 免缓存令牌是应用目录的改动时间, 存在列表里。
+        // 不重拉的话, 刚 scp 上去的 QML 用的还是进空间那一刻的旧令牌, URL 没变 → 引擎
+        // 直接给缓存里的旧版, 人在设备上退出应用再进也没用, 只能退出整个空间重来。
+        if (devMode && !app._fresh) {
+            request("GET", baseUrl + "/space/apps", null, function(st, r) {
+                if (st === 200 && r && r.apps) {
+                    apps = r.apps
+                    for (var i = 0; i < apps.length; ++i)
+                        if (apps[i].id === app.id) {
+                            var a = apps[i]
+                            a._fresh = true      // 防止递归
+                            space.open(a)
+                            return
+                        }
+                }
+                app._fresh = true
+                space.open(app)
+            })
+            return
+        }
         if (app.service) {
             busyText = "正在启动 " + app.name + " 的后台…"
             request("POST", baseUrl + "/space/apps/" + app.id + "/service/start", null, function(st, r) {
@@ -262,6 +306,35 @@ Rectangle {
             request("POST", baseUrl + "/space/apps/" + app.id + "/service/stop", null, null)
     }
 
+    // 为编译发布的应用造一个 Component。
+    //
+    // 编译之后包里没有 .qml 文件, createComponent 无从下手, 只能靠 import 模块名。
+    // 包一层 Component 而不是直接 createQmlObject 出对象, 是为了和明文那条路接口一致 ——
+    // 后面都走 createObject(appHost, {space: api}), 让 space 在对象构造时就位。应用的
+    // 属性初始化 (如 dir: "file://" + space.appDir) 依赖这一点, 事后再赋值就晚了。
+    function moduleComponent(app) {
+        var uri = app.module.uri, type = app.module.main
+        // 分步打点: 模块出问题时整个界面会卡住, 卡住前没有任何输出的话根本不知道
+        // 停在哪一步 —— 是 import 解析、plugin 加载, 还是实例化。
+        console.warn("[space] 模块 " + uri + "." + type + " 开始 import")
+        try {
+            // 用数组 join 拼多行 QML, 不写字符串里的换行转义 —— 之前那版把转义符写成了
+            // 真实换行, JS 字符串字面量跨行是畸形的, 结果 Qt 解析时主线程 100% 空转、
+            // 界面全卡死, 连 "import 完成" 都打不出来 (实验 2~5 全中)。
+            // 第三个参数是解析这段 QML 的基准 URL, 必须合法; 原来传的 "module:<uri>"
+            // 是自造 scheme, 一并换成外壳自己的 URL。
+            var src = ['import QtQuick', 'import ' + uri,
+                       'Component { ' + type + ' { } }'].join('\n')
+            var r = Qt.createQmlObject(src, space, Qt.resolvedUrl("Space.qml"))
+            console.warn("[space] 模块 " + uri + " import 完成, Component 已就绪")
+            return r
+        } catch (e) {
+            // 最常见的是模块没装到 QML_IMPORT_PATH 指的目录, 或者 .so 架构不对
+            return { status: Component.Error,
+                     errorString: function () { return "加载模块 " + uri + " 失败: " + e } }
+        }
+    }
+
     function mount(app, serviceUrl) {
         unmount()
         api.appId = app.id
@@ -275,13 +348,21 @@ Rectangle {
         chrome = true
         appError = ""
         current = app
-        var c = Qt.createComponent(bust(app.entryUrl, app.rev))
+        // 两种发布形态:
+        //   明文: entryUrl 指向应用目录里的 .qml, 直接 createComponent
+        //   编译: manifest 声明 module, 包里只有 .so —— 用一段即时 QML 去 import 它。
+        //        模块装在固定的 qmlmods 目录, 由 xochitl 的 QML_IMPORT_PATH 指过去。
+        var c = app.module && app.module.main
+                ? moduleComponent(app)
+                : Qt.createComponent(bust(app.entryUrl, app.rev))
         if (c.status === Component.Error) {
             appError = c.errorString()
             console.log("[space] 应用 " + app.id + " 加载失败: " + appError)
             return
         }
+        console.warn("[space] " + app.id + " 开始实例化")
         var obj = c.createObject(appHost, { "space": api })
+        console.warn("[space] " + app.id + " 实例化返回, space 注入=" + (obj && obj.space ? "成功" : "失败"))
         if (!obj) {
             appError = "createObject 失败: " + c.errorString()
             console.log("[space] 应用 " + app.id + " 创建失败: " + c.errorString())
@@ -344,8 +425,11 @@ Rectangle {
     // 挂载小组件: 与打开应用同一条路径 (createObject 时父项与初始属性都已就位)
     function mountWidget(host, app) {
         if (host.wItem) { host.wItem.destroy(); host.wItem = null }
-        if (!app || !app.widgetUrl) return
-        var c = Qt.createComponent(bust(app.widgetUrl, app.rev))
+        var compiled = app && app.module && app.module.widget
+        if (!app || (!app.widgetUrl && !compiled)) return
+        var c = compiled
+                ? moduleComponent({ module: { uri: app.module.uri, main: app.module.widget } })
+                : Qt.createComponent(bust(app.widgetUrl, app.rev))
         if (c.status === Component.Error) { console.log("[space] 小组件 " + app.id + ": " + c.errorString()); return }
         var o = c.createObject(host, { "space": api, "app": app })
         if (o) host.wItem = o
@@ -376,7 +460,7 @@ Rectangle {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: space.px(72)
+        height: space.vpx(72)
         IconButton {
             anchors.top: parent.top
             anchors.topMargin: 10
@@ -391,7 +475,7 @@ Rectangle {
         id: appTitleText
         visible: space.chrome && space.current !== null
         anchors.top: appNav.bottom
-        anchors.topMargin: space.px(56)
+        anchors.topMargin: space.vpx(56)
         anchors.left: parent.left
         anchors.leftMargin: space.margin
         text: space.current ? (space.appTitle || space.current.name) : ""
@@ -410,7 +494,7 @@ Rectangle {
         anchors.rightMargin: space.margin
         // 副标题已去掉 (2026-10-03)。高度 = 标题底 + 24:
         // 标题 y 42 + 标题高 ~78 = 120, 再留 24。省下的 72 给首页大卡。
-        height: space.px(144)
+        height: space.vpx(144)
         // 返回只留一个 "<" 并入标题行: 原来单占一行加"返回"二字, 白吃 70px,
         // 又与整页的克制气质不搭。退出空间在设置里也有一条, 这里是一步直达。
         // < 不是主角: 挪到内容边距之外、贴近屏幕左沿, 把内容左边界让给标题,
@@ -430,7 +514,7 @@ Rectangle {
         Text {
             id: pageTitle
             x: 0
-            y: space.px(42)
+            y: space.vpx(42)
             text: space.tabTitle()
             font.pixelSize: space.fpx(56)
             font.weight: Font.Medium
@@ -476,30 +560,30 @@ Rectangle {
     Item {
         id: content
         anchors.top: !space.chrome ? parent.top : (space.current ? appTitleText.bottom : pageHeader.bottom)
-        anchors.topMargin: !space.chrome ? 0 : (space.current ? space.px(48) : 0)
+        anchors.topMargin: !space.chrome ? 0 : (space.current ? space.vpx(48) : 0)
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: (space.chrome && space.current === null) ? tabBar.top : parent.bottom
         anchors.leftMargin: space.chrome ? space.margin : 0
         anchors.rightMargin: space.chrome ? space.margin : 0
-        anchors.bottomMargin: space.chrome ? space.px(24) : 0
+        anchors.bottomMargin: space.chrome ? space.vpx(24) : 0
 
         // ── 空间 (首页) ──
         Flickable {
             visible: space.current === null && space.tab === "home"
             anchors.fill: parent
             contentWidth: width
-            contentHeight: homeCol.height + space.px(24)   // 底部留白与块间距一致
+            contentHeight: homeCol.height + space.vpx(24)   // 底部留白与块间距一致
             clip: true
             ColumnLayout {
                 id: homeCol
                 width: parent.width
-                spacing: space.px(24)
+                spacing: space.vpx(24)
 
                 // 顶部大卡: 日期 + 时间; 装了 hero 小组件 (如天气) 则由它整卡接管
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: space.px(562)   // 副标题省下的高度匀给插图
+                    Layout.preferredHeight: space.vpx(562)   // 副标题省下的高度匀给插图
                     radius: 12
                     border.color: "#B4AFA6"
                     border.width: 1
@@ -542,16 +626,16 @@ Rectangle {
                     Layout.fillWidth: true
                     columns: 2
                     columnSpacing: space.px(24)
-                    rowSpacing: space.px(24)
+                    rowSpacing: space.vpx(24)
 
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: space.px(350)
+                        Layout.preferredHeight: space.vpx(350)
                         radius: 12; border.color: "#B4AFA6"; border.width: 1; color: "white"; clip: true
                         readonly property var planApp: space.slotWidgetApp("plan")
 
                         Column {
-                            anchors.fill: parent; anchors.margins: space.px(22); spacing: space.px(12)
+                            anchors.fill: parent; anchors.margins: space.px(22); spacing: space.vpx(12)
                             visible: parent.planApp === null
                             Text { text: "今日计划"; font.pixelSize: space.fpx(28); font.weight: Font.Medium; color: "#000000" }
                             Text {
@@ -577,18 +661,18 @@ Rectangle {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: space.px(350)
+                        Layout.preferredHeight: space.vpx(350)
                         radius: 12; border.color: "#B4AFA6"; border.width: 1; color: "white"; clip: true
                         readonly property bool hasRecent: space.recentDoc !== null
                         readonly property bool hasHalf: space.plainWidgetApps().length > 0
 
                         Column {
-                            anchors.fill: parent; anchors.margins: space.px(22); spacing: space.px(10)
+                            anchors.fill: parent; anchors.margins: space.px(22); spacing: space.vpx(10)
                             Text { text: "正在进行"; font.pixelSize: space.fpx(28); font.weight: Font.Medium; color: "#000000" }
 
                             Item {
                                 width: parent.width
-                                height: space.px(92)
+                                height: space.vpx(92)
                                 visible: parent.parent.hasRecent
                                 Image {
                                     id: bookIcon
@@ -602,7 +686,7 @@ Rectangle {
                                     anchors.left: bookIcon.right; anchors.leftMargin: space.px(16)
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
-                                    spacing: space.px(8)
+                                    spacing: space.vpx(8)
                                     Text {
                                         width: parent.width
                                         text: space.recentDoc ? space.recentDoc.name : ""
@@ -637,7 +721,7 @@ Rectangle {
                                 delegate: Item {
                                     required property var modelData
                                     width: parent.width
-                                    height: space.px(92)
+                                    height: space.vpx(92)
                                     property var wItem: null
                                     Component.onCompleted: space.mountWidget(this, modelData)
                                 }
@@ -677,14 +761,14 @@ Rectangle {
                     id: homeGrid
                     Layout.fillWidth: true
                     columns: space.cols(width, 200)
-                    rowSpacing: space.px(24)
+                    rowSpacing: space.vpx(24)
                     columnSpacing: space.px(24)
                     Repeater {
                         model: space.homeApps()
                         delegate: Kit.STile {
                             required property var modelData
                             Layout.fillWidth: true
-                            Layout.preferredHeight: space.px(170)
+                            Layout.preferredHeight: space.vpx(170)
                             iconSize: space.fpx(62)
                             labelSize: space.fpx(26)
                             iconSource: space.bust(modelData.iconUrl || "", modelData.rev)
@@ -701,20 +785,20 @@ Rectangle {
             visible: space.current === null && space.tab === "apps"
             anchors.fill: parent
             contentWidth: width
-            contentHeight: appsGrid.height + space.px(24)
+            contentHeight: appsGrid.height + space.vpx(24)
             clip: true
             GridLayout {
                 id: appsGrid
                 width: parent.width
                 columns: space.cols(width, 270)
-                rowSpacing: space.px(24)
+                rowSpacing: space.vpx(24)
                 columnSpacing: space.px(24)
                 Repeater {
                     model: space.userApps()
                     delegate: Kit.STile {
                         required property var modelData
                         Layout.fillWidth: true
-                        Layout.preferredHeight: space.px(220)
+                        Layout.preferredHeight: space.vpx(220)
                         iconSize: space.fpx(76)
                         labelSize: space.fpx(28)
                         iconSource: space.bust(modelData.iconUrl || "", modelData.rev)
@@ -731,7 +815,7 @@ Rectangle {
             visible: space.current === null && space.tab === "discover"
             anchors.fill: parent
             contentWidth: width
-            contentHeight: storeCol.height + space.px(24)
+            contentHeight: storeCol.height + space.vpx(24)
             clip: true
             ColumnLayout {
                 id: storeCol
@@ -739,8 +823,8 @@ Rectangle {
                 spacing: 0
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: space.px(150)
-                    Layout.bottomMargin: space.px(24)
+                    Layout.preferredHeight: space.vpx(150)
+                    Layout.bottomMargin: space.vpx(24)
                     radius: 12
                     color: "#f0f0f0"
                     Column {
@@ -773,7 +857,7 @@ Rectangle {
                         required property var modelData
                         readonly property string installed: space.installedVersion(modelData.id)
                         Layout.fillWidth: true
-                        Layout.preferredHeight: space.px(120)
+                        Layout.preferredHeight: space.vpx(120)
                         RowLayout {
                             anchors.fill: parent
                             spacing: space.px(20)
@@ -810,7 +894,7 @@ Rectangle {
             visible: space.current === null && space.tab === "settings"
             anchors.fill: parent
             contentWidth: width
-            contentHeight: mineCol.height + space.px(24)
+            contentHeight: mineCol.height + space.vpx(24)
             clip: true
             ColumnLayout {
                 id: mineCol
@@ -842,8 +926,8 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.leftMargin: 16
                     Layout.rightMargin: 16
-                    Layout.topMargin: space.px(10)
-                    Layout.bottomMargin: space.px(16)
+                    Layout.topMargin: space.vpx(10)
+                    Layout.bottomMargin: space.vpx(16)
                     text: "高清用文档那档波形，插画和灰阶更细腻，代价是每次操作慢一拍、进页面会留一层淡残影；"
                           + "快刷与系统界面同档，干脆利落。整个空间（含所有应用）统一生效。"
                     font.pixelSize: space.fpx(21)
@@ -885,7 +969,7 @@ Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: space.px(120)
+        height: space.vpx(120)
         color: "white"
         Rectangle { anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right; height: 1; color: "#B4AFA6" }
         RowLayout {
@@ -963,7 +1047,7 @@ Rectangle {
         Rectangle {
             anchors.centerIn: parent
             width: Math.min(parent.width - space.px(160), space.px(900))
-            height: confirmCol.implicitHeight + space.px(96)
+            height: confirmCol.implicitHeight + space.vpx(96)
             color: "white"
             radius: 12
             ColumnLayout {

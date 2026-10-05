@@ -91,12 +91,13 @@
 <body>
 <div class="card">
   <h1>上传到 reMarkable</h1>
-  <p class="subtitle">文档 / 字体 / 壁纸 / 应用</p>
+  <p class="subtitle">文档 / 字体 / 壁纸 / 音乐 / 应用</p>
 
   <div class="tabs">
     <div class="tab active" data-target="doc">文档</div>
     <div class="tab" data-target="font">字体</div>
     <div class="tab" data-target="screen">壁纸</div>
+    <div class="tab" data-target="music">音乐</div>
     <div class="tab" data-target="space">应用</div>
     <div class="tab" data-target="ai">AI</div>
   </div>
@@ -122,6 +123,14 @@
            accept=".png,image/png">
     <p class="hint">上传后到设备「高级」面板里选作休眠壁纸，下次休眠生效</p>
     <ul class="file-list" data-list="/screens"></ul>
+  </div>
+
+  <div class="panel" id="panel-music">
+    <label class="pick" for="file-music">🎵 选择音乐文件</label>
+    <input type="file" id="file-music" data-endpoint="/music"
+           accept=".mp3,.m4a,.flac,.wav,.ogg,audio/*" multiple>
+    <p class="hint">传到设备后在「音乐」应用里就能看到；mp3 支持最好，其余格式视解码器而定</p>
+    <ul class="file-list" data-list="/music"></ul>
   </div>
 
   <div class="panel" id="panel-space">

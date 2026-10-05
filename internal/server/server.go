@@ -38,7 +38,10 @@ const (
 var (
 	allowedFontExts   = map[string]struct{}{".ttf": {}, ".otf": {}}
 	allowedScreenExts = map[string]struct{}{".png": {}}
-	allowedDocExts    = map[string]struct{}{".pdf": {}, ".epub": {}}
+	// 音乐: mp3 是主力 (播放器是 mpg123), 另外几种放进来是因为手机分享出来的文件常是它们,
+	// 拦在门外用户只会困惑; 播不了的曲库里会标出来, 比传不进去好。
+	allowedMusicExts = map[string]struct{}{".mp3": {}, ".m4a": {}, ".flac": {}, ".wav": {}, ".ogg": {}}
+	allowedDocExts   = map[string]struct{}{".pdf": {}, ".epub": {}}
 )
 
 // Config 是构造服务器需要的所有可配项.
@@ -46,6 +49,7 @@ type Config struct {
 	StaticDir      string // 静态资源目录 (qr.html)
 	FontsDir       string // 字体存放目录
 	ScreensDir     string // 锁屏图存放目录
+	MusicDir       string // 音乐存放目录 (音乐应用扫这里)
 	DocStagingDir  string // /documents 上传暂存目录 (librarian 会从此处复制)
 	FontsActiveDir string // 字体激活符号链接目录 (~/.local/share/fonts)
 	XochitlConf    string // xochitl 配置路径 (~/.config/remarkable/xochitl.conf)
@@ -53,6 +57,7 @@ type Config struct {
 	SpaceDir     string
 	SpaceUserDir string
 	SpaceDataDir string
+	SpaceModDir  string // 编译发布的应用的 QML 模块目录 (要与 xochitl 的 QML_IMPORT_PATH 一致)
 	SpaceBaseURL string // 告诉应用后台 upload-server 在哪
 	SpaceStore   string // 应用商店索引 URL (空 = 不提供)
 }
@@ -63,14 +68,15 @@ type Server struct {
 }
 
 func New(cfg Config) (*Server, error) {
-	for _, d := range []string{cfg.FontsDir, cfg.ScreensDir, cfg.DocStagingDir} {
+	for _, d := range []string{cfg.FontsDir, cfg.ScreensDir, cfg.DocStagingDir, cfg.MusicDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("mkdir %s: %w", d, err)
 		}
 	}
 	s := &Server{cfg: cfg}
 	if cfg.SpaceDir != "" {
-		s.space = space.New(filepath.Join(cfg.SpaceDir, "apps"), cfg.SpaceUserDir, cfg.SpaceDataDir, deviceArch(), cfg.SpaceBaseURL)
+		s.space = space.New(filepath.Join(cfg.SpaceDir, "apps"), cfg.SpaceUserDir, cfg.SpaceDataDir,
+			cfg.SpaceModDir, deviceArch(), cfg.SpaceBaseURL)
 		s.space.StoreURL = cfg.SpaceStore
 	}
 	return s, nil
@@ -79,7 +85,7 @@ func New(cfg Config) (*Server, error) {
 // Space 暴露启动台后端 (main 用它做自启; 没配置时返回空实现, 调用安全)。
 func (s *Server) Space() *space.Handler {
 	if s.space == nil {
-		return space.New("", "", "", deviceArch(), "")
+		return space.New("", "", "", "", deviceArch(), "")
 	}
 	return s.space
 }
@@ -110,6 +116,9 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("GET /screens", s.listScreens)
 	mux.HandleFunc("POST /screens", s.uploadScreen)
+	mux.HandleFunc("GET /music", s.listMusic)
+	mux.HandleFunc("POST /music", s.uploadMusic)
+	mux.HandleFunc("DELETE /music/{name}", s.deleteMusic)
 	mux.HandleFunc("DELETE /screens/{name}", s.deleteScreen)
 	mux.HandleFunc("GET /screens/active", s.activeScreen)
 	mux.HandleFunc("POST /screens/{name}/apply", s.applyScreen)
@@ -345,6 +354,42 @@ func (s *Server) uploadFont(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"name": name, "size": size})
+}
+
+// ---- 音乐 ----
+//
+// 音乐本身是第三方应用, 外壳按说不该认识它。这里仍放通用上传页, 是因为扫码上传是
+// 手机侧唯一的入口 —— 不然传首歌还得开电脑 scp。落点就是音乐应用扫的那个目录。
+// 等上传页支持"按应用清单发现可上传的应用"之后, 这段可以收掉。
+
+func (s *Server) listMusic(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, listFiles(s.cfg.MusicDir, allowedMusicExts))
+}
+
+func (s *Server) uploadMusic(w http.ResponseWriter, r *http.Request) {
+	name, size, ok := saveUpload(w, r, s.cfg.MusicDir, allowedMusicExts, ".mp3 / .m4a / .flac / .wav / .ogg")
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"name": name, "size": size})
+}
+
+func (s *Server) deleteMusic(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	target, err := safeJoin(s.cfg.MusicDir, name)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := os.Remove(target); err != nil {
+		if os.IsNotExist(err) {
+			httpError(w, http.StatusNotFound, "文件不存在")
+			return
+		}
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": filepath.Base(name)})
 }
 
 func (s *Server) deleteFont(w http.ResponseWriter, r *http.Request) {

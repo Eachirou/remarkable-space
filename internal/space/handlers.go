@@ -42,12 +42,17 @@ type Handler struct {
 const storeCacheTTL = 10 * time.Minute
 
 // New 组装默认的注册表 + 托管器。
-func New(builtinDir, userDir, dataDir, arch, baseURL string) *Handler {
-	for _, d := range []string{userDir, dataDir} {
-		_ = os.MkdirAll(d, 0o755)
+// New 建后端。moduleDir 放编译发布的应用的 QML 模块, 必须与 xochitl 的 QML_IMPORT_PATH
+// 一致 —— 那个环境变量是启动时定下的, 装应用时改不了。
+func New(builtinDir, userDir, dataDir, moduleDir, arch, baseURL string) *Handler {
+	for _, d := range []string{userDir, dataDir, moduleDir} {
+		if d != "" {
+			_ = os.MkdirAll(d, 0o755)
+		}
 	}
 	return &Handler{
-		Reg: &Registry{BuiltinDir: builtinDir, UserDir: userDir, DataDir: dataDir, Arch: arch},
+		Reg: &Registry{BuiltinDir: builtinDir, UserDir: userDir, DataDir: dataDir,
+			ModuleDir: moduleDir, Arch: arch},
 		Sup: NewSupervisor(baseURL),
 	}
 }
