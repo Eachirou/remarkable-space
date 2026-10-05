@@ -25,6 +25,7 @@ import (
 // 这里没有、也不该有任何具体应用的路由: 天气的地图合成一度挂在这儿, 那意味着外壳认识
 // "weather" 这个应用 —— 它一旦能装能删, 删掉之后后端还留着四个专用路由。现在天气和音乐
 // 一样自带后端 (weather-server), 空间只按清单把它拉起来, 不关心它干什么。
+//
 //	DELETE /space/apps/{id}                 卸载 (仅用户目录)
 //	GET    /space/apps/{id}/service         后台状态
 //	POST   /space/apps/{id}/service/start   拉起后台 (就绪后返回)
@@ -37,6 +38,10 @@ type Handler struct {
 	Sup *Supervisor
 	// 应用商店索引地址 (JSON, 见 space/README.md "应用商店"); 空 = 不提供商店
 	StoreURL string
+	// 取索引时附带的客户端标识, 放在 X-Space-Key 头里。官方商店的 nginx 认这个头,
+	// 不带就 404 —— 用浏览器直接打开索引地址看不到东西。空 = 不带这个头,
+	// 自建商店 (和本地开发) 不受影响。值在编译期用 -ldflags -X 注进 storeKey, 不进仓库。
+	StoreKey string
 
 	storeMu   sync.Mutex
 	storeAt   time.Time
@@ -58,8 +63,22 @@ func New(builtinDir, userDir, dataDir, moduleDir, arch, baseURL string) *Handler
 	return &Handler{
 		Reg: &Registry{BuiltinDir: builtinDir, UserDir: userDir, DataDir: dataDir,
 			ModuleDir: moduleDir, Arch: arch},
-		Sup: NewSupervisor(baseURL),
+		Sup:      NewSupervisor(baseURL),
+		StoreKey: defaultStoreKey(),
 	}
+}
+
+// storeKey 是官方商店的客户端标识, 由编译期注入 (make STORE_KEY=...), 仓库里恒为空字符串 ——
+// 它不是秘密学意义上的密钥, 只是一道"别用浏览器直接翻索引"的门: 二进制在用户手里,
+// strings 或抓包都能取到。真要防白嫖得在下载环节做授权, 不在这儿。
+var storeKey string
+
+// 环境变量优先, 这样换密钥不必重新发一版二进制 —— 在 xochitl 的 drop-in 里加一行就行。
+func defaultStoreKey() string {
+	if v := os.Getenv("SPACE_STORE_KEY"); v != "" {
+		return v
+	}
+	return storeKey
 }
 
 // Mount 注册路由。
@@ -139,7 +158,15 @@ func (h *Handler) store(w http.ResponseWriter, r *http.Request) {
 	defer h.storeMu.Unlock()
 	if h.storeBody == nil || time.Since(h.storeAt) > storeCacheTTL || r.URL.Query().Get("refresh") == "1" {
 		client := &http.Client{Timeout: 15 * time.Second}
-		resp, err := client.Get(h.StoreURL)
+		req, err := http.NewRequest(http.MethodGet, h.StoreURL, nil)
+		if err != nil {
+			fail(w, http.StatusBadGateway, "商店地址无效: "+err.Error())
+			return
+		}
+		if h.StoreKey != "" {
+			req.Header.Set("X-Space-Key", h.StoreKey)
+		}
+		resp, err := client.Do(req)
 		if err != nil {
 			fail(w, http.StatusBadGateway, "连不上应用商店: "+err.Error())
 			return
@@ -147,7 +174,11 @@ func (h *Handler) store(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 		resp.Body.Close()
 		if err != nil || resp.StatusCode != http.StatusOK || !json.Valid(body) {
-			fail(w, http.StatusBadGateway, "应用商店索引无效 (HTTP "+strconv.Itoa(resp.StatusCode)+")")
+			msg := "应用商店索引无效 (HTTP " + strconv.Itoa(resp.StatusCode) + ")"
+			if resp.StatusCode == http.StatusNotFound {
+				msg = "应用商店拒绝了这次请求 (HTTP 404): 这个版本没有商店密钥, 或密钥已经换了"
+			}
+			fail(w, http.StatusBadGateway, msg)
 			return
 		}
 		h.storeBody, h.storeAt = body, time.Now()
@@ -277,7 +308,7 @@ func (h *Handler) installURL(w http.ResponseWriter, r *http.Request) {
 		*p = Progress{ID: req.ID, Name: req.Name, Phase: "downloading"}
 	})
 	go func() {
-		app, err := h.Reg.InstallFromURL(req.URL, req.SHA256, h.Sup)
+		app, err := h.Reg.InstallFromURL(req.URL, req.SHA256, h.StoreKey, h.Sup)
 		setProgress(func(p *Progress) {
 			if err != nil {
 				p.Phase, p.Error = "error", err.Error()
