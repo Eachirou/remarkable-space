@@ -71,7 +71,12 @@ type Server struct {
 }
 
 func New(cfg Config) (*Server, error) {
+	// 空 = 这项功能不启用 (比如没配插图目录就没有首页插图库)。拿空串去 MkdirAll
+	// 会直接失败, 让整个后端因为一个可选目录起不来 —— 不值得。
 	for _, d := range []string{cfg.FontsDir, cfg.ScreensDir, cfg.DocStagingDir, cfg.MusicDir, cfg.HeroDir} {
+		if d == "" {
+			continue
+		}
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("mkdir %s: %w", d, err)
 		}

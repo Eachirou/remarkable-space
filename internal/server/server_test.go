@@ -27,6 +27,8 @@ func newTestServer(t *testing.T) (*Server, http.Handler, string) {
 		FontsDir:      filepath.Join(root, "fonts"),
 		ScreensDir:    filepath.Join(root, "screens"),
 		DocStagingDir: filepath.Join(root, "staging"),
+		MusicDir:      filepath.Join(root, "music"),
+		HeroDir:       filepath.Join(root, "hero"),
 	}
 	if err := os.MkdirAll(cfg.StaticDir, 0o755); err != nil {
 		t.Fatal(err)

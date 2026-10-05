@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManifestValidate(t *testing.T) {
@@ -160,15 +161,27 @@ func TestSupervisorStartStop(t *testing.T) {
 	if !st.Running || st.PID == 0 {
 		t.Fatalf("状态不对: %+v", st)
 	}
+	// 先等日志落盘再停。Start 返回时子进程刚 fork 出来, 那行 echo 未必执行到了 ——
+	// 原来在这里直接读, 机器稍忙就读到空文件, 随机失败。
+	logPath := filepath.Join(app.DataDir, "service.log")
+	deadline := time.Now().Add(3 * time.Second)
+	var logged []byte
+	for time.Now().Before(deadline) {
+		logged, _ = os.ReadFile(logPath)
+		if strings.Contains(string(logged), "started echo") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !strings.Contains(string(logged), "started echo") {
+		t.Errorf("日志没写到数据目录: %q", logged)
+	}
+
 	if err := sup.Stop("echo"); err != nil {
 		t.Fatalf("停止失败: %v", err)
 	}
 	if sup.Status("echo").Running {
 		t.Error("停止后仍 running")
-	}
-	b, _ := os.ReadFile(filepath.Join(app.DataDir, "service.log"))
-	if !strings.Contains(string(b), "started echo") {
-		t.Errorf("日志没写到数据目录: %q", b)
 	}
 }
 
