@@ -66,3 +66,27 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+// 端到端: 编译期 -X 注入的密钥要一路走到请求头上。
+// -X 的包路径或变量名写错时 Go 不报错、静默不注入, 光看编译通过发现不了,
+// 所以这条链得真的跑一遍。平时不带密钥编译时自动跳过。
+func TestInjectedKeyReachesRequest(t *testing.T) {
+	if storeKey == "" {
+		t.Skip("没有编译期注入的密钥, 跳过 (go test -ldflags \"-X ...storeKey=X\" 才测得到)")
+	}
+	var got string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Space-Key")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"apps":[]}`))
+	}))
+	defer up.Close()
+
+	h := New(t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir(), "aarch64", "http://127.0.0.1:1")
+	h.StoreURL = up.URL
+	h.store(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/space/store", nil))
+
+	if got != storeKey {
+		t.Fatalf("请求头里的密钥 = %q, 想要 %q (注入没生效, 或 New 没把它接上)", got, storeKey)
+	}
+}
