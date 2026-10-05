@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -63,6 +64,52 @@ func (r *Registry) InstallZip(zr *zip.Reader, sup *Supervisor) (App, error) {
 }
 
 // InstallFromURL 下载应用包再安装; sha256hex 非空时校验摘要。
+// Progress 是一次安装的进度。设备上一次只装一个应用, 所以全局一份就够。
+//
+// 为什么要它: 下载几 MB 在设备的 Wi-Fi 上可能十几秒, 期间界面只能干等 —— 用户不知道
+// 是在下载、卡住了, 还是已经失败。墨水屏刷新慢, 不适合跑动画, 给个百分比数字最合适。
+type Progress struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Phase string `json:"phase"` // downloading / installing / done / error
+	Got   int64  `json:"got"`
+	Total int64  `json:"total"` // 0 = 服务器没给 Content-Length
+	Error string `json:"error,omitempty"`
+}
+
+var (
+	progMu sync.Mutex
+	prog   Progress
+)
+
+// InstallProgress 读当前安装进度 (没有任务时 Phase 为空)。
+func InstallProgress() Progress {
+	progMu.Lock()
+	defer progMu.Unlock()
+	return prog
+}
+
+func setProgress(f func(*Progress)) {
+	progMu.Lock()
+	defer progMu.Unlock()
+	f(&prog)
+}
+
+// countingReader 边读边记字节数, 供进度查询。
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	if n > 0 {
+		c.n += int64(n)
+		setProgress(func(p *Progress) { p.Got = c.n })
+	}
+	return n, err
+}
+
 func (r *Registry) InstallFromURL(url, sha256hex string, sup *Supervisor) (App, error) {
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Get(url)
@@ -73,6 +120,7 @@ func (r *Registry) InstallFromURL(url, sha256hex string, sup *Supervisor) (App, 
 	if resp.StatusCode != http.StatusOK {
 		return App{}, fmt.Errorf("下载失败: HTTP %d", resp.StatusCode)
 	}
+	setProgress(func(p *Progress) { p.Total = resp.ContentLength; p.Phase = "downloading" })
 	tmp, err := os.CreateTemp("", "space-app-*.zip")
 	if err != nil {
 		return App{}, err
@@ -80,7 +128,8 @@ func (r *Registry) InstallFromURL(url, sha256hex string, sup *Supervisor) (App, 
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(resp.Body, maxAppBytes+1))
+	cr := &countingReader{r: io.LimitReader(resp.Body, maxAppBytes+1)}
+	n, err := io.Copy(io.MultiWriter(tmp, h), cr)
 	if err != nil {
 		return App{}, fmt.Errorf("下载失败: %w", err)
 	}
@@ -90,6 +139,9 @@ func (r *Registry) InstallFromURL(url, sha256hex string, sup *Supervisor) (App, 
 	if sha256hex != "" && !strings.EqualFold(hex.EncodeToString(h.Sum(nil)), sha256hex) {
 		return App{}, errors.New("应用包 sha256 校验不通过")
 	}
+	// 下完了, 后面是校验+解包+搬模块。这几步在设备上也要一两秒 (模块包有好几 MB),
+	// 界面上得换个说法, 不然进度卡在 100% 不动会让人以为死了。
+	setProgress(func(p *Progress) { p.Phase = "installing" })
 	zr, err := zip.NewReader(tmp, n)
 	if err != nil {
 		return App{}, fmt.Errorf("不是合法 zip: %w", err)

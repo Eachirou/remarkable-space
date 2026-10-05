@@ -224,13 +224,46 @@ Rectangle {
         })
     }
 
+    // 安装在后端后台跑, 这边轮询进度。下载几 MB 在设备的 Wi-Fi 上要十几秒, 同步等的话
+    // 界面只能干等, 用户分不出是在下载还是卡住了。
+    // 墨水屏不跑动画 —— 每次重绘都是实打实的屏幕刷新, 进度条滚起来既慢又闪, 给个百分比
+    // 数字最省事; 轮询间隔 1.2 秒也是这个道理, 太密了屏幕一直在抖。
     function installFromStore(item) {
-        busyText = "正在安装 " + item.name + "…"
-        request("POST", baseUrl + "/space/apps/install-url", { url: item.zip, sha256: item.sha256 || "" }, function(st, r) {
-            busyText = ""
-            if (st !== 200) { showToast((r && r.error) ? r.error : ("安装失败 (" + st + ")")); return }
-            showToast(item.name + " 已安装")
-            reload()
+        busyText = "正在下载 " + item.name + "…"
+        request("POST", baseUrl + "/space/apps/install-url",
+                { url: item.zip, sha256: item.sha256 || "", id: item.id, name: item.name },
+                function (st, r) {
+                    if (st !== 200 && st !== 202) {
+                        busyText = ""
+                        showToast((r && r.error) ? r.error : ("安装失败 (" + st + ")"))
+                        return
+                    }
+                    installPoll.restart()
+                })
+    }
+
+    Timer {
+        id: installPoll
+        interval: 1200
+        repeat: true
+        onTriggered: space.request("GET", space.baseUrl + "/space/apps/install-progress", null,
+                                   function (st, p) {
+            if (st !== 200 || !p) return
+            if (p.phase === "downloading") {
+                // 服务器没给 Content-Length 时只报已下多少, 别显示一个假的百分比
+                space.busyText = p.total > 0
+                        ? "正在下载 " + p.name + "… " + Math.round(p.got * 100 / p.total) + "%"
+                        : "正在下载 " + p.name + "… " + (p.got / 1048576).toFixed(1) + " MB"
+                return
+            }
+            if (p.phase === "installing") { space.busyText = "正在安装 " + p.name + "…"; return }
+            installPoll.stop()
+            space.busyText = ""
+            if (p.phase === "error") { space.showToast(p.error || "安装失败"); return }
+            if (p.phase === "done") {
+                space.showToast((p.name || "应用") + " 已安装")
+                space.reload()
+            }
         })
     }
 
@@ -616,21 +649,29 @@ Rectangle {
                     Item {
                         anchors.fill: parent
                         visible: space.heroWidgetApp() === null
+                        // 没装 hero 小组件 (比如天气被删掉了) 时的默认样子: 一幅山水垫底,
+                        // 日期时间压在上面。素材是 2:1 的横幅, 贴着底边按原比例铺开 ——
+                        // 上面留出的白正好垫文字, 两者不重叠, 所以不需要蒙版或渐隐。
+                        Image {
+                            id: heroArt
+                            anchors.bottom: parent.bottom
+                            anchors.left: parent.left; anchors.right: parent.right
+                            height: Math.min(parent.height, Math.round(parent.width / 2))
+                            source: space.kitDir + "/images/hero-default.jpg"
+                            fillMode: Image.PreserveAspectCrop
+                            // 解码到实际显示尺寸, 别按原图 1200 宽解了再缩 —— 墨水屏上白费内存
+                            sourceSize.width: width
+                            visible: status === Image.Ready
+                        }
                         Column {
                             anchors.left: parent.left
                             anchors.leftMargin: space.px(32)
-                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.top: parent.top
+                            anchors.topMargin: space.vpx(40)
                             spacing: 8
                             Text { text: space.dateLine(); font.pixelSize: space.fpx(26); color: "#262626" }
                             Text { text: Qt.formatTime(space.localNow(), "HH:mm"); font.pixelSize: space.fpx(88); font.weight: Font.Light }
                             Text { text: "今天也是安静的一天。"; font.pixelSize: space.fpx(22); color: "#26251F" }
-                        }
-                        Rectangle {
-                            anchors.right: parent.right
-                            anchors.rightMargin: space.px(40)
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: space.px(120); height: width; radius: width / 2
-                            color: "#e4e4e4"
                         }
                     }
                     Item {

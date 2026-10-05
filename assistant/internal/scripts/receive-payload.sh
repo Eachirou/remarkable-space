@@ -10,6 +10,11 @@
            /home/root/xovi/exthome/qt-resource-rebuilder
   # --no-same-owner 防止 tar 把 macOS 端打包时的 uid (xurx=502) 还原到设备文件,
   # 否则 /home/root owner 被改成 502 导致 sshd PAM/xochitl home 访问全卡死, 设备砖机
+  # 内置应用目录完全由安装器管, 先清空再解包 —— tar 只覆盖同名文件, 不会删已经移走的。
+  # 应用从内置挪到商店后 (五个小游戏就是这么挪的), 老设备上的内置副本会一直留着:
+  # 用户从商店装了新版再删掉, 内置那份又冒出来, 看着就是"删不掉"。
+  # 用户自己装的在 ~/.local/share/.../apps, 不在这里, 清空伤不到。
+  rm -rf /home/root/rmkit-cn/space/apps
   cd / && tar -xzf - --no-same-owner --no-same-permissions
   # 兜底: 把 rmkit 自己投放的目录 owner 设回 root, 防御任何残留 502。
   # 只限 rmkit/xovi 路径, 绝不 -R 整个 /home/root: 单槽 Android 的系统与 /data 也在 /home/root 下,

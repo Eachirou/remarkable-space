@@ -212,8 +212,7 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	// 它自己带上传/蓝牙/字体锁屏图/AI/截图/二维码, 外加空间的注册表与绿色安装。
 	add(spaceBase+"/space-server", "space-dist/"+ar.spaceBin, 0o755)
 	add(spaceBase+"/static/qr.html", "space/static/qr.html", 0o644)
-	// 天气地图的 Natural Earth 矢量底图; 后端按"二进制同目录"找它
-	add(spaceBase+"/geo.json", "space/geo.json", 0o644)
+
 	// install.sh 496-502: qmd/
 	add(base+"/qmd/pinyin_interceptor.qmd", "qmd/pinyin_interceptor.qmd", 0o644)
 	add(base+"/qmd/zh_CN.rcc", "qmd/zh_CN.rcc", 0o644)

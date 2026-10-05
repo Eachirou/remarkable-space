@@ -34,12 +34,16 @@ echo "→ 推外壳与内置应用"
 ssh $SSHOPT "$D" "mkdir -p /home/root/rmkit-cn/space /home/root/remarkable-space \
                   /home/root/.local/share/rmkit-cn/space/apps \
                   /home/root/.local/share/rmkit-cn/space/data"
-tar -C "$HERE" -cf - shell kit apps | ssh $SSHOPT "$D" "tar -C /home/root/rmkit-cn/space -xf -"
+# 先清空内置应用目录再解包: 这个目录完全由安装器管, tar 只会覆盖同名文件、不会删
+# 已经移走的。应用从内置挪到商店之后 (五个小游戏就是这么挪的), 老设备上的内置副本
+# 会一直留着 —— 用户从商店装了新版、再删掉, 内置那份又冒出来, 看着就是"删不掉",
+# 再删一次还会收到"内置应用随 rmkit-cn 一起管理"。
+# 用户自己装的应用在 ~/.local/share/.../apps, 不在这里, 清空伤不到。
+tar -C "$HERE" -cf - shell kit apps | ssh $SSHOPT "$D" "rm -rf /home/root/rmkit-cn/space/apps && tar -C /home/root/rmkit-cn/space -xf -"
 
-echo "→ 推后端 / 静态页 / 矢量底图"
+echo "→ 推后端与静态页"
 tar -C "$HERE" -cf - static | ssh $SSHOPT "$D" "tar -C /home/root/remarkable-space -xf -"
 scp $SSHOPT "$HERE/dist/$BIN" "$D:/home/root/remarkable-space/space-server.new"
-scp $SSHOPT "$HERE/data/geo.json" "$D:/home/root/remarkable-space/geo.json"
 scp $SSHOPT "$HERE/systemd/remarkable-space.service" "$D:/tmp/remarkable-space.service"
 scp $SSHOPT "$HERE/systemd/zz-space.conf" "$D:/tmp/zz-space.conf"
 

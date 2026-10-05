@@ -19,7 +19,12 @@ import (
 //
 //	GET    /space/apps                      应用列表 (外壳首页 / 手机管理页共用)
 //	POST   /space/apps                      上传 zip 安装 (multipart 字段 file, 或 body 直接是 zip)
-//	POST   /space/apps/install-url          {"url": ..., "sha256": ...} 从网址安装 (应用商店用)
+//	POST   /space/apps/install-url          {"url": ..., "sha256": ...} 从网址安装 (应用商店用; 后台跑, 立即返回)
+//	GET    /space/apps/install-progress     查上面那次安装的进度
+//
+// 这里没有、也不该有任何具体应用的路由: 天气的地图合成一度挂在这儿, 那意味着外壳认识
+// "weather" 这个应用 —— 它一旦能装能删, 删掉之后后端还留着四个专用路由。现在天气和音乐
+// 一样自带后端 (weather-server), 空间只按清单把它拉起来, 不关心它干什么。
 //	DELETE /space/apps/{id}                 卸载 (仅用户目录)
 //	GET    /space/apps/{id}/service         后台状态
 //	POST   /space/apps/{id}/service/start   拉起后台 (就绪后返回)
@@ -62,6 +67,7 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /space/apps", h.list)
 	mux.HandleFunc("POST /space/apps", h.installUpload)
 	mux.HandleFunc("POST /space/apps/install-url", h.installURL)
+	mux.HandleFunc("GET /space/apps/install-progress", h.installProgressHandler)
 	mux.HandleFunc("DELETE /space/apps/{id}", h.uninstall)
 	mux.HandleFunc("GET /space/apps/{id}/service", h.serviceStatus)
 	mux.HandleFunc("POST /space/apps/{id}/service/start", h.serviceStart)
@@ -70,10 +76,6 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /space/apps/{id}/data/{key}", h.dataPut)
 	mux.HandleFunc("GET /space/store", h.store)
 	mux.HandleFunc("GET /space/recent", h.recent)
-	mux.HandleFunc("GET /space/weather/map", h.weatherMap)
-	mux.HandleFunc("GET /space/weather/map/frames", h.weatherMapFrames)
-	mux.HandleFunc("GET /space/weather/map/hours", h.weatherRainHours)
-	mux.HandleFunc("GET /space/weather/map/cities", h.weatherMapCities)
 }
 
 var dataKeyRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
@@ -258,17 +260,38 @@ func (h *Handler) installURL(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL    string `json:"url"`
 		SHA256 string `json:"sha256"`
+		ID     string `json:"id"`   // 仅用于进度显示
+		Name   string `json:"name"` // 同上
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
 		fail(w, http.StatusBadRequest, "需要 {\"url\": ...}")
 		return
 	}
-	app, err := h.Reg.InstallFromURL(req.URL, req.SHA256, h.Sup)
-	if err != nil {
-		fail(w, http.StatusBadGateway, err.Error())
+	// 后台装, 立刻返回 —— 下载几 MB 在设备上要十几秒, 同步等的话界面只能干等, 连
+	// "在下载" 还是 "卡住了" 都分不出。前端拿 /space/apps/install-progress 轮询。
+	if p := InstallProgress(); p.Phase == "downloading" || p.Phase == "installing" {
+		fail(w, http.StatusConflict, "正在安装 "+p.Name+", 等它装完再来")
 		return
 	}
-	writeJSON(w, http.StatusOK, app)
+	setProgress(func(p *Progress) {
+		*p = Progress{ID: req.ID, Name: req.Name, Phase: "downloading"}
+	})
+	go func() {
+		app, err := h.Reg.InstallFromURL(req.URL, req.SHA256, h.Sup)
+		setProgress(func(p *Progress) {
+			if err != nil {
+				p.Phase, p.Error = "error", err.Error()
+				return
+			}
+			p.Phase, p.ID, p.Name = "done", app.ID, app.Name
+		})
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
+}
+
+// installProgressHandler 给前端轮询用。设备上一次只装一个, 所以是全局单任务。
+func (h *Handler) installProgressHandler(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, InstallProgress())
 }
 
 func (h *Handler) uninstall(w http.ResponseWriter, r *http.Request) {
