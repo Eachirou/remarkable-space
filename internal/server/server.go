@@ -57,12 +57,13 @@ type Config struct {
 	FontsActiveDir string // 字体激活符号链接目录 (~/.local/share/fonts)
 	XochitlConf    string // xochitl 配置路径 (~/.config/remarkable/xochitl.conf)
 	// 「空间 (SPACE)」启动台: 内置应用目录 (安装器管理) / 用户应用目录 (绿色安装) / 应用数据目录
-	SpaceDir     string
-	SpaceUserDir string
-	SpaceDataDir string
-	SpaceModDir  string // 编译发布的应用的 QML 模块目录 (要与 xochitl 的 QML_IMPORT_PATH 一致)
-	SpaceBaseURL string // 告诉应用后台 upload-server 在哪
-	SpaceStore   string // 应用商店索引 URL (空 = 不提供)
+	SpaceDir      string
+	SpaceUserDir  string
+	SpaceDataDir  string
+	SpaceModDir   string // 编译发布的应用的 QML 模块目录 (要与 xochitl 的 QML_IMPORT_PATH 一致)
+	SpaceBaseURL  string // 告诉应用后台 upload-server 在哪
+	SpaceStore    string // 应用商店索引 URL (空 = 不提供)
+	SpaceStoreAPI string // 商店握手接口 (空 = 不握手, 直接取上面那份静态索引)
 }
 
 type Server struct {
@@ -86,6 +87,11 @@ func New(cfg Config) (*Server, error) {
 		s.space = space.New(filepath.Join(cfg.SpaceDir, "apps"), cfg.SpaceUserDir, cfg.SpaceDataDir,
 			cfg.SpaceModDir, deviceArch(), cfg.SpaceBaseURL)
 		s.space.StoreURL = cfg.SpaceStore
+		s.space.StoreAPI = cfg.SpaceStoreAPI
+		// 设备凭据和应用目录放在一起 (…/space/device.json), 跟 .dev 标记同级
+		if cfg.SpaceUserDir != "" {
+			s.space.SetupAuth(filepath.Join(filepath.Dir(cfg.SpaceUserDir), "device.json"))
+		}
 	}
 	return s, nil
 }

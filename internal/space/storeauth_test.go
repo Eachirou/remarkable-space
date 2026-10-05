@@ -27,6 +27,8 @@ type fakeStore struct {
 	// /challenge 直接拒
 	challengeStatus int
 	challengeBody   string
+	indexHits       int
+	lastAuth        string
 }
 
 func newFakeStore() *fakeStore {
@@ -96,6 +98,17 @@ func (f *fakeStore) handler() http.Handler {
 			out["newSecret"] = ns
 		}
 		writeJSON(w, 200, out)
+	})
+	mux.HandleFunc("GET /index", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.indexHits++
+		f.lastAuth = r.Header.Get("Authorization")
+		if !strings.HasPrefix(f.lastAuth, "Bearer tk-") {
+			writeJSON(w, 401, map[string]any{"error": "票不对"})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"apps": []any{map[string]any{"id": "plan"}}})
 	})
 	return mux
 }

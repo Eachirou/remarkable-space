@@ -110,16 +110,19 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// storeKey 非空时放进 X-Space-Key 头 —— 应用包和索引归同一道门管, 只挡索引是漏的:
-// 链接一旦被记下来 (旧版索引、抓包), 不带头照样能一直下。
-func (r *Registry) InstallFromURL(url, sha256hex, storeKey string, sup *Supervisor) (App, error) {
+// hdr 里带的是取包的凭证 —— 粗筛用的 X-Space-Key, 以及握手模式下的 Bearer 票。
+// 应用包和索引归同一道门管: 只挡索引是漏的, 链接一旦被记下来 (旧版索引、抓包),
+// 不带凭证照样能一直下。
+func (r *Registry) InstallFromURL(url, sha256hex string, hdr http.Header, sup *Supervisor) (App, error) {
 	client := &http.Client{Timeout: 5 * time.Minute}
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return App{}, fmt.Errorf("下载失败: 地址无效: %w", err)
 	}
-	if storeKey != "" {
-		req.Header.Set("X-Space-Key", storeKey)
+	for k, vs := range hdr {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {

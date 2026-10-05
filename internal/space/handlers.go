@@ -4,13 +4,13 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -42,10 +42,25 @@ type Handler struct {
 	// 不带就 404 —— 用浏览器直接打开索引地址看不到东西。空 = 不带这个头,
 	// 自建商店 (和本地开发) 不受影响。值在编译期用 -ldflags -X 注进 storeKey, 不进仓库。
 	StoreKey string
+	// 官方商店的握手接口 (形如 https://boangs.com/rmkit-space/api), 见 storeauth.go。
+	// 配了就走三步握手, 索引按这台设备定制; 空 = 退回直接取 StoreURL 那份静态索引,
+	// 自建商店只要摆一个 JSON 文件就能用, 不必实现握手。
+	StoreAPI string
+
+	auth *StoreAuth
 
 	storeMu   sync.Mutex
 	storeAt   time.Time
 	storeBody []byte
+}
+
+// SetupAuth 按当前配置装上握手客户端。StoreAPI 为空时什么也不做 —— 那条路上
+// 索引是一份静态 JSON, 没有握手对端。
+func (h *Handler) SetupAuth(credPath string) {
+	if h.StoreAPI == "" {
+		return
+	}
+	h.auth = newStoreAuth(h.StoreAPI, credPath, h.StoreKey, Identity())
 }
 
 // 商店索引缓存时长: 设备 Wi-Fi 常年休眠、DNS 不稳, 拉一次能用就多用一会儿
@@ -94,6 +109,7 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /space/apps/{id}/data/{key}", h.dataGet)
 	mux.HandleFunc("PUT /space/apps/{id}/data/{key}", h.dataPut)
 	mux.HandleFunc("GET /space/store", h.store)
+	mux.HandleFunc("GET /space/device", h.device)
 	mux.HandleFunc("GET /space/recent", h.recent)
 }
 
@@ -150,41 +166,92 @@ func (h *Handler) dataPut(w http.ResponseWriter, r *http.Request) {
 //
 // 由设备端拉取而不是让面板直连: 面板里的 XHR 拿不到设备的 DNS 兜底与超时控制。
 func (h *Handler) store(w http.ResponseWriter, r *http.Request) {
-	if h.StoreURL == "" {
+	if h.StoreURL == "" && h.StoreAPI == "" {
 		fail(w, http.StatusNotFound, "没有配置应用商店")
 		return
 	}
 	h.storeMu.Lock()
 	defer h.storeMu.Unlock()
 	if h.storeBody == nil || time.Since(h.storeAt) > storeCacheTTL || r.URL.Query().Get("refresh") == "1" {
-		client := &http.Client{Timeout: 15 * time.Second}
-		req, err := http.NewRequest(http.MethodGet, h.StoreURL, nil)
+		body, err := h.fetchIndex()
 		if err != nil {
-			fail(w, http.StatusBadGateway, "商店地址无效: "+err.Error())
-			return
-		}
-		if h.StoreKey != "" {
-			req.Header.Set("X-Space-Key", h.StoreKey)
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			fail(w, http.StatusBadGateway, "连不上应用商店: "+err.Error())
-			return
-		}
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-		resp.Body.Close()
-		if err != nil || resp.StatusCode != http.StatusOK || !json.Valid(body) {
-			msg := "应用商店索引无效 (HTTP " + strconv.Itoa(resp.StatusCode) + ")"
-			if resp.StatusCode == http.StatusNotFound {
-				msg = "应用商店拒绝了这次请求 (HTTP 404): 这个版本没有商店密钥, 或密钥已经换了"
-			}
-			fail(w, http.StatusBadGateway, msg)
+			fail(w, http.StatusBadGateway, err.Error())
 			return
 		}
 		h.storeBody, h.storeAt = body, time.Now()
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_, _ = w.Write(h.storeBody)
+}
+
+func (h *Handler) fetchIndex() ([]byte, error) {
+	if h.auth != nil {
+		return h.fetchIndexAuthed()
+	}
+	return h.fetchIndexStatic()
+}
+
+// 握手那条路: 索引按这台设备定制 (没授权的付费应用只有条目和购买入口, 没有下载链接)。
+func (h *Handler) fetchIndexAuthed() ([]byte, error) {
+	body, err := h.getIndexWithTicket()
+	if err != nil && isAuthErr(err) {
+		// 票可能被服务端提前作废了 (封禁、密钥轮转)。丢掉重握一次, 只试这一次。
+		h.auth.Invalidate()
+		body, err = h.getIndexWithTicket()
+	}
+	return body, err
+}
+
+func (h *Handler) getIndexWithTicket() ([]byte, error) {
+	ticket, err := h.auth.Ticket()
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodGet, h.StoreAPI+"/index", nil)
+	if err != nil {
+		return nil, fmt.Errorf("商店地址无效: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ticket)
+	if h.StoreKey != "" {
+		req.Header.Set("X-Space-Key", h.StoreKey)
+	}
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("连不上应用商店: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if resp.StatusCode != http.StatusOK {
+		return nil, &storeHTTPError{status: resp.StatusCode, msg: storeErrMsg(resp.StatusCode, body)}
+	}
+	if err != nil || !json.Valid(body) {
+		return nil, fmt.Errorf("应用商店返回的索引看不懂")
+	}
+	return body, nil
+}
+
+// 静态那条路: 索引就是一份摆在那儿的 JSON。自建商店走这条, 不必实现握手。
+func (h *Handler) fetchIndexStatic() ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, h.StoreURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("商店地址无效: %w", err)
+	}
+	if h.StoreKey != "" {
+		req.Header.Set("X-Space-Key", h.StoreKey)
+	}
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("连不上应用商店: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil || resp.StatusCode != http.StatusOK || !json.Valid(body) {
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("应用商店拒绝了这次请求 (HTTP 404): 这个版本没有商店密钥, 或密钥已经换了")
+		}
+		return nil, fmt.Errorf("应用商店索引无效 (HTTP %d)", resp.StatusCode)
+	}
+	return body, nil
 }
 
 // AutoStart 拉起所有声明了 autostart 的应用后台 (upload-server 启动时调一次)。
@@ -308,7 +375,7 @@ func (h *Handler) installURL(w http.ResponseWriter, r *http.Request) {
 		*p = Progress{ID: req.ID, Name: req.Name, Phase: "downloading"}
 	})
 	go func() {
-		app, err := h.Reg.InstallFromURL(req.URL, req.SHA256, h.StoreKey, h.Sup)
+		app, err := h.Reg.InstallFromURL(req.URL, req.SHA256, h.downloadHeader(), h.Sup)
 		setProgress(func(p *Progress) {
 			if err != nil {
 				p.Phase, p.Error = "error", err.Error()
@@ -372,4 +439,32 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func fail(w http.ResponseWriter, code int, detail string) {
 	writeJSON(w, code, map[string]any{"error": detail, "detail": detail})
+}
+
+// downloadHeader 装上取应用包要带的凭证。握手模式下票可能取不到 (没网、被封),
+// 那就只带粗筛头让服务端去拒 —— 在这里直接报错的话, 自建商店也跟着下不了。
+func (h *Handler) downloadHeader() http.Header {
+	hdr := http.Header{}
+	if h.StoreKey != "" {
+		hdr.Set("X-Space-Key", h.StoreKey)
+	}
+	if h.auth != nil {
+		if tk, err := h.auth.Ticket(); err == nil {
+			hdr.Set("Authorization", "Bearer "+tk)
+		} else {
+			logStore("取应用包时没拿到票: %v", err)
+		}
+	}
+	return hdr
+}
+
+// device 把这台设备的身份给界面。买应用时用户要把设备码抄给我们, 所以得有地方看。
+// 只给设备码, 不给机器标识 —— 界面上用不着, 少一处可能被截图发出去的东西。
+func (h *Handler) device(w http.ResponseWriter, r *http.Request) {
+	id := Identity()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"code": id.Code,
+		// 读不到机器标识的设备连不了商店, 界面上得说清楚, 不能只显示一个空白
+		"ok": id.Code != "",
+	})
 }

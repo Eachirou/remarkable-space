@@ -36,6 +36,9 @@ func main() {
 		spaceDataDir   = flag.String("space-data", "", "「空间」应用数据目录 (默认: $HOME/.local/share/rmkit-cn/space/data)")
 		spaceModDir    = flag.String("space-modules", "", "「空间」编译应用的 QML 模块目录 (默认: $HOME/.local/share/rmkit-cn/space/qmlmods; 要与 xochitl 的 QML_IMPORT_PATH 一致)")
 		spaceStore     = flag.String("space-store", "https://boangs.com/rmkit-space/index.json", "「空间」应用商店索引 URL (空 = 关闭商店)")
+		// 默认空: 服务端的握手接口上线之前打开它, 所有设备都会连不上商店。
+		// 等 store-server 部署好再开, 见 docs-store-key.md。
+		spaceStoreAPI = flag.String("space-store-api", "", "「空间」应用商店握手接口 (空 = 不握手, 直接取静态索引)")
 	)
 	flag.Parse()
 
@@ -94,6 +97,7 @@ func main() {
 		SpaceModDir:    *spaceModDir,
 		SpaceBaseURL:   "http://127.0.0.1:8080",
 		SpaceStore:     *spaceStore,
+		SpaceStoreAPI:  *spaceStoreAPI,
 	})
 	if err != nil {
 		log.Fatalf("server.New: %v", err)

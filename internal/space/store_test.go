@@ -3,6 +3,8 @@ package space
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -88,5 +90,55 @@ func TestInjectedKeyReachesRequest(t *testing.T) {
 
 	if got != storeKey {
 		t.Fatalf("请求头里的密钥 = %q, 想要 %q (注入没生效, 或 New 没把它接上)", got, storeKey)
+	}
+}
+
+// 配了握手接口就走握手, 索引请求要带票。
+func TestStoreUsesHandshakeWhenAPIConfigured(t *testing.T) {
+	f := newFakeStore()
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+
+	h := &Handler{StoreAPI: srv.URL}
+	h.SetupAuth(filepath.Join(t.TempDir(), "device.json"))
+	h.auth.identity = DeviceIdentity{MachineID: "m1", Code: DeviceCode("m1")}
+
+	rec := httptest.NewRecorder()
+	h.store(rec, httptest.NewRequest(http.MethodGet, "/space/store", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("状态码 = %d (body: %s)", rec.Code, rec.Body)
+	}
+	if f.indexHits != 1 {
+		t.Errorf("取了 %d 次索引, 想要 1 次", f.indexHits)
+	}
+	if !strings.HasPrefix(f.lastAuth, "Bearer ") {
+		t.Errorf("索引请求没带票: %q", f.lastAuth)
+	}
+	if !strings.Contains(rec.Body.String(), "plan") {
+		t.Errorf("索引内容没透出来: %s", rec.Body)
+	}
+}
+
+// 没配握手接口 = 自建商店, 索引就是一份静态 JSON, 不该去握手。
+func TestStoreStaysStaticWithoutAPI(t *testing.T) {
+	var hits int
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"apps":[{"id":"mine"}]}`))
+	}))
+	defer up.Close()
+
+	h := &Handler{StoreURL: up.URL}
+	h.SetupAuth(filepath.Join(t.TempDir(), "device.json")) // 没有 StoreAPI, 应当什么也不装
+	if h.auth != nil {
+		t.Fatal("没配握手接口却装上了握手客户端")
+	}
+
+	rec := httptest.NewRecorder()
+	h.store(rec, httptest.NewRequest(http.MethodGet, "/space/store", nil))
+	if rec.Code != http.StatusOK || hits != 1 {
+		t.Fatalf("状态码 = %d, 上游命中 %d 次", rec.Code, hits)
 	}
 }
