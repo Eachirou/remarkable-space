@@ -85,6 +85,14 @@ Rectangle {
             if (st === 200 && r) space.heroImages = r
         })
     }
+    // 这台设备在应用商店那边的身份。买应用时用户要把它抄给我们, 所以设置里得显示。
+    property string deviceCode: ""
+    function loadDevice() {
+        request("GET", baseUrl + "/space/device", null, function (st, r) {
+            if (st === 200 && r) space.deviceCode = r.code || ""
+        })
+    }
+
     function heroWidgetEnabled() { return space.heroChoice === "" }
     function heroImageUrl() {
         if (space.heroChoice !== "" && space.heroChoice !== "none")
@@ -529,7 +537,7 @@ Rectangle {
     Timer { id: toastTimer; interval: 4000; repeat: false; onTriggered: space.toastText = "" }
     Timer { interval: 15000; running: space.visible; repeat: true; onTriggered: space.now = new Date() }
 
-    Component.onCompleted: { reload(); loadShellCfg() }
+    Component.onCompleted: { reload(); loadShellCfg(); loadDevice() }
     onTabChanged: { if (tab === "discover" && !storeLoaded) loadStore(false) }
 
     // ─── 应用内导航栏 (返回 + 标题) ───────────────────────────────────
@@ -1069,6 +1077,26 @@ Rectangle {
                           + "快刷与系统界面同档，干脆利落。整个空间（含所有应用）统一生效。"
                     font.pixelSize: space.fpx(21)
                     color: "#26251F"
+                    wrapMode: Text.WordWrap
+                }
+                Kit.SRow {
+                    Layout.fillWidth: true
+                    ui: space.fs
+                    iconSource: space.kitDir + "/icons/user.svg"
+                    text: "设备码"
+                    detail: space.deviceCode !== "" ? space.deviceCode : "读不到"
+                }
+                Text {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 16
+                    Layout.topMargin: space.vpx(10)
+                    Layout.bottomMargin: space.vpx(16)
+                    text: space.deviceCode !== ""
+                          ? "这台设备在应用商店里的编号。购买应用时把它告诉我们，授权会绑定到这台设备。"
+                          : "读不到这台设备的硬件编号，应用商店用不了。"
+                    font.pixelSize: space.fpx(21)
+                    color: "#4A4A46"
                     wrapMode: Text.WordWrap
                 }
                 Kit.SRow {
