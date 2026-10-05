@@ -65,11 +65,31 @@ Rectangle {
         request("GET", baseUrl + "/space/apps/shell/data/config", null, function (st, r) {
             if (st === 200 && r && r.screenMode) space.screenMode = r.screenMode
             else space.applyScreenMode()
+            if (st === 200 && r && r.hero !== undefined) space.heroChoice = r.hero
         })
+        loadHeroList()
     }
     function saveShellCfg() {
         request("PUT", baseUrl + "/space/apps/shell/data/config",
-                { screenMode: space.screenMode }, null)
+                { screenMode: space.screenMode, hero: space.heroChoice }, null)
+    }
+
+    // 首页顶部那张大卡放什么:
+    //   ""      跟着装了什么走 —— 有天气就天气, 没有就内置那幅山水 (默认)
+    //   "none"  就要内置山水, 哪怕装着天气
+    //   其它    用户自己传的某张图的文件名
+    property string heroChoice: ""
+    property var heroImages: []
+    function loadHeroList() {
+        request("GET", baseUrl + "/hero", null, function (st, r) {
+            if (st === 200 && r) space.heroImages = r
+        })
+    }
+    function heroWidgetEnabled() { return space.heroChoice === "" }
+    function heroImageUrl() {
+        if (space.heroChoice !== "" && space.heroChoice !== "none")
+            return space.baseUrl + "/hero/" + encodeURIComponent(space.heroChoice)
+        return space.kitDir + "/images/hero-default.jpg"
     }
     property var apps: []
     property string listError: ""
@@ -354,6 +374,8 @@ Rectangle {
     // 就再没人能销毁它, 一直泄漏到 xochitl 退出。
     function unmount() {
         if (currentItem) { currentItem.destroy(); currentItem = null }
+        // 「个性化」改的是外壳自己的配置 (首页插图), 退出来得重新读一遍才看得到效果
+        loadShellCfg()
         var app = current
         current = null
         appError = ""
@@ -648,7 +670,7 @@ Rectangle {
                     clip: true
                     Item {
                         anchors.fill: parent
-                        visible: space.heroWidgetApp() === null
+                        visible: !space.heroWidgetEnabled() || space.heroWidgetApp() === null
                         // 没装 hero 小组件 (比如天气被删掉了) 时的默认样子: 一幅山水垫底,
                         // 日期时间压在上面。素材是 2:1 的横幅, 贴着底边按原比例铺开 ——
                         // 上面留出的白正好垫文字, 两者不重叠, 所以不需要蒙版或渐隐。
@@ -657,11 +679,51 @@ Rectangle {
                             anchors.bottom: parent.bottom
                             anchors.left: parent.left; anchors.right: parent.right
                             height: Math.min(parent.height, Math.round(parent.width / 2))
-                            source: space.kitDir + "/images/hero-default.jpg"
+                            source: space.heroImageUrl()
                             fillMode: Image.PreserveAspectCrop
                             // 解码到实际显示尺寸, 别按原图 1200 宽解了再缩 —— 墨水屏上白费内存
                             sourceSize.width: width
                             visible: status === Image.Ready
+                        }
+                        // 横幅是方角、卡片是圆角, 底下两角会戳出来。设备上没有
+                        // QtQuick.Effects 做遮罩 (Qt5Compat.GraphicalEffects 也没有),
+                        // clip 又只做矩形裁剪、不跟圆角走 —— 照搬天气小组件的办法, 用 Canvas
+                        // 在两角各补一小块"方角减去那道弧"的白, 四边不留白, 图与描边贴合。
+                        Component {
+                            id: heroCornerCut
+                            Canvas {
+                                property bool atRight: false
+                                width: 14; height: 14
+                                onPaint: {
+                                    var ctx = getContext("2d")
+                                    ctx.reset()
+                                    ctx.fillStyle = "white"
+                                    ctx.beginPath()
+                                    if (atRight) {
+                                        ctx.moveTo(width, 0); ctx.lineTo(width, height); ctx.lineTo(0, height)
+                                        ctx.arc(0, 0, width, Math.PI / 2, 0, true)
+                                    } else {
+                                        ctx.moveTo(0, 0); ctx.lineTo(0, height); ctx.lineTo(width, height)
+                                        ctx.arc(width, 0, width, Math.PI / 2, Math.PI, false)
+                                    }
+                                    ctx.closePath(); ctx.fill()
+                                }
+                            }
+                        }
+                        Loader {
+                            sourceComponent: heroCornerCut
+                            anchors.left: parent.left; anchors.bottom: parent.bottom
+                        }
+                        Loader {
+                            sourceComponent: heroCornerCut
+                            anchors.right: parent.right; anchors.bottom: parent.bottom
+                            onLoaded: { item.atRight = true; item.requestPaint() }
+                        }
+                        // 卡片自己的细描边被画盖住了, 补回来 —— 否则上半截有框下半截没有
+                        Rectangle {
+                            anchors.fill: parent
+                            color: "transparent"; radius: 12
+                            border.color: "#B4AFA6"; border.width: 1
                         }
                         Column {
                             anchors.left: parent.left
@@ -678,7 +740,7 @@ Rectangle {
                         id: heroHost
                         anchors.fill: parent
                         property var wItem: null
-                        property var heroApp: space.heroWidgetApp()
+                        property var heroApp: space.heroWidgetEnabled() ? space.heroWidgetApp() : null
                         onHeroAppChanged: space.mountWidget(heroHost, heroApp)
                         Component.onCompleted: space.mountWidget(heroHost, heroApp)
                     }

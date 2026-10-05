@@ -41,7 +41,9 @@ var (
 	// 音乐: mp3 是主力 (播放器是 mpg123), 另外几种放进来是因为手机分享出来的文件常是它们,
 	// 拦在门外用户只会困惑; 播不了的曲库里会标出来, 比传不进去好。
 	allowedMusicExts = map[string]struct{}{".mp3": {}, ".m4a": {}, ".flac": {}, ".wav": {}, ".ogg": {}}
-	allowedDocExts   = map[string]struct{}{".pdf": {}, ".epub": {}}
+	// 首页插图: jpg 为主 (照片与水彩都压得住), png 留给带透明的
+	allowedHeroExts = map[string]struct{}{".jpg": {}, ".jpeg": {}, ".png": {}}
+	allowedDocExts  = map[string]struct{}{".pdf": {}, ".epub": {}}
 )
 
 // Config 是构造服务器需要的所有可配项.
@@ -50,6 +52,7 @@ type Config struct {
 	FontsDir       string // 字体存放目录
 	ScreensDir     string // 锁屏图存放目录
 	MusicDir       string // 音乐存放目录 (音乐应用扫这里)
+	HeroDir        string // 「空间」首页插图目录 (用户自己传的)
 	DocStagingDir  string // /documents 上传暂存目录 (librarian 会从此处复制)
 	FontsActiveDir string // 字体激活符号链接目录 (~/.local/share/fonts)
 	XochitlConf    string // xochitl 配置路径 (~/.config/remarkable/xochitl.conf)
@@ -68,7 +71,7 @@ type Server struct {
 }
 
 func New(cfg Config) (*Server, error) {
-	for _, d := range []string{cfg.FontsDir, cfg.ScreensDir, cfg.DocStagingDir, cfg.MusicDir} {
+	for _, d := range []string{cfg.FontsDir, cfg.ScreensDir, cfg.DocStagingDir, cfg.MusicDir, cfg.HeroDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("mkdir %s: %w", d, err)
 		}
@@ -116,6 +119,10 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("GET /screens", s.listScreens)
 	mux.HandleFunc("POST /screens", s.uploadScreen)
+	mux.HandleFunc("GET /hero", s.listHero)
+	mux.HandleFunc("POST /hero", s.uploadHero)
+	mux.HandleFunc("GET /hero/{name}", s.previewHero)
+	mux.HandleFunc("DELETE /hero/{name}", s.deleteHero)
 	mux.HandleFunc("GET /music", s.listMusic)
 	mux.HandleFunc("POST /music", s.uploadMusic)
 	mux.HandleFunc("DELETE /music/{name}", s.deleteMusic)
@@ -377,6 +384,58 @@ func (s *Server) uploadMusic(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteMusic(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	target, err := safeJoin(s.cfg.MusicDir, name)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := os.Remove(target); err != nil {
+		if os.IsNotExist(err) {
+			httpError(w, http.StatusNotFound, "文件不存在")
+			return
+		}
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": filepath.Base(name)})
+}
+
+// ---- 首页插图 ----
+//
+// 空间首页顶部那张大卡: 装了天气就由天气的小组件整卡接管, 没装就垫一幅画。
+// 这里管的是"没装天气时垫哪一幅" —— 内置一幅山水, 用户也可以自己传, 像换休眠壁纸那样。
+// 存在空间自己的目录下, 不和锁屏图混: 两者尺寸与用途都不一样 (这个是 2:1 横幅)。
+
+func (s *Server) listHero(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, listFiles(s.cfg.HeroDir, allowedHeroExts))
+}
+
+func (s *Server) uploadHero(w http.ResponseWriter, r *http.Request) {
+	name, size, ok := saveUpload(w, r, s.cfg.HeroDir, allowedHeroExts, ".jpg / .png")
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"name": name, "size": size})
+}
+
+// previewHero 把插图原样送出去 —— 列表接口只给文件名, 界面光有名字选不出哪张画。
+func (s *Server) previewHero(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	target, err := safeJoin(s.cfg.HeroDir, name)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := os.Stat(target); err != nil {
+		httpError(w, http.StatusNotFound, "插图不存在")
+		return
+	}
+	w.Header().Set("Cache-Control", "max-age=60")
+	http.ServeFile(w, r, target)
+}
+
+func (s *Server) deleteHero(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	target, err := safeJoin(s.cfg.HeroDir, name)
 	if err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return

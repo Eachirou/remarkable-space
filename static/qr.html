@@ -91,12 +91,13 @@
 <body>
 <div class="card">
   <h1>上传到 reMarkable</h1>
-  <p class="subtitle">文档 / 字体 / 壁纸 / 音乐 / 应用</p>
+  <p class="subtitle">文档 / 字体 / 壁纸 / 插图 / 音乐 / 应用</p>
 
   <div class="tabs">
     <div class="tab active" data-target="doc">文档</div>
     <div class="tab" data-target="font">字体</div>
     <div class="tab" data-target="screen">壁纸</div>
+    <div class="tab" data-target="hero">插图</div>
     <div class="tab" data-target="music">音乐</div>
     <div class="tab" data-target="space">应用</div>
     <div class="tab" data-target="ai">AI</div>
@@ -123,6 +124,15 @@
            accept=".png,image/png">
     <p class="hint">上传后到设备「高级」面板里选作休眠壁纸，下次休眠生效</p>
     <ul class="file-list" data-list="/screens"></ul>
+  </div>
+
+  <div class="panel" id="panel-hero">
+    <label class="pick" for="file-hero">🖼️ 选择插图 (JPG / PNG)</label>
+    <input type="file" id="file-hero" data-endpoint="/hero"
+           accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple>
+    <p class="hint">「空间」首页顶部那张大卡的垫图，传完到设备上「空间 → 设置 → 首页插图」里选。
+       横幅比例（宽约为高的两倍）最合适，太高的会被裁掉上下。</p>
+    <ul class="file-list" data-list="/hero"></ul>
   </div>
 
   <div class="panel" id="panel-music">

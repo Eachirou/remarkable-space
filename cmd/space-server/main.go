@@ -27,6 +27,7 @@ func main() {
 		fontsDir       = flag.String("fonts", "", "字体存放目录 (默认: $HOME/.local/share/rmkit-cn/fonts)")
 		screensDir     = flag.String("screens", "", "锁屏图存放目录 (默认: $HOME/.local/share/rmkit-cn/screens)")
 		musicDir       = flag.String("music", "", "音乐存放目录 (默认: $HOME/.local/share/rmkit-cn/music)")
+		heroDir        = flag.String("hero", "", "「空间」首页插图目录 (默认: $HOME/.local/share/rmkit-cn/space/hero)")
 		stagingDir     = flag.String("staging", "/tmp/rmkit_upload", "文档上传暂存目录")
 		fontsActiveDir = flag.String("fonts-active", "", "字体激活符号链接目录 (默认: $HOME/.local/share/fonts)")
 		xochitlConf    = flag.String("xochitl-conf", "", "xochitl 配置路径 (默认: $HOME/.config/remarkable/xochitl.conf)")
@@ -59,6 +60,9 @@ func main() {
 	if *musicDir == "" {
 		*musicDir = filepath.Join(home, ".local/share/rmkit-cn/music")
 	}
+	if *heroDir == "" {
+		*heroDir = filepath.Join(home, ".local/share/rmkit-cn/space/hero")
+	}
 	if *fontsActiveDir == "" {
 		*fontsActiveDir = filepath.Join(home, ".local/share/fonts")
 	}
@@ -80,6 +84,7 @@ func main() {
 		FontsDir:       *fontsDir,
 		ScreensDir:     *screensDir,
 		MusicDir:       *musicDir,
+		HeroDir:        *heroDir,
 		DocStagingDir:  *stagingDir,
 		FontsActiveDir: *fontsActiveDir,
 		XochitlConf:    *xochitlConf,

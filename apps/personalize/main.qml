@@ -1,4 +1,7 @@
-// 个性化 — 「空间」内置设置项: 字体 + 休眠壁纸 (从旧高级面板迁出)
+// 个性化 — 「空间」内置设置项: 字体 / 休眠壁纸 / 空间插图
+//
+// 三样都是"换个样子"的事, 原来字体与壁纸上下堆在一张长页里, 插图又单独藏在空间设置
+// 的二级页 —— 同一类事分在两处。改成三个页签并到这里。
 import QtQuick
 import QtQuick.Layouts
 import device.ui.controls
@@ -19,7 +22,46 @@ Item {
     ListModel { id: _rmhFontsModel }
     ListModel { id: _rmhScreensModel }
 
-    Component.onCompleted: { refreshFonts(); refreshScreens() }
+    // ─── 空间插图 ───
+    // 首页顶部那张大卡垫什么。选择存在外壳自己的配置里 (应用 id "shell"), 所以这里
+    // 读写的是别人的数据 —— 外壳在关掉应用时会重新读一遍, 改完退出就生效。
+    //   ""      跟着装了什么走: 有天气就天气, 没有就内置那幅
+    //   "none"  就要内置那幅, 哪怕装着天气
+    //   其它    用户自己传的文件名
+    property string _rmhHero: ""
+    ListModel { id: _rmhHeroModel }
+    property string sect: "font"          // font / screen / hero
+
+    function refreshHero() {
+        _rmhHeroModel.clear()
+        space.get("/hero", function (st, r) {
+            if (st !== 200 || !r) return
+            for (var i = 0; i < r.length; ++i) _rmhHeroModel.append({ rowName: r[i].name })
+        })
+        space.dataGet("shell", "config", function (st, r) {
+            if (st === 200 && r && r.hero !== undefined) root._rmhHero = r.hero
+        })
+    }
+    function setHero(key) {
+        root._rmhHero = key
+        // 只改 hero 这一项, 别把外壳的其它设置 (刷新效果) 覆盖掉
+        space.dataGet("shell", "config", function (st, r) {
+            var cfg = (st === 200 && r) ? r : ({})
+            cfg.hero = key
+            space.dataPut("shell", "config", cfg, null)
+        })
+    }
+    function deleteHero(name) {
+        space.request("DELETE", space.baseUrl + "/hero/" + encodeURIComponent(name),
+                      null, function (st) {
+            if (st === 200) {
+                if (root._rmhHero === name) root.setHero("")
+                root.refreshHero()
+            }
+        })
+    }
+
+    Component.onCompleted: { refreshFonts(); refreshScreens(); refreshHero() }
 
     // 有变更时右上角出"应用" (放在外壳标题那一行的右侧)
     IconButton {
@@ -46,8 +88,37 @@ Item {
             width: parent.width
             spacing: 24
 
+            // ─── 页签 ────────────────────────────────────
+            Row {
+                Layout.fillWidth: true
+                Layout.bottomMargin: 8
+                spacing: 0
+                Repeater {
+                    model: [{ k: "font", t: "字体" }, { k: "screen", t: "休眠壁纸" },
+                            { k: "hero", t: "空间插图" }]
+                    delegate: Rectangle {
+                        required property var modelData
+                        readonly property bool on: root.sect === modelData.k
+                        width: Math.round((_rmhPersCol.width - 2) / 3)
+                        height: 68
+                        color: on ? "#262626" : "white"
+                        border.color: "#B4AFA6"
+                        border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: parent.modelData.t
+                            font.pixelSize: 26
+                            font.weight: parent.on ? Font.Medium : Font.Normal
+                            color: parent.on ? "white" : "#262626"
+                        }
+                        MouseArea { anchors.fill: parent; onClicked: root.sect = parent.modelData.k }
+                    }
+                }
+            }
+
             // ─── 字体 ────────────────────────────────────
             RowLayout {
+                visible: root.sect === "font"
                 Layout.fillWidth: true
                 Text {
                     text: "\u5b57\u4f53"
@@ -63,7 +134,7 @@ Item {
             }
 
             Text {
-                visible: _rmhFontsModel.count === 0
+                visible: root.sect === "font" && _rmhFontsModel.count === 0
                 text: "\u6682\u65e0\u5b57\u4f53\uff0c\u8bf7\u5148\u626b\u7801\u4e0a\u4f20"
                 font.pixelSize: 24
                 Layout.fillWidth: true
@@ -72,6 +143,7 @@ Item {
             Repeater {
                 model: _rmhFontsModel
                 delegate: Item {
+                    visible: root.sect === "font"
                     id: _rmhFontRow
                     required property string rowName
                     Layout.fillWidth: true
@@ -131,10 +203,9 @@ Item {
                 }
             }
 
-            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#e0e0e0" }
-
             // ─── 壁纸 ────────────────────────────────────
             RowLayout {
+                visible: root.sect === "screen"
                 Layout.fillWidth: true
                 Text {
                     text: "\u4f11\u7720\u58c1\u7eb8"
@@ -150,13 +221,14 @@ Item {
             }
 
             Text {
-                visible: _rmhScreensModel.count === 0
+                visible: root.sect === "screen" && _rmhScreensModel.count === 0
                 text: "\u6682\u65e0\u58c1\u7eb8\uff0c\u8bf7\u5148\u626b\u7801\u4e0a\u4f20"
                 font.pixelSize: 24
                 Layout.fillWidth: true
             }
 
             Flow {
+                visible: root.sect === "screen"
                 Layout.fillWidth: true
                 spacing: 20
 
@@ -236,7 +308,100 @@ Item {
                 }
             }
 
-            Item { Layout.preferredHeight: 40 }
+            // ─── 空间插图 ────────────────────────────────
+            // 选项做成带预览的卡片 —— 光给文件名看不出是哪张画, 和挑壁纸一个道理。
+            // 前两项是特殊选择 (跟随应用 / 内置那幅), 后面才是用户自己传的。
+            RowLayout {
+                visible: root.sect === "hero"
+                Layout.fillWidth: true
+                Text { text: "空间首页插图"; font.pixelSize: 32; font.weight: Font.Medium }
+                Item { Layout.fillWidth: true }
+                IconButton {
+                    iconSource: "qrc:/ark/icons/restore"
+                    title: "刷新"
+                    onClicked: root.refreshHero()
+                }
+            }
+            Text {
+                visible: root.sect === "hero"
+                Layout.fillWidth: true
+                text: "首页顶部那张大卡垫什么。装了天气时可以让天气接管，也可以固定用一幅画。"
+                      + "插图经扫码上传页的「插图」那栏传进来，横幅比例（宽约为高的两倍）最合适。"
+                font.pixelSize: 22
+                color: "#4A4A46"
+                wrapMode: Text.WordWrap
+            }
+            Repeater {
+                model: 2 + _rmhHeroModel.count
+                delegate: Rectangle {
+                    id: _rmhHeroCell
+                    required property int index
+                    visible: root.sect === "hero"
+                    readonly property string rowKey:
+                        index === 0 ? "" : (index === 1 ? "none"
+                                            : _rmhHeroModel.get(index - 2).rowName)
+                    readonly property string rowLabel:
+                        index === 0 ? "跟随应用" : (index === 1 ? "内置插图" : rowKey)
+                    readonly property string rowPreview:
+                        index === 0 ? ""
+                        : (index === 1 ? root.space.kitDir + "/images/hero-default.jpg"
+                           : root.space.baseUrl + "/hero/" + encodeURIComponent(rowKey))
+                    readonly property bool sel: root._rmhHero === rowKey
+
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 72 + Math.round(width / 2)
+                    radius: 8
+                    color: "white"
+                    border.color: sel ? "#262626" : "#C4BFB6"
+                    border.width: sel ? 3 : 1
+                    clip: true
+
+                    Text {
+                        anchors.top: parent.top; anchors.topMargin: 18
+                        anchors.left: parent.left; anchors.leftMargin: 20
+                        text: _rmhHeroCell.rowLabel
+                        font.pixelSize: 26
+                        font.weight: _rmhHeroCell.sel ? Font.Medium : Font.Normal
+                    }
+                    // 自己传的才给删除
+                    IconButton {
+                        visible: _rmhHeroCell.index >= 2
+                        anchors.top: parent.top; anchors.topMargin: 6
+                        anchors.right: parent.right; anchors.rightMargin: 10
+                        iconSource: "qrc:/ark/icons/trash"
+                        title: "删除"
+                        onClicked: root.deleteHero(_rmhHeroCell.rowKey)
+                    }
+                    Image {
+                        anchors.left: parent.left; anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.leftMargin: 1; anchors.rightMargin: 1; anchors.bottomMargin: 1
+                        height: Math.round(width / 2)
+                        source: _rmhHeroCell.rowPreview
+                        sourceSize.width: width
+                        cache: false
+                        fillMode: Image.PreserveAspectCrop
+                        visible: _rmhHeroCell.rowPreview !== "" && status === Image.Ready
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        anchors.verticalCenterOffset: 18
+                        width: parent.width - 80
+                        visible: _rmhHeroCell.rowPreview === ""
+                        text: "装了天气就显示天气，没装则用内置插图"
+                        font.pixelSize: 22
+                        color: "#6B6B66"
+                        wrapMode: Text.WordWrap
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        anchors.topMargin: 48      // 让开右上角的删除按钮
+                        onClicked: root.setHero(_rmhHeroCell.rowKey)
+                    }
+                }
+            }
+
         }
 
     }
