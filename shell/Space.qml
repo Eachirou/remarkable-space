@@ -1097,46 +1097,13 @@ Rectangle {
                         space.saveShellCfg()
                     }
                 }
-                Text {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 16
-                    Layout.rightMargin: 16
-                    Layout.topMargin: space.vpx(10)
-                    Layout.bottomMargin: space.vpx(16)
-                    text: "高清用文档那档波形，插画和灰阶更细腻，代价是每次操作慢一拍、进页面会留一层淡残影；"
-                          + "快刷与系统界面同档，干脆利落。整个空间（含所有应用）统一生效。"
-                    font.pixelSize: space.fpx(21)
-                    color: "#26251F"
-                    wrapMode: Text.WordWrap
-                }
-                Kit.SRow {
-                    Layout.fillWidth: true
-                    ui: space.fs
-                    iconSource: space.kitDir + "/icons/user.svg"
-                    text: "设备码"
-                    detail: space.deviceCode !== "" ? space.deviceCode : "读不到"
-                }
-                Text {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 16
-                    Layout.rightMargin: 16
-                    Layout.topMargin: space.vpx(10)
-                    Layout.bottomMargin: space.vpx(16)
-                    text: space.deviceCode !== ""
-                          ? "这台设备在应用商店里的编号。购买应用时把它告诉我们，授权会绑定到这台设备。"
-                          : "读不到这台设备的硬件编号，应用商店用不了。"
-                    font.pixelSize: space.fpx(21)
-                    color: "#4A4A46"
-                    wrapMode: Text.WordWrap
-                }
                 Kit.SRow {
                     Layout.fillWidth: true
                     ui: space.fs
                     iconSource: space.kitDir + "/icons/squares-four.svg"
                     text: "关于空间"
-                    detail: "外壳 v" + space.shellVersion
-                    showArrow: false
-                    onClicked: space.showToast("空间 (SPACE) 外壳契约 v" + space.shellVersion + "，应用 " + space.apps.length + " 个")
+                    detail: "V1.0　Copyright © 2026 Boangs"
+                    interactive: false
                 }
             }
         }
