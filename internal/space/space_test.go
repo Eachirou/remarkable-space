@@ -215,3 +215,40 @@ func TestDataGetPut(t *testing.T) {
 		t.Errorf("文件没落在数据目录: %v", err)
 	}
 }
+
+// install.fetch 的地址允许明文 http —— 镜像可能是个纯 IP 的国内节点, 签不了 CA 证书。
+// 安全性由 sha256 兜底: 中间人改了内容就对不上, 装不进去。
+// 所以 sha256 绝不能因此放松, 这条测试同时钉住这两件事。
+func TestInstallFetchURLAndDigest(t *testing.T) {
+	base := func(url, sha string) *Manifest {
+		return &Manifest{
+			ID: "x", Name: "X", Version: "1.0", Entry: "main.qml",
+			Install: &Install{
+				Fetch:  []Fetch{{URL: url, SHA256: sha}},
+				Script: "setup.sh",
+			},
+		}
+	}
+	const good = "d1de77b7c6bad07875e12306481ca35d62470a6ceb414580aadf9eb79dba8cd7"
+
+	for _, tc := range []struct {
+		name, url, sha string
+		wantErr        bool
+	}{
+		{"https 可以", "https://example.test/a.zip", good, false},
+		{"http 也可以 (国内 IP 节点签不了证书)", "http://39.97.43.228/t/a.zip", good, false},
+		{"别的协议不行", "ftp://example.test/a.zip", good, true},
+		{"没有 sha256 不行", "http://example.test/a.zip", "", true},
+		{"sha256 格式不对不行", "http://example.test/a.zip", "abc", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := base(tc.url, tc.sha).Validate()
+			if tc.wantErr && err == nil {
+				t.Errorf("本该被拒却通过了")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("本该通过却被拒: %v", err)
+			}
+		})
+	}
+}

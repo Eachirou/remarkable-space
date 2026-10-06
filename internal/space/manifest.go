@@ -169,13 +169,17 @@ func (m *Manifest) Validate() error {
 	}
 	if m.Install != nil {
 		for i, f := range m.Install.Fetch {
-			// 只认 https: 这些东西要在设备上以 root 解包和执行, 明文信道上被换掉就完了。
-			if !strings.HasPrefix(f.URL, "https://") {
-				return fmt.Errorf("install.fetch[%d].url 必须是 https: %q", i, f.URL)
+			if !strings.HasPrefix(f.URL, "https://") && !strings.HasPrefix(f.URL, "http://") {
+				return fmt.Errorf("install.fetch[%d].url 必须是 http(s): %q", i, f.URL)
 			}
-			// sha256 是硬要求, 不是可选项 —— 对方换了包要当场知道, 而不是装上才发现
+			// sha256 是硬要求, 不是可选项。它同时顶两件事:
+			//   1. 对方换了包要当场知道, 而不是装上才发现;
+			//   2. 明文 http 下中间人改不了内容 —— 改了就对不上, 装不进去。
+			// 所以这里允许 http: 镜像可能是个纯 IP 的国内节点 (签不了 CA 证书),
+			// 而下载物都是公开的开源包, https 多出来的传输加密没什么可保的。
+			// 但**绝不能**因此放松 sha256。
 			if !sha256Re.MatchString(f.SHA256) {
-				return fmt.Errorf("install.fetch[%d].sha256 必须是 64 位十六进制", i)
+				return fmt.Errorf("install.fetch[%d].sha256 必须是 64 位十六进制 (明文 http 全靠它保证内容没被换)", i)
 			}
 			if f.To != "" && (!isRelativeInside(f.To) || strings.Contains(f.To, "/")) {
 				return fmt.Errorf("install.fetch[%d].to 只能是文件名: %q", i, f.To)

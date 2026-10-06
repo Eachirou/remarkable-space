@@ -85,6 +85,39 @@ Rectangle {
             if (st === 200 && r) space.heroImages = r
         })
     }
+    // AppLoad 自己会往侧栏插一个入口。空间里已经能直接启动那些应用了
+    // (launch.type=appload 走 AppLoadLauncher.launchApplication), 侧栏再放一个
+    // 等于同一件事两个入口, 还把"从哪进"这件事搞乱。
+    //
+    // 它是 qmldiff 注入的, 带 objectName="openAppLoad" —— 这是唯一稳定的抓手:
+    // id 在运行时拿不到, 按类型/位置找则会随固件改版漂移。
+    //
+    // 时机: 侧栏是懒加载的, 刚启动时还不存在。但用户是从侧栏点进空间的, 所以
+    // 空间一显示就说明侧栏已经建好了 —— 在这里做最稳, 不用轮询也不用 Timer
+    // (运行时注入的组件里 Timer 本来就不触发)。
+    property bool apploadEntryHidden: false
+    function hideApploadEntry() {
+        if (apploadEntryHidden) return
+        var root = space
+        while (root.parent) root = root.parent
+        var target = findByObjectName(root, "openAppLoad")
+        if (target) {
+            target.visible = false
+            apploadEntryHidden = true
+        }
+    }
+    function findByObjectName(node, name) {
+        if (!node) return null
+        if (node.objectName === name) return node
+        var kids = node.children
+        if (!kids) return null
+        for (var i = 0; i < kids.length; i++) {
+            var r = findByObjectName(kids[i], name)
+            if (r) return r
+        }
+        return null
+    }
+
     // 这台设备在应用商店那边的身份。买应用时用户要把它抄给我们, 所以设置里得显示。
     property string deviceCode: ""
     function loadDevice() {
@@ -558,7 +591,8 @@ Rectangle {
     Timer { id: toastTimer; interval: 4000; repeat: false; onTriggered: space.toastText = "" }
     Timer { interval: 15000; running: space.visible; repeat: true; onTriggered: space.now = new Date() }
 
-    Component.onCompleted: { reload(); loadShellCfg(); loadDevice() }
+    Component.onCompleted: { reload(); loadShellCfg(); loadDevice(); hideApploadEntry() }
+    onVisibleChanged: if (visible) hideApploadEntry()
     onTabChanged: { if (tab === "discover" && !storeLoaded) loadStore(false) }
 
     // ─── 应用内导航栏 (返回 + 标题) ───────────────────────────────────
