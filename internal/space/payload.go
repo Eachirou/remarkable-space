@@ -49,7 +49,11 @@ func (r *Registry) runInstall(appDir string, m *Manifest, hdr http.Header) error
 		setProgress(func(p *Progress) {
 			p.Phase = "fetching"
 			p.Got, p.Total = 0, 0
-			p.Name = fmt.Sprintf("%s (本体 %d/%d)", m.Name, i+1, len(m.Install.Fetch))
+			if len(m.Install.Fetch) > 1 {
+				p.Name = fmt.Sprintf("%s (本体 %d/%d)", m.Name, i+1, len(m.Install.Fetch))
+			} else {
+				p.Name = m.Name + " 本体"
+			}
 		})
 		if err := fetchVerified(f.URL, filepath.Join(work, name), f.SHA256, hdr); err != nil {
 			return fmt.Errorf("取 %s 失败: %w", name, err)

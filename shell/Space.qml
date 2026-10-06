@@ -292,14 +292,20 @@ Rectangle {
         onTriggered: space.request("GET", space.baseUrl + "/space/apps/install-progress", null,
                                    function (st, p) {
             if (st !== 200 || !p) return
-            if (p.phase === "downloading") {
-                // 服务器没给 Content-Length 时只报已下多少, 别显示一个假的百分比
-                space.busyText = p.total > 0
-                        ? "正在下载 " + p.name + "… " + Math.round(p.got * 100 / p.total) + "%"
-                        : "正在下载 " + p.name + "… " + (p.got / 1048576).toFixed(1) + " MB"
+            // 只有终态才收摊。中间阶段不止"下载"和"安装"两种 (带本体的应用还要再下一次),
+            // 原来按阶段名逐个匹配, 新增一个阶段就会掉到下面的收尾逻辑里 ——
+            // 进度框闪一下就没, 装完也不刷新列表, 看着像安装失败了。
+            if (p.phase !== "done" && p.phase !== "error") {
+                if (p.phase === "installing") {
+                    space.busyText = "正在安装 " + p.name + "…"
+                } else {
+                    // 服务器没给 Content-Length 时只报已下多少, 别显示一个假的百分比
+                    space.busyText = p.total > 0
+                            ? "正在下载 " + p.name + "… " + Math.round(p.got * 100 / p.total) + "%"
+                            : "正在下载 " + p.name + "… " + (p.got / 1048576).toFixed(1) + " MB"
+                }
                 return
             }
-            if (p.phase === "installing") { space.busyText = "正在安装 " + p.name + "…"; return }
             installPoll.stop()
             space.busyText = ""
             if (p.phase === "error") { space.showToast(p.error || "安装失败"); return }
