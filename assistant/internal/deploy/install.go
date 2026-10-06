@@ -334,6 +334,22 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 		log("✓ 空间 drop-in 已装 (编译应用的模块搜索路径)")
 	}
 
+	// 后端的 drop-in: 应用商店的握手接口。静态索引入口已经关掉了, 不配这个的设备
+	// 取不到商店 —— 所以它和上面那份一样是装机必备, 不是可选项。
+	if b.Has(storeAPIDropinSrc) {
+		conf, err := b.ReadAll(storeAPIDropinSrc)
+		if err != nil {
+			return err
+		}
+		if err := c.WriteFile(ctx, "/tmp/10-store-api.conf", bytes.NewReader(conf), "644"); err != nil {
+			return err
+		}
+		if err := c.RunScript(ctx, storeAPIDropinScript, nil); err != nil {
+			return fmt.Errorf("装应用商店 drop-in 失败: %w", err)
+		}
+		log("✓ 应用商店握手已配置")
+	}
+
 	if p.DeployRime { // install.sh 575-612
 		log("部署 rime 词库 (整句输入)...")
 		if err := c.RunScript(ctx, scripts.RimeSetup, nil); err != nil {
@@ -380,6 +396,24 @@ for d in /etc/systemd/system /tmp/lc/etc/systemd/system; do
 done
 sync; umount -l /tmp/lc 2>/dev/null || true; rmdir /tmp/lc 2>/dev/null || true
 rm -f /tmp/zz-space.conf
+systemctl daemon-reload
+`
+
+// storeAPIDropinSrc 是载荷包里后端那份 drop-in 的路径 (应用商店握手接口)。
+const storeAPIDropinSrc = "space-systemd/10-store-api.conf"
+
+// storeAPIDropinScript 同样双写 /etc 与 ext4 lower —— /etc 是 tmpfs overlay,
+// 只写上层的话重启就退回"取不到商店"了。
+const storeAPIDropinScript = `set -eu
+mkdir -p /tmp/lc && mount --bind / /tmp/lc 2>/dev/null || true
+mount -o remount,rw /tmp/lc 2>/dev/null || true
+for d in /etc/systemd/system /tmp/lc/etc/systemd/system; do
+  mkdir -p "$d/remarkable-space.service.d"
+  cp /tmp/10-store-api.conf "$d/remarkable-space.service.d/10-store-api.conf"
+  chmod 644 "$d/remarkable-space.service.d/10-store-api.conf"
+done
+sync; umount -l /tmp/lc 2>/dev/null || true; rmdir /tmp/lc 2>/dev/null || true
+rm -f /tmp/10-store-api.conf
 systemctl daemon-reload
 `
 

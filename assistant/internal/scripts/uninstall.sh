@@ -5,7 +5,10 @@ REMOTE_BASE=/home/root/rmkit-cn
     # 历史 Python IME unit (现已归档到 legacy/ime-py/), 老设备上可能残留, 一并清
     systemctl stop    rmkit-cn-ime.service rmkit-cn-ime-udev.service 2>/dev/null || true
     systemctl disable rmkit-cn-ime.service rmkit-cn-ime-udev.service 2>/dev/null || true
-    rm -rf $REMOTE_BASE
+    # 空间后端顶替了 rmkit-cn-upload, 原来这里只停老的那个, 新的会留着跑
+    systemctl stop    remarkable-space.service 2>/dev/null || true
+    systemctl disable remarkable-space.service 2>/dev/null || true
+    rm -rf $REMOTE_BASE /home/root/remarkable-space
     # 蓝牙音频组件 (bluealsa/mpg123 + D-Bus 策略只在 /etc 上层 tmpfs, 重启即消)
     killall -q mpg123 2>/dev/null || true
     killall -q bluealsa 2>/dev/null || true
@@ -20,7 +23,14 @@ REMOTE_BASE=/home/root/rmkit-cn
       rm -f $D/systemd/system/xochitl.service.d/zz-rmkit-cn.conf \
             $D/systemd/system/xochitl.service.d/zz-rmkit-cn.conf.bak* \
             $D/systemd/system/xochitl.service.d/zz-rmkit-cn.conf.old
+      # 空间自己的那份 xochitl drop-in 一直漏着没清
+      rm -f $D/systemd/system/xochitl.service.d/zz-space.conf
       rmdir $D/systemd/system/xochitl.service.d 2>/dev/null || true
+      # 空间后端的 unit 与它的 drop-in (应用商店握手接口)
+      rm -f $D/systemd/system/remarkable-space.service
+      rm -f $D/systemd/system/remarkable-space.service.d/10-store-api.conf
+      rmdir $D/systemd/system/remarkable-space.service.d 2>/dev/null || true
+      rm -f $D/systemd/system/multi-user.target.wants/remarkable-space.service
     done
     if mountpoint -q $MNT 2>/dev/null; then sync; umount -l $MNT 2>/dev/null || true; rmdir $MNT 2>/dev/null || true; fi
     rm -f /etc/udev/rules.d/99-rmkit-cn-ime.rules

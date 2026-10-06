@@ -153,6 +153,8 @@ func main() {
 			// 空间自己的 xochitl drop-in 单独放: 它要落到 xochitl.service.d/ 而不是
 			// unit 目录, 底座阶段 1 的循环只认 .service/.path/.timer, 混在一起会被漏掉。
 			"space-systemd/zz-space.conf": "systemd/zz-space.conf",
+			// 后端的 drop-in, 同理落到 remarkable-space.service.d/
+			"space-systemd/10-store-api.conf": "systemd/10-store-api.conf",
 		} {
 			p := filepath.Join(*spaceRepo, local)
 			if _, err := os.Stat(p); err != nil {

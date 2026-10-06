@@ -1,5 +1,7 @@
 # 空间助手 (Wails v2 桌面程序)
-#   make bundle            生成"空间 + 底座"载荷包 (底座产物取自 RMKIT_REPO, 空间取自本仓库)
+#   make bundle STORE_KEY=…  生成"空间 + 底座"载荷包 (底座产物取自 RMKIT_REPO, 空间取自本仓库)
+#                            STORE_KEY 是官方商店的客户端标识, 发版必须带; 留空也能打,
+#                            但那个包装出来的设备连不上官方商店 (自建商店不受影响)
 #   make bundle-android    从 ANDROID_DIR 生成 android-rmppm 载荷包
 #   make build-mac         构建 macOS .app (build/bin/)
 #   make build-win         交叉构建 Windows exe
@@ -14,8 +16,10 @@ LDFLAGS := -X main.version=$(VERSION) -X "main.buildTime=$(BUILD_TIME)"
 
 .PHONY: bundle bundle-android build-mac build-win cli dev vet
 
+# STORE_KEY 透给仓库根的 make。不自动编译的话很容易打进一个旧的、没有商店密钥的
+# 二进制 —— 装出来的设备取不到商店, 而且设备上看不出是这个原因。
 bundle:
-	@test -f ../dist/space-server-aarch64 || { echo "先在仓库根跑 make all 出后端二进制"; exit 1; }
+	$(MAKE) -C .. all STORE_KEY=$(STORE_KEY)
 	mkdir -p dist
 	go run ./cmd/mkbundle -component space -repo $(RMKIT_REPO) -space-repo .. -version $(VERSION) -out dist/space-bundle.zip
 
