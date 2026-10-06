@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -61,6 +62,8 @@ func (h *Handler) SetupAuth(credPath string) {
 		return
 	}
 	h.auth = newStoreAuth(h.StoreAPI, credPath, h.StoreKey, Identity())
+	// 装"本体"时可能要下别人 CDN 上的东西 —— 票只发给我们自己的商店
+	storeHosts = []string{strings.TrimSuffix(h.StoreAPI, "/")}
 }
 
 // 商店索引缓存时长: 设备 Wi-Fi 常年休眠、DNS 不稳, 拉一次能用就多用一会儿
@@ -353,7 +356,7 @@ func (h *Handler) installUpload(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "不是合法 zip: "+err.Error())
 		return
 	}
-	app, err := h.Reg.InstallZip(zr, h.Sup)
+	app, err := h.Reg.InstallZip(zr, nil, h.Sup)
 	if err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
 		return

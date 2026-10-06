@@ -22,7 +22,7 @@ const maxAppBytes = 256 << 20
 // InstallZip 把一个应用包 (zip) 绿色安装到用户应用目录。
 // 包结构: manifest.json 在 zip 根, 或者在唯一的一层顶级目录下 (GitHub 打包常见)。
 // 流程: 校验清单 → 解压到临时目录 → 停掉同名后台 → 原子替换目录。失败不影响已装版本。
-func (r *Registry) InstallZip(zr *zip.Reader, sup *Supervisor) (App, error) {
+func (r *Registry) InstallZip(zr *zip.Reader, hdr http.Header, sup *Supervisor) (App, error) {
 	prefix, m, err := findManifest(zr)
 	if err != nil {
 		return App{}, err
@@ -55,6 +55,12 @@ func (r *Registry) InstallZip(zr *zip.Reader, sup *Supervisor) (App, error) {
 			_ = os.RemoveAll(final)
 			return App{}, err
 		}
+	}
+	// 本体 (别人发布的那部分) 放最后装: 它要下几十 MB 又要跑脚本, 失败率比前面高,
+	// 而应用目录这时已经完整 —— 用户至少能看到这个应用、能再点一次重装。
+	if err := r.runInstall(final, m, hdr); err != nil {
+		setProgress(func(p *Progress) { p.Phase = "error"; p.Error = err.Error() })
+		return App{}, err
 	}
 	a, ok := r.Get(m.ID)
 	if !ok {
@@ -158,7 +164,7 @@ func (r *Registry) InstallFromURL(url, sha256hex string, hdr http.Header, sup *S
 	if err != nil {
 		return App{}, fmt.Errorf("不是合法 zip: %w", err)
 	}
-	return r.InstallZip(zr, sup)
+	return r.InstallZip(zr, hdr, sup)
 }
 
 // Uninstall 删除用户目录里的应用 (内置应用不可卸载; 应用数据目录保留)。
@@ -178,8 +184,12 @@ func (r *Registry) Uninstall(id string, sup *Supervisor) error {
 	}
 	// 先记下模块名再删应用目录 —— 清单没了就不知道该收哪个模块
 	var modDir string
-	if m, err := LoadManifest(dir); err == nil && m.Module != nil {
-		modDir = filepath.Join(r.ModuleDir, moduleDirName(m.Module.URI))
+	if m, err := LoadManifest(dir); err == nil {
+		if m.Module != nil {
+			modDir = filepath.Join(r.ModuleDir, moduleDirName(m.Module.URI))
+		}
+		// 本体 (装在应用目录之外的那部分) 得趁脚本还在的时候收掉
+		r.runUninstall(dir, m)
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return err

@@ -106,7 +106,7 @@ func TestInstallZipAndUninstall(t *testing.T) {
 		"music-1.0/main.qml":      "import QtQuick\nItem {}\n",
 		"music-1.0/bin/server":    "#!/bin/sh\n",
 	})
-	app, err := r.InstallZip(zr, nil)
+	app, err := r.InstallZip(zr, nil, nil)
 	if err != nil {
 		t.Fatalf("安装失败: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestInstallZipAndUninstall(t *testing.T) {
 		"manifest.json": `{"id":"evil","name":"x","version":"1","entry":"main.qml"}`,
 		"../../pwn":     "x",
 	})
-	if _, err := r.InstallZip(evil, nil); err == nil {
+	if _, err := r.InstallZip(evil, nil, nil); err == nil {
 		t.Error("路径穿越 zip 应被拒")
 	}
 	if _, err := os.Stat(filepath.Join(r.UserDir, "evil")); err == nil {

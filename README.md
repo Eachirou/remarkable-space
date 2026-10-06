@@ -9,7 +9,7 @@ reMarkable 上的启动台：首页小组件 + 应用注册表 + 绿色安装 + 
 |---|---|---|
 | `shell/` | `space/shell/` | 外壳 `Space.qml`：标签页、小组件挂载、应用创建销毁、给应用的 `space` API |
 | `kit/` | `space/kit/` | 共享 QML 组件（`SRow` / `STile` / `SButton` …）与图标 |
-| `apps/` | `space/apps/` | **内置**应用，随安装器部署。每个目录一个 `manifest.json` + `main.qml`（可选 `widget.qml`） |
+| `apps/` | `space/apps/` | **内置**应用，随安装器部署。只放系统功能入口（设置类）——第三方应用走商店安装，源码在另一个仓库 |
 | `server/` | `upload-server-go/internal/space/` | 后端 Go 包：注册表、安装、后台托管、最近在读、天气地图渲染 |
 | `data/geo.json` | 随后端部署 | 天气地图的矢量底图（Natural Earth，公共领域，已简化） |
 
@@ -50,3 +50,11 @@ reMarkable 上的启动台：首页小组件 + 应用注册表 + 绿色安装 + 
   "service": { "exec": "...", "port": 9100, "keepalive": true }
 }
 ```
+
+## 许可
+
+[Apache License 2.0](LICENSE)。
+
+选它而不是 GPL 是有意的：应用由外壳的 QML 引擎加载，这种"插件"关系在 GPL 下是灰色
+地带（FSF 认为共享地址空间的插件属于衍生作品）。Apache-2.0 明确允许闭源扩展，
+第三方应用——包括收费的——不必跟着开源。附带的专利授权和商标条款也比 MIT 周全。

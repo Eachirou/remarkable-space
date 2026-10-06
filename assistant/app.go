@@ -288,7 +288,32 @@ func (a *App) DetectProxy() string { return netx.DetectProxy() }
 
 // DownloadBundle 从 URL 下载载荷包到本机缓存目录 (进度走事件 "progress"), 然后打开校验。
 // proxy 为空则直连; 可选 sha256 与整个 zip 比对 (Release 页公布的值)。
-func (a *App) DownloadBundle(url, sha, proxy string) (*BundleInfo, error) {
+// 多个地址按顺序试, 前一个不行再换下一个。GitHub 在国内常连不上, 而自建服务器
+// 带宽有限 —— 两头都留着, 谁通用谁。
+func (a *App) DownloadBundle(urls []string, sha, proxy string) (*BundleInfo, error) {
+	if len(urls) == 0 {
+		return nil, errors.New("没有可用的下载地址")
+	}
+	var lastErr error
+	for i, u := range urls {
+		b, err := a.downloadOne(u, sha, proxy)
+		if err == nil {
+			return b, nil
+		}
+		lastErr = err
+		// 用户主动取消就别接着试下一个了 —— 他按的是"取消"不是"换一个"
+		if errors.Is(err, context.Canceled) {
+			return nil, err
+		}
+		if i < len(urls)-1 {
+			a.log("✗ " + err.Error())
+			a.log("换下一个地址再试…")
+		}
+	}
+	return nil, lastErr
+}
+
+func (a *App) downloadOne(url, sha, proxy string) (*BundleInfo, error) {
 	dir, _ := os.UserCacheDir()
 	dir = filepath.Join(dir, "space-assistant")
 	_ = os.MkdirAll(dir, 0o755)
@@ -313,11 +338,14 @@ func (a *App) DownloadBundle(url, sha, proxy string) (*BundleInfo, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("下载失败: %w。GitHub 直连在国内常超时: 可在上方填代理地址 (如 http://127.0.0.1:7890), 或用浏览器下载后点\"选择本地载荷包\"", err)
+		if strings.Contains(url, "github.com") {
+			return nil, fmt.Errorf("下载失败: %w (GitHub 直连在国内常超时, 可在上方填代理地址)", err)
+		}
+		return nil, fmt.Errorf("下载失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("下载失败: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("下载失败: HTTP %d (%s)", resp.StatusCode, url)
 	}
 	f, err := os.Create(dst + ".part")
 	if err != nil {

@@ -74,7 +74,32 @@ type Manifest struct {
 	MinShell    int      `json:"min_shell,omitempty"`   // 需要的最低外壳契约版本
 	Service     *Service `json:"service,omitempty"`
 	Launch      *Launch  `json:"launch,omitempty"`
-	Module      *Module  `json:"module,omitempty"` // 编译发布: 与 entry/widget 二选一
+	Module      *Module  `json:"module,omitempty"`  // 编译发布: 与 entry/widget 二选一
+	Install     *Install `json:"install,omitempty"` // 装完应用包之后还要装的"本体"
+}
+
+// Install 描述"应用包之外还得装点别的"。
+//
+// 有些应用的本体是别人发布的, 我们不能也不该重新分发 (版权, 以及跟着人家升级的负担)。
+// 这种就只在商店里放一份几百字节的描述 + 我们自己写的安装脚本, 让设备**直接从官方
+// 地址下载**。Fetch 里的 sha256 是硬要求: 对方换了包我们当场知道, 而不是装上才发现。
+type Install struct {
+	Fetch []Fetch `json:"fetch,omitempty"`
+	// Script 应用包里自带的安装脚本 (相对路径)。它跑在 root 下, 所以必须是我们自己
+	// 写的、可审计的 —— 绝不执行从网上抓来的脚本。工作目录是放下载物的临时目录,
+	// 环境变量 SPACE_APP_DIR 指向应用自己的目录。
+	Script string `json:"script,omitempty"`
+	// Uninstall 卸载脚本 (相对路径)。没有的话卸载只删应用目录, 本体会留在设备上。
+	Uninstall string `json:"uninstall,omitempty"`
+	// Note 安装前给用户看的一句话 (要下多大、装到哪)。
+	Note string `json:"note,omitempty"`
+}
+
+type Fetch struct {
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256"`
+	// To 存成什么文件名 (默认取 URL 最后一段)。
+	To string `json:"to,omitempty"`
 }
 
 var idRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
@@ -83,6 +108,7 @@ var idRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 // URI 允许 . 分段 (如 Space.Plan), 目录按段拆开。
 var moduleURIRe = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*(\.[A-Z][A-Za-z0-9]*)*$`)
 var qmlTypeRe = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
+var sha256Re = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
 var categoryOrder = map[string]int{
 	"system": 0, "settings": 1, "reader": 2, "tool": 3, "game": 4, "other": 5,
@@ -140,6 +166,31 @@ func (m *Manifest) Validate() error {
 	}
 	if _, ok := categoryOrder[m.Category]; !ok {
 		return fmt.Errorf("category %q 不认识 (system/settings/reader/tool/game/other)", m.Category)
+	}
+	if m.Install != nil {
+		for i, f := range m.Install.Fetch {
+			// 只认 https: 这些东西要在设备上以 root 解包和执行, 明文信道上被换掉就完了。
+			if !strings.HasPrefix(f.URL, "https://") {
+				return fmt.Errorf("install.fetch[%d].url 必须是 https: %q", i, f.URL)
+			}
+			// sha256 是硬要求, 不是可选项 —— 对方换了包要当场知道, 而不是装上才发现
+			if !sha256Re.MatchString(f.SHA256) {
+				return fmt.Errorf("install.fetch[%d].sha256 必须是 64 位十六进制", i)
+			}
+			if f.To != "" && (!isRelativeInside(f.To) || strings.Contains(f.To, "/")) {
+				return fmt.Errorf("install.fetch[%d].to 只能是文件名: %q", i, f.To)
+			}
+		}
+		for _, f := range []struct{ name, val string }{
+			{"install.script", m.Install.Script}, {"install.uninstall", m.Install.Uninstall},
+		} {
+			if f.val != "" && !isRelativeInside(f.val) {
+				return fmt.Errorf("%s 必须是应用目录内的相对路径: %q", f.name, f.val)
+			}
+		}
+		if len(m.Install.Fetch) > 0 && m.Install.Script == "" {
+			return errors.New("install.fetch 得配 install.script —— 光下载不装没有意义")
+		}
 	}
 	if m.MinShell > ShellVersion {
 		return fmt.Errorf("需要外壳契约版本 %d, 本机只有 %d", m.MinShell, ShellVersion)
