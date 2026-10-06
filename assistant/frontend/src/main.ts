@@ -33,7 +33,9 @@ const state = {
   password: '',
 }
 
-const RELEASE_BASE = 'https://github.com/boangs/remarkable-space/releases/latest/download/'
+// 载荷放自己的服务器: remarkable-space 是私有仓库, GitHub Release 的 download 链接
+// 要带 token 才下得动, 普通用户点下载只会得到 404。
+const RELEASE_BASE = 'https://boangs.com/space/'
 
 const $ = (sel: string) => document.querySelector(sel) as HTMLElement
 const mb = (n: number) => (n / 1e6).toFixed(1) + ' MB'
