@@ -155,9 +155,17 @@ func main() {
 			"space-systemd/zz-space.conf": "systemd/zz-space.conf",
 			// 后端的 drop-in, 同理落到 remarkable-space.service.d/
 			"space-systemd/10-store-api.conf": "systemd/10-store-api.conf",
+			// rm-appload: KOReader 这类 framebuffer 程序要靠它拿画布。
+			// 由 vendor/fetch-appload.sh 从官方拉下来 (不进仓库, 见那个脚本的说明)。
+			"third_party/appload/appload.so":         "third_party/appload/aarch64/appload.so",
+			"third_party/appload/qtfb-shim.so":       "third_party/appload/aarch64/shims/qtfb-shim.so",
+			"third_party/appload/qtfb-shim-32bit.so": "third_party/appload/aarch64/shims/qtfb-shim-32bit.so",
 		} {
 			p := filepath.Join(*spaceRepo, local)
 			if _, err := os.Stat(p); err != nil {
+				if strings.HasPrefix(local, "third_party/appload/") {
+					die("缺 %s —— 先跑 vendor/fetch-appload.sh 把官方包拉下来", p)
+				}
 				die("缺空间文件 %s", p)
 			}
 			files[zipName] = p

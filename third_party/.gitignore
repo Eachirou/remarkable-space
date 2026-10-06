@@ -1,0 +1,2 @@
+# 第三方发布包由 fetch-appload.sh 构建时拉取, 不进仓库 (见那个脚本开头的说明)
+appload/

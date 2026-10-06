@@ -350,6 +350,29 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 		log("✓ 应用商店握手已配置")
 	}
 
+	// rm-appload: KOReader 这类要 framebuffer 的程序靠它拿画布。装的是官方发布包,
+	// 版本和 sha256 锁在 third_party/fetch-appload.sh 里 —— 这东西对固件版本敏感,
+	// 旧版配新固件会让 xochitl 崩到切槽, 所以绝不能随便换。
+	if b.Has(apploadSrc) {
+		for _, f := range []struct{ src, dst string }{
+			{apploadSrc, "/home/root/xovi/extensions.d/appload.so"},
+			{"third_party/appload/qtfb-shim.so", "/home/root/shims/qtfb-shim.so"},
+			{"third_party/appload/qtfb-shim-32bit.so", "/home/root/shims/qtfb-shim-32bit.so"},
+		} {
+			data, err := b.ReadAll(f.src)
+			if err != nil {
+				return err
+			}
+			if err := c.WriteFile(ctx, "/tmp/"+path.Base(f.dst), bytes.NewReader(data), "755"); err != nil {
+				return err
+			}
+		}
+		if err := c.RunScript(ctx, apploadScript, nil); err != nil {
+			return fmt.Errorf("装 AppLoad 失败: %w", err)
+		}
+		log("✓ AppLoad 已装 (KOReader 等外部应用要用)")
+	}
+
 	if p.DeployRime { // install.sh 575-612
 		log("部署 rime 词库 (整句输入)...")
 		if err := c.RunScript(ctx, scripts.RimeSetup, nil); err != nil {
@@ -415,6 +438,23 @@ done
 sync; umount -l /tmp/lc 2>/dev/null || true; rmdir /tmp/lc 2>/dev/null || true
 rm -f /tmp/10-store-api.conf
 systemctl daemon-reload
+`
+
+// apploadSrc 是载荷里 appload 扩展的路径。
+const apploadSrc = "third_party/appload/appload.so"
+
+// apploadScript 把 appload 放进 xovi 的扩展目录, shim 放进 /home/root/shims。
+// 已启用的扩展都不带 .conf (xovi 按目录认), 所以只拷 .so 就是启用。
+const apploadScript = `set -eu
+mkdir -p /home/root/xovi/extensions.d /home/root/shims
+# 同名的 .bak/.old 会让 xovi 报 "processed more than once" 然后 fatal, 备份绝不能留在这个目录
+rm -f /home/root/xovi/extensions.d/appload.so.bak /home/root/xovi/extensions.d/appload.so.old
+mv /tmp/appload.so /home/root/xovi/extensions.d/appload.so
+mv /tmp/qtfb-shim.so /home/root/shims/qtfb-shim.so
+mv /tmp/qtfb-shim-32bit.so /home/root/shims/qtfb-shim-32bit.so
+chmod 755 /home/root/xovi/extensions.d/appload.so /home/root/shims/qtfb-shim.so /home/root/shims/qtfb-shim-32bit.so
+# 老版本可能躺在 inactive-extensions 里, 一并换掉, 免得下次有人手工启用旧的
+[ -f /home/root/xovi/inactive-extensions/appload.so ] && cp /home/root/xovi/extensions.d/appload.so /home/root/xovi/inactive-extensions/appload.so || true
 `
 
 // writeTar 按 install.sh 547 的方式打包: uid/gid 0, 路径以 ./ 开头, gzip。
