@@ -355,7 +355,7 @@ func (a *App) PlanSpace() (*deploy.Plan, error) {
 
 // RunSpace 执行「空间 + 底座」的安装/更新。
 func (a *App) RunSpace() error {
-	return a.runTask("安装 rmkit-cn", func(ctx context.Context) error {
+	return a.runTask("安装空间", func(ctx context.Context) error {
 		p, err := deploy.NewPlan(*a.info, a.bundle)
 		if err != nil {
 			return err
@@ -371,7 +371,7 @@ func (a *App) RepairPanel() error {
 
 // UninstallSpace 卸载空间与底座, 设备恢复出厂启动配置。
 func (a *App) UninstallSpace() error {
-	return a.runTask("卸载 rmkit-cn", func(ctx context.Context) error { return deploy.Uninstall(ctx, a.client) })
+	return a.runTask("卸载空间", func(ctx context.Context) error { return deploy.Uninstall(ctx, a.client) })
 }
 
 // PlanAndroid 生成单槽 Android 安装计划 (含预检阻断项)。

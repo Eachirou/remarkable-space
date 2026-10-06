@@ -278,7 +278,7 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 	}
 
 	// install.sh 543-566: 单次 tar 流式传输
-	log(fmt.Sprintf("传输 payload (%d 个文件, %.1f MB, 单次 SSH 流式)...", len(p.Files), float64(p.TotalBytes)/1e6))
+	log(fmt.Sprintf("传输载荷 (%d 个文件, %.1f MB, 单次 SSH 流式)...", len(p.Files), float64(p.TotalBytes)/1e6))
 	start := time.Now()
 	pr, pw := io.Pipe()
 	go func() { pw.CloseWithError(writeTar(pw, b, p.Files)) }()
