@@ -283,7 +283,8 @@ func (a *App) OpenBundle(path string) (*BundleInfo, error) {
 		Created: b.Manifest.Created, Notes: b.Manifest.Notes, Files: len(b.Manifest.Files), Bytes: total}, nil
 }
 
-// DetectProxy 探测可用代理 (环境变量 / macOS 系统代理 / Windows 注册表), 给前端预填。
+// DetectProxy 探测可用代理 (环境变量 / macOS 系统代理 / Windows 注册表)。
+// 只在下载失败后提示用 —— 默认不预填: 各人代理不一样, 填错了反而连不上。
 func (a *App) DetectProxy() string { return netx.DetectProxy() }
 
 // DownloadBundle 从 URL 下载安装包到本机缓存目录 (进度走事件 "progress"), 然后打开校验。

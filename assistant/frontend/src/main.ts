@@ -156,7 +156,7 @@ function renderDo(i: Info) {
         <div class="row">
           <button id="btn-plan" class="secondary" ${busy || !bundleOk ? 'disabled' : ''}>预览将写入的内容</button>
           ${bundleOk ? `<button id="btn-choose" class="secondary" ${busy}>换一个安装包…</button>` : ''}
-          <label>代理 <input id="proxy" value="${esc(state.proxy)}" placeholder="留空直连" size="22" ${busy}></label>
+          <label>代理 <input id="proxy" value="${esc(state.proxy)}" placeholder="一般不用填" size="22" ${busy}></label>
         </div>
         <p class="hint">安装包从我们自己的服务器下载，直连即可，一般不用填代理。</p>
         ${state.action === 'space' ? `
@@ -322,12 +322,21 @@ function bind() {
 
   // 第三步
   $('#btn-choose')?.addEventListener('click', async () => { try { const b = (await ChooseBundle()) as BundleInfo | null; if (b) { state.bundle = b; render() } } catch (e) { appendLog('✗ ' + String(e)) } })
-  $('#proxy')?.addEventListener('change', (e) => { state.proxy = (e.target as HTMLInputElement).value.trim(); try { localStorage.setItem('proxy', state.proxy) } catch { /* 忽略 */ } })
+  $('#proxy')?.addEventListener('change', (e) => { state.proxy = (e.target as HTMLInputElement).value.trim(); try { localStorage.setItem('proxy.manual', state.proxy) } catch { /* 忽略 */ } })
   $('#btn-download')?.addEventListener('click', () => guarded(async () => {
     const name = state.action === 'space' ? 'space-bundle.zip' : 'android-rmppm-bundle.zip'
     state.proxy = (($('#proxy') as HTMLInputElement)?.value || '').trim()
     $('#dl-progress')?.classList.remove('hidden')
-    state.bundle = (await DownloadBundle([RELEASE_BASE + name], '', state.proxy)) as BundleInfo
+    try {
+      state.bundle = (await DownloadBundle([RELEASE_BASE + name], '', state.proxy)) as BundleInfo
+    } catch (e) {
+      // 下不动的时候才提代理。探测到系统代理就告诉他可以去「高级」里填上再试。
+      if (!state.proxy) {
+        const sys = await DetectProxy().catch(() => '')
+        if (sys) appendLog('提示：检测到系统代理 ' + sys + '，若直连下不动，可在「高级」里填上再试。')
+      }
+      throw e
+    }
   }))
   $('#chk-replace')?.addEventListener('change', (e) => { state.replaceSystem = (e.target as HTMLInputElement).checked })
   $('#chk-removedata')?.addEventListener('change', (e) => { state.removeData = (e.target as HTMLInputElement).checked })
@@ -378,9 +387,11 @@ EventsOn('progress', (p: { done: number; total: number }) => {
   if (bar && p.total > 0) bar.style.width = Math.min(100, (p.done / p.total) * 100).toFixed(1) + '%'
 })
 
-try { state.proxy = localStorage.getItem('proxy') || '' } catch { /* 忽略 */ }
+// 代理框默认留空。以前启动时会探测系统代理自动填进去 —— 可各人代理不一样,
+// 填错了反而连不上, 不懂的人也不知道那一栏该删。现在只有用户自己填过才记住。
+// (key 换过名: 老版本自动探测写进 'proxy' 的值就此失效)
+try { state.proxy = localStorage.getItem('proxy.manual') || '' } catch { /* 忽略 */ }
 render()
 LoadPassword('10.11.99.1').then((pw) => { if (pw) { state.password = pw; render(); appendLog('已从钥匙串读到保存的密码') } })
 LogDir().then((d) => appendLog('审计日志目录: ' + d))
 Version().then((v) => { state.version = v; render(); appendLog('版本 ' + v) })
-if (!state.proxy) DetectProxy().then((p) => { if (p) { state.proxy = p; appendLog('探测到代理: ' + p) } })
