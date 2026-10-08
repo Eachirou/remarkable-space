@@ -236,7 +236,7 @@ func (a *App) Disconnect() {
 	}
 }
 
-// BundleInfo 是给前端看的载荷包摘要。
+// BundleInfo 是给前端看的安装包摘要。
 type BundleInfo struct {
 	Path      string `json:"path"`
 	Component string `json:"component"`
@@ -247,11 +247,11 @@ type BundleInfo struct {
 	Bytes     int64  `json:"bytes"`
 }
 
-// ChooseBundle 弹文件选择框选本地载荷包。
+// ChooseBundle 弹文件选择框选本地安装包。
 func (a *App) ChooseBundle() (*BundleInfo, error) {
 	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:   "选择载荷包 (space-bundle-*.zip / android-rmppm-bundle-*.zip)",
-		Filters: []runtime.FileFilter{{DisplayName: "载荷包 (*.zip)", Pattern: "*.zip"}},
+		Title:   "选择安装包 (space-bundle-*.zip / android-rmppm-bundle-*.zip)",
+		Filters: []runtime.FileFilter{{DisplayName: "安装包 (*.zip)", Pattern: "*.zip"}},
 	})
 	if err != nil || path == "" {
 		return nil, err
@@ -259,7 +259,7 @@ func (a *App) ChooseBundle() (*BundleInfo, error) {
 	return a.OpenBundle(path)
 }
 
-// OpenBundle 打开并校验载荷包 (逐文件 sha256)。
+// OpenBundle 打开并校验安装包 (逐文件 sha256)。
 func (a *App) OpenBundle(path string) (*BundleInfo, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -267,10 +267,10 @@ func (a *App) OpenBundle(path string) (*BundleInfo, error) {
 		_ = a.bundle.Close()
 		a.bundle = nil
 	}
-	a.log("校验载荷包 " + path)
+	a.log("校验安装包 " + path)
 	b, err := bundle.Open(path, true)
 	if err != nil {
-		a.log("载荷包无效: " + err.Error())
+		a.log("安装包无效: " + err.Error())
 		return nil, err
 	}
 	a.bundle = b
@@ -278,7 +278,7 @@ func (a *App) OpenBundle(path string) (*BundleInfo, error) {
 	for _, e := range b.Manifest.Files {
 		total += e.Size
 	}
-	a.log(fmt.Sprintf("载荷包 OK: %s 版本 %s, %d 个文件", b.Manifest.Component, b.Manifest.Version, len(b.Manifest.Files)))
+	a.log(fmt.Sprintf("安装包 OK: %s 版本 %s, %d 个文件", b.Manifest.Component, b.Manifest.Version, len(b.Manifest.Files)))
 	return &BundleInfo{Path: path, Component: string(b.Manifest.Component), Version: b.Manifest.Version,
 		Created: b.Manifest.Created, Notes: b.Manifest.Notes, Files: len(b.Manifest.Files), Bytes: total}, nil
 }
@@ -286,7 +286,7 @@ func (a *App) OpenBundle(path string) (*BundleInfo, error) {
 // DetectProxy 探测可用代理 (环境变量 / macOS 系统代理 / Windows 注册表), 给前端预填。
 func (a *App) DetectProxy() string { return netx.DetectProxy() }
 
-// DownloadBundle 从 URL 下载载荷包到本机缓存目录 (进度走事件 "progress"), 然后打开校验。
+// DownloadBundle 从 URL 下载安装包到本机缓存目录 (进度走事件 "progress"), 然后打开校验。
 // proxy 为空则直连; 可选 sha256 与整个 zip 比对 (Release 页公布的值)。
 // 多个地址按顺序试, 前一个不行再换下一个。GitHub 在国内常连不上, 而自建服务器
 // 带宽有限 —— 两头都留着, 谁通用谁。
@@ -376,7 +376,7 @@ func (a *App) PlanSpace() (*deploy.Plan, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.info == nil || a.bundle == nil {
-		return nil, errors.New("先连接设备并选择载荷包")
+		return nil, errors.New("先连接设备并选择安装包")
 	}
 	return deploy.NewPlan(*a.info, a.bundle)
 }
@@ -407,7 +407,7 @@ func (a *App) PlanAndroid(replaceSystem bool) (*android.Plan, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.info == nil || a.bundle == nil {
-		return nil, errors.New("先连接设备并选择载荷包")
+		return nil, errors.New("先连接设备并选择安装包")
 	}
 	present, err := a.androidSystemPresent()
 	if err != nil {

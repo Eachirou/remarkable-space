@@ -1,4 +1,4 @@
-// mkbundle 从仓库产物生成桌面助手的载荷包 (zip + manifest.json, 每文件 sha256)。
+// mkbundle 从仓库产物生成桌面助手的安装包 (zip + manifest.json, 每文件 sha256)。
 //
 //	go run ./cmd/mkbundle -component space -repo ../../rmkit-cn -space-repo .. -out space-bundle.zip
 //	go run ./cmd/mkbundle -component android-rmppm -android-dir <目录> -out android-rmppm-bundle.zip
@@ -54,7 +54,7 @@ func main() {
 	component := flag.String("component", "space", "space | android-rmppm")
 	repo := flag.String("repo", "../../rmkit-cn", "rmkit-cn 底座仓库根目录 (冻结, 只取产物)")
 	spaceRepo := flag.String("space-repo", "..", "remarkable-space 仓库根目录")
-	androidDir := flag.String("android-dir", "", "android 载荷目录")
+	androidDir := flag.String("android-dir", "", "android 文件目录")
 	out := flag.String("out", "", "输出 zip")
 	version := flag.String("version", time.Now().Format("20060102-1504"), "版本串")
 	notes := flag.String("notes", "", "说明")

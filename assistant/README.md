@@ -26,7 +26,7 @@ Mac / Windows 上的桌面程序，USB 直连 reMarkable，一次把「空间」
 # 1. 先在仓库根出后端二进制
 cd .. && make all
 
-# 2. 打载荷包 (底座产物取自 RMKIT_REPO, 默认 ../../rmkit-cn)
+# 2. 打安装包 (底座产物取自 RMKIT_REPO, 默认 ../../rmkit-cn)
 cd assistant && make bundle
 
 # 3. 构建界面

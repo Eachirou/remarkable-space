@@ -1,4 +1,4 @@
-// Package bundle 定义桌面助手的载荷包: 一个 zip (可随机访问, 大文件不必整包读入内存),
+// Package bundle 定义桌面助手的安装包: 一个 zip (可随机访问, 大文件不必整包读入内存),
 // 根目录有 manifest.json 记录版本、组件与每个文件的 sha256。
 //
 // 包由 cmd/mkbundle 从仓库产物生成, 发布为 GitHub Release 附件; 用户也可以选本地文件。
@@ -43,7 +43,7 @@ type Manifest struct {
 	Files     map[string]Entry `json:"files"`
 }
 
-// Bundle 是打开的载荷包。
+// Bundle 是打开的安装包。
 type Bundle struct {
 	Path     string
 	Manifest Manifest
@@ -51,11 +51,11 @@ type Bundle struct {
 	index    map[string]*zip.File
 }
 
-// Open 打开并校验载荷包。verify=true 时逐文件算 sha256 (首次打开建议开, 之后可关)。
+// Open 打开并校验安装包。verify=true 时逐文件算 sha256 (首次打开建议开, 之后可关)。
 func Open(path string, verify bool) (*Bundle, error) {
 	zr, err := zip.OpenReader(path)
 	if err != nil {
-		return nil, fmt.Errorf("打不开载荷包 %s: %w", path, err)
+		return nil, fmt.Errorf("打不开安装包 %s: %w", path, err)
 	}
 	b := &Bundle{Path: path, zr: zr, index: map[string]*zip.File{}}
 	for _, f := range zr.File {
@@ -64,7 +64,7 @@ func Open(path string, verify bool) (*Bundle, error) {
 	mf, ok := b.index[ManifestName]
 	if !ok {
 		_ = zr.Close()
-		return nil, errors.New("载荷包缺 manifest.json, 不是空间助手的包")
+		return nil, errors.New("安装包缺 manifest.json, 不是空间助手的包")
 	}
 	rc, err := mf.Open()
 	if err != nil {
@@ -80,7 +80,7 @@ func Open(path string, verify bool) (*Bundle, error) {
 	for name := range b.Manifest.Files {
 		if _, ok := b.index[name]; !ok {
 			_ = zr.Close()
-			return nil, fmt.Errorf("载荷包缺文件 %s (清单有, 包里没有)", name)
+			return nil, fmt.Errorf("安装包缺文件 %s (清单有, 包里没有)", name)
 		}
 	}
 	if verify {
@@ -115,7 +115,7 @@ func (b *Bundle) Names() []string {
 func (b *Bundle) Open(name string) (io.ReadCloser, error) {
 	f, ok := b.index[name]
 	if !ok {
-		return nil, fmt.Errorf("载荷包没有 %s", name)
+		return nil, fmt.Errorf("安装包没有 %s", name)
 	}
 	return f.Open()
 }
@@ -150,7 +150,7 @@ func (b *Bundle) Verify() error {
 			return fmt.Errorf("%s 大小不符 (清单 %d, 实际 %d)", name, e.Size, n)
 		}
 		if got := hex.EncodeToString(h.Sum(nil)); got != e.SHA256 {
-			return fmt.Errorf("%s 校验失败 (sha256 不符), 载荷包已损坏或被改动", name)
+			return fmt.Errorf("%s 校验失败 (sha256 不符), 安装包已损坏或被改动", name)
 		}
 	}
 	return nil

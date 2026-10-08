@@ -30,7 +30,7 @@ import (
 func main() {
 	host := flag.String("host", "10.11.99.1", "设备地址")
 	password := flag.String("password", os.Getenv("RM_PASSWORD"), "SSH 密码 (或环境变量 RM_PASSWORD)")
-	bpath := flag.String("bundle", "", "载荷包 zip")
+	bpath := flag.String("bundle", "", "安装包 zip")
 	replace := flag.Bool("replace-system", false, "android: 覆盖已有 Android 系统")
 	removeData := flag.Bool("remove-data", false, "uninstall-android: 连同 /home 数据删除")
 	offArch := flag.String("arch", "aarch64", "plan-offline: 架构 aarch64 | armv7l")
@@ -74,7 +74,7 @@ func main() {
 		b, err = bundle.Open(*bpath, true)
 		die(err)
 		defer b.Close()
-		fmt.Printf("载荷包: %s 版本 %s, %d 个文件\n", b.Manifest.Component, b.Manifest.Version, len(b.Manifest.Files))
+		fmt.Printf("安装包: %s 版本 %s, %d 个文件\n", b.Manifest.Component, b.Manifest.Version, len(b.Manifest.Files))
 	}
 	need := func() {
 		if b == nil {

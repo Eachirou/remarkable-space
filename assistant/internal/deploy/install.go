@@ -31,7 +31,7 @@ import (
 	"github.com/boangs/remarkable-space/assistant/internal/sshx"
 )
 
-// FileEntry 是 payload 里一个文件: 载荷包内路径 → 设备路径。
+// FileEntry 是 payload 里一个文件: 安装包内路径 → 设备路径。
 type FileEntry struct {
 	Device string `json:"device"`
 	Source string `json:"source"`
@@ -82,10 +82,10 @@ func archFor(a string) (arch, error) {
 	return arch{}, fmt.Errorf("不支持的架构: %s (仅支持 aarch64 / armv7l)", a)
 }
 
-// NewPlan 根据探测结果与载荷包内容生成计划 (纯计算, 不碰设备)。
+// NewPlan 根据探测结果与安装包内容生成计划 (纯计算, 不碰设备)。
 func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	if b.Manifest.Component != bundle.ComponentSpace {
-		return nil, fmt.Errorf("载荷包组件是 %s, 不是 space", b.Manifest.Component)
+		return nil, fmt.Errorf("安装包组件是 %s, 不是 space", b.Manifest.Component)
 	}
 	if info.InAndroidMode {
 		return nil, errors.New("设备当前在 Android 模式, 请先回到 reMarkable 系统")
@@ -114,7 +114,7 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	for _, f := range []string{"space-dist/" + ar.spaceBin, "dist/" + p.imeBin, "dist/" + ar.imeHook, "dist/" + ar.qmdTool,
 		"vendor/extensions/xovi-message-broker-" + ar.ext + ".so", "dist/reMarkable_zh_CN.qm", "qmd/zh_CN.rcc"} {
 		if !b.Has(f) {
-			return nil, fmt.Errorf("载荷包缺必备产物 %s", f)
+			return nil, fmt.Errorf("安装包缺必备产物 %s", f)
 		}
 	}
 	p.DeployAudio = b.Has("vendor/audio/rmkit-audio-" + ar.ext + ".tar.gz")
@@ -126,7 +126,7 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	if p.NeedXovi {
 		p.xoviTar = "vendor/xovi/xovi-" + ar.xovi + ".tar.gz"
 		if !b.Has(p.xoviTar) || !b.Has("vendor/xovi/xochitl-xovi") {
-			return nil, errors.New("设备没有 xovi 且载荷包不含 vendor/xovi, 无法自动部署")
+			return nil, errors.New("设备没有 xovi 且安装包不含 vendor/xovi, 无法自动部署")
 		}
 	}
 	// install.sh 223-241: 按架构的 drop-in [Unit] 头
@@ -144,7 +144,7 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	}
 	must := func(device, source string, mode int64) error {
 		if !b.Has(source) {
-			return fmt.Errorf("载荷包缺 %s", source)
+			return fmt.Errorf("安装包缺 %s", source)
 		}
 		add(device, source, mode)
 		return nil
@@ -278,7 +278,7 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 	}
 
 	// install.sh 543-566: 单次 tar 流式传输
-	log(fmt.Sprintf("传输载荷 (%d 个文件, %.1f MB, 单次 SSH 流式)...", len(p.Files), float64(p.TotalBytes)/1e6))
+	log(fmt.Sprintf("传输文件 (%d 个文件, %.1f MB, 单次 SSH 流式)...", len(p.Files), float64(p.TotalBytes)/1e6))
 	start := time.Now()
 	pr, pw := io.Pipe()
 	go func() { pw.CloseWithError(writeTar(pw, b, p.Files)) }()
@@ -305,7 +305,7 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 	switch strings.TrimSpace(res.Stdout) {
 	case "126", "127":
 		return fmt.Errorf("后端二进制在设备上跑不起来 (架构不符?), 已停止安装, 设备未改动; "+
-			"载荷包里给的是 %s 版", p.spaceBin)
+			"安装包里给的是 %s 版", p.spaceBin)
 	}
 	log("✓ 后端二进制自检通过")
 
@@ -405,7 +405,7 @@ func Uninstall(ctx context.Context, c *sshx.Client) error {
 	return c.RunScript(ctx, scripts.Uninstall, nil)
 }
 
-// spaceDropinSrc 是载荷包里空间那份 xochitl drop-in 的路径。
+// spaceDropinSrc 是安装包里空间那份 xochitl drop-in 的路径。
 const spaceDropinSrc = "space-systemd/zz-space.conf"
 
 // spaceDropinScript 把它双写到 /etc 与 ext4 lower。与底座的 drop-in 并存, 互不覆盖。
@@ -422,7 +422,7 @@ rm -f /tmp/zz-space.conf
 systemctl daemon-reload
 `
 
-// storeAPIDropinSrc 是载荷包里后端那份 drop-in 的路径 (应用商店握手接口)。
+// storeAPIDropinSrc 是安装包里后端那份 drop-in 的路径 (应用商店握手接口)。
 const storeAPIDropinSrc = "space-systemd/10-store-api.conf"
 
 // storeAPIDropinScript 同样双写 /etc 与 ext4 lower —— /etc 是 tmpfs overlay,
@@ -440,7 +440,7 @@ rm -f /tmp/10-store-api.conf
 systemctl daemon-reload
 `
 
-// apploadSrc 是载荷里 appload 扩展的路径。
+// apploadSrc 是安装包里 appload 扩展的路径。
 const apploadSrc = "third_party/appload/appload.so"
 
 // apploadScript 把 appload 放进 xovi 的扩展目录, shim 放进 /home/root/shims。

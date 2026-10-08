@@ -1,4 +1,4 @@
-# 单槽 Android (RMPPM) 设备端安装: 载荷已由助手放到 $STAGE, 本脚本把它们落到本槽。
+# 单槽 Android (RMPPM) 设备端安装: 文件已由助手放到 $STAGE, 本脚本把它们落到本槽。
 # 设计要点 (与 2026-09-06 跑通的手工安装一致):
 #   - 只动当前槽 rootfs 的 /boot /lib/modules /usr/bin /sbin/init 与 rootfs 下层 /etc;
 #     Android 系统与数据放共享的 /home, rootfs 只多 ~27MB。
@@ -6,12 +6,12 @@
 #     原链接备份为 /sbin/init.systemd-orig, 卸载即还原。
 #   - 出厂链接 /boot/fitImage.ahab 全程不动, 直到用户点"进 Android" (boot-android.sh) 才临时指向
 #     android 内核, 而包装脚本开机第一件事就是把它改回来 —— 任何失败都回到 reMarkable。
-# env: STAGE (载荷目录) REPLACE_SYSTEM (1=覆盖已有 /home/root/android-system)
+# env: STAGE (暂存目录) REPLACE_SYSTEM (1=覆盖已有 /home/root/android-system)
 set -e
 STAGE=${STAGE:-/tmp/rmkit-android-stage}
 fail() { echo "  ✗ $*"; exit 1; }
 
-[ -d "$STAGE" ] || fail "载荷目录 $STAGE 不存在"
+[ -d "$STAGE" ] || fail "暂存目录 $STAGE 不存在"
 [ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ] || fail "当前不是 reMarkable 系统 (PID1 非 systemd), 请先回原厂系统"
 STOCK=$(readlink /boot/fitImage.ahab 2>/dev/null || true)
 case "$STOCK" in
@@ -41,7 +41,7 @@ echo "    /lib/modules/$MODNAME ($(find /lib/modules/$MODNAME -name '*.ko*' | wc
 
 echo "  → 3/8 宿主二进制"
 for b in rm-android-init-ss rm-touch-relay rm-epd-bridge rm-native-controls rm-wifi-config; do
-  [ -f "$STAGE/$b" ] || fail "载荷缺 $b"
+  [ -f "$STAGE/$b" ] || fail "安装包缺 $b"
   cp "$STAGE/$b" "/usr/bin/$b.new"; chmod 755 "/usr/bin/$b.new"; mv "/usr/bin/$b.new" "/usr/bin/$b"
 done
 cp "$STAGE/propset" /home/root/propset; chmod 755 /home/root/propset
@@ -88,8 +88,8 @@ if [ -f "$STAGE/android-system.tar.gz" ]; then
     echo "    已解包"
   fi
 else
-  [ -e /home/root/android-system/system/bin/init ] || fail "载荷不含 Android 系统包, 设备上也没有 /home/root/android-system"
-  echo "    载荷不含系统包, 沿用设备上已有的"
+  [ -e /home/root/android-system/system/bin/init ] || fail "安装包不含 Android 系统包, 设备上也没有 /home/root/android-system"
+  echo "    安装包不含系统包, 沿用设备上已有的"
 fi
 
 echo "  → 6b/8 Android 系统内的两处修补 (幂等)"

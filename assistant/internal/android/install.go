@@ -1,5 +1,5 @@
 // Package android 是 RMPPM 单槽 Android 的安装计划与执行 (主机侧)。
-// 设备端逻辑在 scripts/android-install.sh; 这里负责预检、把载荷流式送到设备的暂存目录、
+// 设备端逻辑在 scripts/android-install.sh; 这里负责预检、把安装包内容流式送到设备的暂存目录、
 // 调用设备端脚本, 以及"进 Android / 回原厂"两个便捷动作。
 package android
 
@@ -29,7 +29,7 @@ const stageDir = "/home/root/.rmkit-android-stage"
 // 显示桥 v55 按这条线的 ABI 编译, 更早固件 (3.27, Qt 6.8) 需要另一套桥, 直接拒绝。
 const minFW = 20260702000000
 
-// 需要的载荷 (bundle 内 android/ 下的名字); android-system.tar.gz 可选 (设备已有时可省)。
+// 需要的安装包内容 (bundle 内 android/ 下的名字); android-system.tar.gz 可选 (设备已有时可省)。
 var required = []string{"fitImage.ahab-android", "modules.tar.gz", "rm-android-init-ss", "rm-touch-relay",
 	"rm-epd-bridge", "rm-native-controls", "propset", "boot-android.sh", "init-wrapper.tmpl.sh",
 	"android-kernel-revert.service.tmpl", "udhcpd-usb.conf", "udhcpd-usb1.conf", "rm-wifi-config"}
@@ -38,7 +38,7 @@ var required = []string{"fitImage.ahab-android", "modules.tar.gz", "rm-android-i
 type Plan struct {
 	FWVersion     string   `json:"fwVersion"`
 	Slot          string   `json:"slot"`
-	HasSystemPkg  bool     `json:"hasSystemPkg"`  // 载荷含 Android 系统包
+	HasSystemPkg  bool     `json:"hasSystemPkg"`  // 安装包内容含 Android 系统包
 	ReplaceSystem bool     `json:"replaceSystem"` // 用户勾选: 覆盖设备已有系统
 	SystemPresent bool     `json:"systemPresent"` // 设备已有 /home/root/android-system
 	Files         []string `json:"files"`
@@ -50,7 +50,7 @@ type Plan struct {
 // NewPlan 做预检并生成计划 (纯计算)。
 func NewPlan(info probe.Info, b *bundle.Bundle, systemPresent, replaceSystem bool) (*Plan, error) {
 	if b.Manifest.Component != bundle.ComponentAndroid {
-		return nil, fmt.Errorf("载荷包组件是 %s, 不是 android-rmppm", b.Manifest.Component)
+		return nil, fmt.Errorf("安装包组件是 %s, 不是 android-rmppm", b.Manifest.Component)
 	}
 	p := &Plan{FWVersion: info.FWVersion, Slot: info.ActiveSlot, SystemPresent: systemPresent, ReplaceSystem: replaceSystem,
 		Files: []string{}, Warnings: []string{}, Blockers: []string{}} // JSON 保证 [] 而非 null
@@ -80,12 +80,12 @@ func NewPlan(info probe.Info, b *bundle.Bundle, systemPresent, replaceSystem boo
 	}
 	for _, r := range required {
 		if !b.Has("android/" + r) {
-			block("载荷包缺 android/" + r)
+			block("安装包缺 android/" + r)
 		}
 	}
 	p.HasSystemPkg = b.Has("android/android-system.tar.gz")
 	if !p.HasSystemPkg && !systemPresent {
-		block("载荷包不含 Android 系统包, 设备上也没有 /home/root/android-system")
+		block("安装包不含 Android 系统包, 设备上也没有 /home/root/android-system")
 	}
 	if p.HasSystemPkg && (!systemPresent || replaceSystem) && info.HomeFreeMB < 4096 {
 		block(fmt.Sprintf("/home 剩余 %d MB, 解包 Android 系统需要至少 4 GB", info.HomeFreeMB))
@@ -114,7 +114,7 @@ func Run(ctx context.Context, c *sshx.Client, b *bundle.Bundle, p *Plan, log ssh
 	if len(p.Blockers) > 0 {
 		return errors.New("预检未通过: " + strings.Join(p.Blockers, "; "))
 	}
-	log(fmt.Sprintf("上传 Android 载荷到 %s (%.0f MB)...", stageDir, float64(p.TotalBytes)/1e6))
+	log(fmt.Sprintf("上传 Android 文件到 %s (%.0f MB)...", stageDir, float64(p.TotalBytes)/1e6))
 	start := time.Now()
 	pr, pw := io.Pipe()
 	go func() { pw.CloseWithError(writeTar(pw, b, p.Files)) }()
