@@ -26,8 +26,8 @@ func main() {
 	app := NewApp()
 	err := wails.Run(&options.App{
 		Title:            "空间助手",
-		Width:            980,
-		Height:           760,
+		Width:            1120,
+		Height:           860,
 		MinWidth:         820,
 		MinHeight:        600,
 		AssetServer:      &assetserver.Options{Assets: assets},

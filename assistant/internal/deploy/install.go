@@ -41,14 +41,15 @@ type FileEntry struct {
 
 // Plan 是一次 rmkit-cn 安装的完整计划, 先给用户过目再执行。
 type Plan struct {
-	Arch        string `json:"arch"`
-	ModelKey    string `json:"modelKey"`
-	FWVersion   string `json:"fwVersion"`
-	NeedXovi    bool   `json:"needXovi"`
-	DeployRime  bool   `json:"deployRime"`
-	DeployAudio bool   `json:"deployAudio"` // install.sh: vendor/audio/rmkit-audio-<arch>.tar.gz 存在即部署 (蓝牙耳机放歌)
-	QMLInject   bool   `json:"qmlInject"`
-	Librarian   bool   `json:"librarian"`
+	Arch          string `json:"arch"`
+	ModelKey      string `json:"modelKey"`
+	FWVersion     string `json:"fwVersion"`
+	BundleVersion string `json:"bundleVersion"` // 这次装的安装包版本, 部署后写进设备
+	NeedXovi      bool   `json:"needXovi"`
+	DeployRime    bool   `json:"deployRime"`
+	DeployAudio   bool   `json:"deployAudio"` // install.sh: vendor/audio/rmkit-audio-<arch>.tar.gz 存在即部署 (蓝牙耳机放歌)
+	QMLInject     bool   `json:"qmlInject"`
+	Librarian     bool   `json:"librarian"`
 
 	Files      []FileEntry `json:"files"`
 	TotalBytes int64       `json:"totalBytes"`
@@ -94,7 +95,7 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Plan{Arch: info.Arch, ModelKey: info.ModelKey, FWVersion: info.FWVersion, NeedXovi: !info.HaveXovi,
+	p := &Plan{Arch: info.Arch, ModelKey: info.ModelKey, FWVersion: info.FWVersion, BundleVersion: b.Manifest.Version, NeedXovi: !info.HaveXovi,
 		Files: []FileEntry{}, Warnings: []string{}, // 保证 JSON 是 [] 而不是 null (前端直接 .map)
 		xoviArch: ar.xovi, uploadBin: ar.uploadBin, imeBin: ar.imeBin, spaceBin: ar.spaceBin}
 	if info.ModelKey == "unknown" {
@@ -293,6 +294,13 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 		return err
 	}
 	log("✓ .last_fw_version 已写入 (" + p.FWVersion + ")")
+
+	// 记一笔装的是哪个安装包。助手下次连上就能告诉用户当前版本, 也才好判断要不要更新。
+	if p.BundleVersion != "" {
+		if err := c.WriteFile(ctx, "/home/root/rmkit-cn/.space_version", strings.NewReader(p.BundleVersion), "644"); err != nil {
+			return err
+		}
+	}
 
 	// 架构自检: 趁还没碰服务和 drop-in, 先确认后端二进制在这台设备上真能执行。
 	// 架构推错 (给 armv7 的机器推 aarch64) 只会在运行时报 Exec format error, 等到
