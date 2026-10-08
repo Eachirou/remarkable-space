@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -307,28 +310,77 @@ func (a *App) DownloadBundle(urls []string, sha, proxy string) (*BundleInfo, err
 			return nil, err
 		}
 		if i < len(urls)-1 {
-			a.log("✗ " + err.Error())
+			a.log("✗ " + scrubErr(err, urls))
 			a.log("换下一个地址再试…")
 		}
 	}
-	return nil, lastErr
+	// 返回给前端的也要过一道 —— 前端会原样 appendLog, 不过滤就等于白过滤。
+	return nil, errors.New(scrubErr(lastErr, urls))
 }
+
+// scrubURL 把报错里的完整地址换成文件名。net/http 的错误长这样:
+//
+//	Get "https://example.com/space/x.zip": dial tcp ...
+//
+// 用户截图发日志求助时, 不该顺带把分发地址一起发出去。
+func scrubURL(s string) string {
+	return urlInErr.ReplaceAllStringFunc(s, func(m string) string {
+		u, err := url.Parse(strings.Trim(m, `"`))
+		if err != nil {
+			return "服务器"
+		}
+		// 只取路径里的文件名。主机名、路径、query 一概不留 —— 用户截图发日志
+		// 求助时, 不该顺带把分发地址发出去。
+		name := path.Base(u.Path)
+		if name == "" || name == "." || name == "/" || strings.HasSuffix(u.Path, "/") {
+			return "服务器"
+		}
+		return name
+	})
+}
+
+// scrubErr 在 scrubURL 之上再抹掉主机名本身。DNS 和 TCP 的错误不带 scheme,
+// 长这样: `dial tcp: lookup example.com: no such host` —— 正则抓不到, 得拿
+// 本次用过的地址逐个替换。
+func scrubErr(err error, urls []string) string {
+	s := scrubURL(err.Error())
+	for _, raw := range urls {
+		u, e := url.Parse(raw)
+		if e != nil {
+			continue
+		}
+		for _, h := range []string{u.Host, u.Hostname()} {
+			if h != "" {
+				s = strings.ReplaceAll(s, h, "服务器")
+			}
+		}
+	}
+	return s
+}
+
+var urlInErr = regexp.MustCompile(`https?://[^\s"]+`)
 
 func (a *App) downloadOne(url, sha, proxy string) (*BundleInfo, error) {
 	dir, _ := os.UserCacheDir()
 	dir = filepath.Join(dir, "space-assistant")
 	_ = os.MkdirAll(dir, 0o755)
 	dst := filepath.Join(dir, filepath.Base(strings.Split(url, "?")[0]))
+	// 日志只报文件名, 不报地址 —— 日志会被用户截图发出来, 分发地址没必要跟着走。
+	name := filepath.Base(strings.Split(url, "?")[0])
 	if strings.TrimSpace(proxy) != "" {
-		a.log("下载 " + url + " (经代理 " + strings.TrimSpace(proxy) + ")")
+		a.log("下载 " + name + " (经代理 " + strings.TrimSpace(proxy) + ")")
 	} else {
-		a.log("下载 " + url + " (直连)")
+		a.log("下载 " + name + " (直连)")
 	}
 	client, err := netx.Client(proxy)
 	if err != nil {
 		return nil, fmt.Errorf("代理地址无效: %w", err)
 	}
-	ctx, cancel := context.WithCancel(a.ctx)
+	parent := a.ctx
+	if parent == nil { // 没跑在 Wails 里 (测试), 照样能下载
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
 	a.mu.Lock()
 	a.cancel = cancel
 	a.mu.Unlock()
