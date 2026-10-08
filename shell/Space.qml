@@ -71,7 +71,7 @@ Rectangle {
     }
     function saveShellCfg() {
         request("PUT", baseUrl + "/space/apps/shell/data/config",
-                { screenMode: space.screenMode, hero: space.heroChoice }, null)
+                { screenMode: space.screenMode, hero: space.heroChoice, lang: space.langPref }, null)
     }
 
     // 首页顶部那张大卡放什么:
@@ -130,12 +130,12 @@ Rectangle {
     // 下载地址由服务端按设备发, 没授权就根本没有 zip —— 所以这里不是"点了没反应",
     // 而是压根不该让它看起来能装。
     function buyPrompt(app) {
-        var lines = ["「" + (app.name || app.id) + "」还没有购买。"]
-        if (app.price) lines.push("价格：" + app.price)
+        var lines = [space.st("buy_not_purchased", { name: app.name || app.id })]
+        if (app.price) lines.push(space.st("buy_price", { price: app.price }))
         lines.push("")
-        lines.push("本机设备码：" + (space.deviceCode !== "" ? space.deviceCode : "（读不到）"))
-        lines.push(app.buy ? app.buy : "把设备码发给作者。")
-        lines.push("开通后在本页点右上角刷新，就能装了。")
+        lines.push(space.st("buy_devicecode", { code: space.deviceCode !== "" ? space.deviceCode : space.st("devicecode_unknown") }))
+        lines.push(app.buy ? app.buy : space.st("buy_hint_1"))
+        lines.push(space.st("buy_hint_2"))
         space.ask(lines.join("\n"), null)
     }
 
@@ -166,10 +166,10 @@ Rectangle {
     property string busyText: ""
     property var confirmApp: null
     // 通用确认框。原来只为"重启进 Android"这类 launch.confirm 服务, 删应用也得问一句,
-    // 所以拆出一条独立的: 文案 + 一个点"确定"才跑的回调。
+    // 所以拆出一条独立的: 文案 + 一个点space.st("ok")才跑的回调。
     property string askText: ""
     property var askAction: null
-    // action 为 null 时就是一条提示 (只有"知道了"), 不是在问要不要做什么。
+    // action 为 null 时就是一条提示 (只有space.st("got_it")), 不是在问要不要做什么。
     property bool askNotice: false
     function ask(text, action) { askText = text; askAction = action; askNotice = !action }
     function askDone(ok) {
@@ -217,6 +217,11 @@ Rectangle {
         function svcGet(path, cb) { space.request("GET", serviceUrl + path, null, cb) }
         function svcPost(path, body, cb) { space.request("POST", serviceUrl + path, body, cb) }
         function localNow() { return space.localNow() }   // 按设备时区 (见 /space/apps 的 tzOffset) 的当前时间
+        // 当前界面语言 (zh-CN / en)。跟随 reMarkable 系统设置, 应用不用自己判断。
+        readonly property string lang: space.lang
+        // 查本应用 i18n/<lang>.json 的词条; 缺词回落 en, 再回落 key 本身。
+        // 不要用 qsTr —— 注入进来的 QML 查不到 Qt 的翻译表 (已验证), tr 走自己的词典。
+        function tr(key) { return space.tr(key) }
         // 应用数据: 存到 dataDir/<key>.json (纯 QML 应用的持久化); 小组件要传自己的 app.id
         function dataGet(id, key, cb) { space.request("GET", space.baseUrl + "/space/apps/" + id + "/data/" + key, null, cb) }
         function dataPut(id, key, obj, cb) { space.request("PUT", space.baseUrl + "/space/apps/" + id + "/data/" + key, obj, cb) }
@@ -242,14 +247,126 @@ Rectangle {
         x.send(hasBody ? JSON.stringify(body) : null)
     }
 
+    // ─── 语言 ─────────────────────────────────────────────────────────
+    // 跑在 xochitl 进程里, 能直接读它的 languageSettings —— 那是用户在系统设置里选的,
+    // 实时且准确。读不到 (固件换了对象名、或这段 QML 没拿到那个上下文) 就用后端兜底,
+    // 后端按 xochitl.conf → 键盘语言 → 环境变量往下猜。
+    property string lang: "en"
+    property string langPref: ""   // 用户在设置里显式选的; 空 = 跟着后端推断走
+    property var dict: ({})        // 当前应用的词典
+    property var dictEn: ({})      // 应用的 en 词典, 缺词时回落用
+    property var shellDict: ({})   // 外壳自己的词典 (shell/i18n/<lang>.json)
+    property var shellDictEn: ({})
+    readonly property string shellDir: "file:///home/root/rmkit-cn/space/shell"
+
+    function detectLang() {
+        var code = ""
+        try {
+            if (typeof languageSettings !== "undefined" && languageSettings && languageSettings.languageCode)
+                code = "" + languageSettings.languageCode
+        } catch (e) { /* 拿不到就算了, 下面用后端的值 */ }
+        return code
+    }
+
+    // zh_CN / zh-Hans / zh → zh-CN; 认不出的回落 en。和后端 NormalizeLang 保持一致。
+    function normLang(s) {
+        if (!s) return ""
+        s = ("" + s).trim()
+        var cut = s.search(/[.@]/)
+        if (cut > 0) s = s.substring(0, cut)
+        s = s.replace(/_/g, "-")
+        var low = s.toLowerCase()
+        if (low.indexOf("zh") === 0) return "zh-CN"
+        if (low === "en" || low.indexOf("en-") === 0) return "en"
+        return ""
+    }
+
+    function setLang(code) {
+        var n = normLang(code)
+        lang = n || "en"
+    }
+
+    // 设置里切语言。写进 shell/config.json 的 lang 键, 顺手把当前应用的词典重读一遍,
+    // 这样不用退出空间再进去。
+    function chooseLang(code) {
+        langPref = code
+        setLang(code)
+        saveShellCfg()
+        loadShellDict()
+        if (current) loadDict(current)
+    }
+
+    // 外壳自己的文案。args 传对象做占位替换: st("downloading", {name: "天气"})
+    // 词典里写 "正在下载 {name}…" / "Downloading {name}…" —— 占位符位置随语言走。
+    function st(key, args) {
+        var v = shellDict[key]
+        if (v === undefined) v = shellDictEn[key]
+        if (v === undefined) v = key
+        if (args !== undefined && args !== null) {
+            for (var k in args) v = v.split("{" + k + "}").join(args[k])
+        }
+        return v
+    }
+
+    function loadShellDict() {
+        shellDict = ({}); shellDictEn = ({})
+        var base = shellDir + "/i18n/"
+        function grab(code, assign) {
+            request("GET", base + code + ".json?t=" + Date.now(), null, function(st2, r) {
+                if (r && typeof r === "object") assign(r)
+            })
+        }
+        grab("en", function(r) { shellDictEn = r; if (lang === "en") shellDict = r })
+        if (lang !== "en") grab(lang, function(r) { shellDict = r })
+    }
+
+    // 查应用词典。缺词先回落 en, 再回落 key 本身 —— 永远不会显示成空白。
+    function tr(key) {
+        if (key === undefined || key === null) return ""
+        var v = dict[key]
+        if (v !== undefined) return v
+        v = dictEn[key]
+        if (v !== undefined) return v
+        return key
+    }
+
+    // 载入某个应用目录下的词典。两份都读: 当前语言 + en, 后者用于缺词回落。
+    // 读不到就留空字典, tr() 会把 key 原样显示出来, 不至于白屏。
+    function loadDict(app, done) {
+        dict = ({}); dictEn = ({})
+        if (!app || !app.dir) { if (done) done(); return }
+        var base = "file://" + app.dir + "/i18n/"
+        var pending = (lang === "en") ? 1 : 2
+        function finish() { if (--pending <= 0 && done) done() }
+        function grab(code, assign) {
+            request("GET", bust(base + code + ".json", app.rev || 0), null, function(st, r) {
+                if (r && typeof r === "object") assign(r)
+                finish()
+            })
+        }
+        grab("en", function(r) { dictEn = r; if (lang === "en") dict = r })
+        if (lang !== "en") grab(lang, function(r) { dict = r })
+    }
+
     function reload() {
         listError = ""
         request("GET", baseUrl + "/space/apps", null, function(st, r) {
-            if (st !== 200 || !r) { listError = "后端未响应 (" + st + ")"; return }
+            if (st !== 200 || !r) { listError = space.st("backend_down", { code: st }); return }
             // 先设开发模式与时区: apps 一赋值就会触发小组件挂载, 那时 devMode 必须已经就位,
             // 否则第一次加载不带免缓存后缀, Qt 会把旧版编译结果缓存住, 之后改 QML 都不生效
             if (r.tzOffset !== undefined) tzOffset = r.tzOffset
             devMode = !!r.dev
+            // 优先级: 用户在空间里显式选的 > xochitl 的实时值 > 后端猜的。
+            // 后端猜的 (按键盘语言) 不能压过 xochitl 实时值, 否则改了系统语言不生效。
+            langPref = r.langPref || ""
+            var pref = normLang(r.langPref || "")
+            var raw  = detectLang()
+            var live = normLang(raw)
+            setLang(pref || live || r.lang || "en")
+            loadShellDict()
+            console.warn("SPACE-LANG: pref=" + JSON.stringify(r.langPref || "")
+                + " live=" + JSON.stringify(raw) + "→" + JSON.stringify(live)
+                + " backend=" + JSON.stringify(r.lang || "") + " ⇒ " + lang)
             apps = r.apps || []
         })
         loadRecent()
@@ -276,7 +393,7 @@ Rectangle {
         storeError = ""
         request("GET", baseUrl + "/space/store" + (refresh ? "?refresh=1" : ""), null, function(st, r) {
             storeLoaded = true
-            if (st !== 200 || !r) { storeError = (r && r.error) ? r.error : ("连不上应用商店 (" + st + ")"); storeApps = []; return }
+            if (st !== 200 || !r) { storeError = (r && r.error) ? r.error : space.st("store_unreachable", { code: st }); storeApps = []; return }
             storeApps = r.apps || []
         })
     }
@@ -291,10 +408,10 @@ Rectangle {
     function uninstallApp(app) {
         request("DELETE", baseUrl + "/space/apps/" + app.id, null, function (st, r) {
             if (st !== 200) {
-                showToast((r && r.error) ? r.error : ("删除失败 (" + st + ")"))
+                showToast((r && r.error) ? r.error : space.st("delete_failed", { code: st }))
                 return
             }
-            showToast((app.name || app.id) + " 已删除")
+            showToast(space.st("deleted", { name: app.name || app.id }))
             reload()
             loadStore(false)
         })
@@ -305,13 +422,13 @@ Rectangle {
     // 墨水屏不跑动画 —— 每次重绘都是实打实的屏幕刷新, 进度条滚起来既慢又闪, 给个百分比
     // 数字最省事; 轮询间隔 1.2 秒也是这个道理, 太密了屏幕一直在抖。
     function installFromStore(item) {
-        busyText = "正在下载 " + item.name + "…"
+        busyText = space.st("downloading", { name: item.name })
         request("POST", baseUrl + "/space/apps/install-url",
                 { url: item.zip, sha256: item.sha256 || "", id: item.id, name: item.name },
                 function (st, r) {
                     if (st !== 200 && st !== 202) {
                         busyText = ""
-                        showToast((r && r.error) ? r.error : ("安装失败 (" + st + ")"))
+                        showToast((r && r.error) ? r.error : space.st("install_failed_code", { code: st }))
                         return
                     }
                     installPoll.restart()
@@ -330,20 +447,20 @@ Rectangle {
             // 进度框闪一下就没, 装完也不刷新列表, 看着像安装失败了。
             if (p.phase !== "done" && p.phase !== "error") {
                 if (p.phase === "installing") {
-                    space.busyText = "正在安装 " + p.name + "…"
+                    space.busyText = space.st("installing", { name: p.name })
                 } else {
                     // 服务器没给 Content-Length 时只报已下多少, 别显示一个假的百分比
                     space.busyText = p.total > 0
-                            ? "正在下载 " + p.name + "… " + Math.round(p.got * 100 / p.total) + "%"
-                            : "正在下载 " + p.name + "… " + (p.got / 1048576).toFixed(1) + " MB"
+                            ? space.st("downloading_pct", { name: p.name, pct: Math.round(p.got * 100 / p.total) })
+                            : space.st("downloading_mb", { name: p.name, mb: (p.got / 1048576).toFixed(1) })
                 }
                 return
             }
             installPoll.stop()
             space.busyText = ""
-            if (p.phase === "error") { space.showToast(p.error || "安装失败"); return }
+            if (p.phase === "error") { space.showToast(p.error || space.st("install_failed")); return }
             if (p.phase === "done") {
-                space.showToast((p.name || "应用") + " 已安装")
+                space.showToast(space.st("installed_toast", { name: p.name || space.st("app_fallback_name") }))
                 space.reload()
             }
         })
@@ -367,12 +484,12 @@ Rectangle {
     function halfWidgetApps() {
         return filterApps(function(a) { return space.hasWidget(a) && a.widget_size !== "hero" && !a.error })
     }
-    // "应用" = 非设置类 (设置类只出现在"设置"标签)
+    // space.st("app_fallback_name") = 非设置类 (设置类只出现在space.st("tab_settings")标签)
     function isSetting(a) { return a.category === "settings" || a.category === "system" }
     function userApps() { return filterApps(function(a) { return !isSetting(a) }) }
     function homeApps() {
         var l = filterApps(function(a) { return !a.error && !isSetting(a) })
-        var n = homeGrid.columns * 2   // 首页只放两行, 其余在"应用"页
+        var n = homeGrid.columns * 2   // 首页只放两行, 其余在space.st("app_fallback_name")页
         return l.length > n ? l.slice(0, n) : l
     }
     function settingsApps() { return filterApps(isSetting) }
@@ -388,14 +505,14 @@ Rectangle {
 
     function openById(id) {
         for (var i = 0; i < apps.length; i++) if (apps[i].id === id) { open(apps[i]); return }
-        showToast("没有安装 " + id)
+        showToast(space.st("not_installed", { id: id }))
     }
 
     function open(app) {
         if (app.error) { showToast(app.error); return }
         // 有界面就挂界面, 没有才当外部程序。界面有两种形态: 明文的 entryUrl,
         // 或编译发布的 module.main —— 后者包里没有 .qml, 判断时漏掉它就会被误当成
-        // "外部程序", 报"这个应用没有入口"。
+        // "外部程序", 报space.st("app_no_entry")。
         if (!app.entryUrl && !(app.module && app.module.main)) { launch(app); return }
         // 开发模式下先把列表拉一遍再开: 免缓存令牌是应用目录的改动时间, 存在列表里。
         // 不重拉的话, 刚 scp 上去的 QML 用的还是进空间那一刻的旧令牌, URL 没变 → 引擎
@@ -418,10 +535,10 @@ Rectangle {
             return
         }
         if (app.service) {
-            busyText = "正在启动 " + app.name + " 的后台…"
+            busyText = space.st("starting_service", { name: app.name })
             request("POST", baseUrl + "/space/apps/" + app.id + "/service/start", null, function(st, r) {
                 busyText = ""
-                if (st !== 200) { showToast((r && r.error) ? r.error : ("后台启动失败 (" + st + ")")); return }
+                if (st !== 200) { showToast((r && r.error) ? r.error : space.st("service_failed", { code: st })); return }
                 mount(app, (r && r.url) ? r.url : (app.serviceUrl || ""))
             })
             return
@@ -472,7 +589,7 @@ Rectangle {
         } catch (e) {
             // 最常见的是模块没装到 QML_IMPORT_PATH 指的目录, 或者 .so 架构不对
             return { status: Component.Error,
-                     errorString: function () { return "加载模块 " + uri + " 失败: " + e } }
+                     errorString: function () { return space.st("module_load_failed", { uri: uri, err: e }) } }
         }
     }
 
@@ -493,6 +610,7 @@ Rectangle {
         //   明文: entryUrl 指向应用目录里的 .qml, 直接 createComponent
         //   编译: manifest 声明 module, 包里只有 .so —— 用一段即时 QML 去 import 它。
         //        模块装在固定的 qmlmods 目录, 由 xochitl 的 QML_IMPORT_PATH 指过去。
+        loadDict(app)   // 异步; tr() 在词典到位前回落 key, 不阻塞首帧
         var c = app.module && app.module.main
                 ? moduleComponent(app)
                 : Qt.createComponent(bust(app.entryUrl, app.rev))
@@ -505,7 +623,7 @@ Rectangle {
         var obj = c.createObject(appHost, { "space": api })
         console.warn("[space] " + app.id + " 实例化返回, space 注入=" + (obj && obj.space ? "成功" : "失败"))
         if (!obj) {
-            appError = "createObject 失败: " + c.errorString()
+            appError = space.st("create_failed", { err: c.errorString() })
             console.log("[space] 应用 " + app.id + " 创建失败: " + c.errorString())
             return
         }
@@ -535,7 +653,7 @@ Rectangle {
     // 外部程序型应用 (KOReader / 微信读书 / Android): 没有 QML 界面, 点图标即启动
     function launch(app) {
         var l = app.launch
-        if (!l) { showToast("这个应用没有入口"); return }
+        if (!l) { showToast(space.st("app_no_entry")); return }
         if (l.confirm && confirmApp !== app) { confirmApp = app; return }
         confirmApp = null
         if (l.type === "appload") {
@@ -553,7 +671,7 @@ Rectangle {
                 close()
                 return
             }
-            if (!l.path) { showToast("appload 未启用"); return }
+            if (!l.path) { showToast(space.st("appload_off")); return }
         }
         // post (或 appload 兜底): 交给 upload-server, 面板先收起来 (重启类操作后面没有界面了)。
         // 只隐藏不销毁: 请求还在路上, 销毁会把发请求的 JS 上下文一起收掉。
@@ -579,13 +697,13 @@ Rectangle {
 
     function showToast(msg) { toastText = msg; toastTimer.restart() }
     function tabTitle() {
-        if (tab === "apps") return "应用"
-        if (tab === "discover") return "发现"
-        if (tab === "settings") return "设置"
-        return "空间"
+        if (tab === "apps") return space.st("tab_apps")
+        if (tab === "discover") return space.st("tab_store")
+        if (tab === "settings") return space.st("tab_settings")
+        return space.st("tab_home")
     }
     function dateLine() {
-        return localNow().toLocaleDateString(Qt.locale("zh_CN"), "M月d日 dddd")
+        return localNow().toLocaleDateString(Qt.locale(space.lang === "zh-CN" ? "zh_CN" : "en_US"), space.st("date_format"))
     }
 
     Timer { id: toastTimer; interval: 4000; repeat: false; onTriggered: space.toastText = "" }
@@ -609,7 +727,7 @@ Rectangle {
             anchors.left: parent.left
             anchors.leftMargin: 10
             iconSource: "qrc:/ark/icons/chevron_left"
-            title: "返回"
+            title: space.st("back")
             onClicked: space.back()
         }
     }
@@ -637,10 +755,10 @@ Rectangle {
         // 副标题已去掉 (2026-10-03)。高度 = 标题底 + 24:
         // 标题 y 42 + 标题高 ~78 = 120, 再留 24。省下的 72 给首页大卡。
         height: space.vpx(144)
-        // 返回只留一个 "<" 并入标题行: 原来单占一行加"返回"二字, 白吃 70px,
+        // 返回只留一个 "<" 并入标题行: 原来单占一行加space.st("back")二字, 白吃 70px,
         // 又与整页的克制气质不搭。退出空间在设置里也有一条, 这里是一步直达。
         // < 不是主角: 挪到内容边距之外、贴近屏幕左沿, 把内容左边界让给标题,
-        // 让"空间"与下面所有卡片的左边对齐。
+        // 让space.st("tab_home")与下面所有卡片的左边对齐。
         Image {
             id: backChevron
             anchors.left: parent.left
@@ -796,7 +914,7 @@ Rectangle {
                             spacing: 8
                             Text { text: space.dateLine(); font.pixelSize: space.fpx(26); color: "#262626" }
                             Text { text: Qt.formatTime(space.localNow(), "HH:mm"); font.pixelSize: space.fpx(88); font.weight: Font.Light }
-                            Text { text: "今天也是安静的一天。"; font.pixelSize: space.fpx(22); color: "#26251F" }
+                            Text { text: space.st("hero_quiet"); font.pixelSize: space.fpx(22); color: "#26251F" }
                         }
                     }
                     Item {
@@ -827,10 +945,10 @@ Rectangle {
                         Column {
                             anchors.fill: parent; anchors.margins: space.px(22); spacing: space.vpx(12)
                             visible: parent.planApp === null
-                            Text { text: "今日计划"; font.pixelSize: space.fpx(28); font.weight: Font.Medium; color: "#000000" }
+                            Text { text: space.st("plan_today"); font.pixelSize: space.fpx(28); font.weight: Font.Medium; color: "#000000" }
                             Text {
                                 width: parent.width
-                                text: "还没装计划应用。到「发现」里安装后，今天要做的事会显示在这里。"
+                                text: space.st("plan_empty")
                                 font.pixelSize: space.fpx(22); color: "#1F1E1B"; wrapMode: Text.WordWrap
                             }
                         }
@@ -858,7 +976,7 @@ Rectangle {
 
                         Column {
                             anchors.fill: parent; anchors.margins: space.px(22); spacing: space.vpx(10)
-                            Text { text: "正在进行"; font.pixelSize: space.fpx(28); font.weight: Font.Medium; color: "#000000" }
+                            Text { text: space.st("ongoing"); font.pixelSize: space.fpx(28); font.weight: Font.Medium; color: "#000000" }
 
                             Item {
                                 width: parent.width
@@ -884,8 +1002,8 @@ Rectangle {
                                     }
                                     Text {
                                         text: space.recentDoc && space.recentDoc.pages > 0
-                                              ? ("阅读进度 " + space.recentDoc.percent + "%")
-                                              : (space.recentDoc ? ("第 " + space.recentDoc.page + " 页") : "")
+                                              ? space.st("reading_progress", { pct: space.recentDoc.percent })
+                                              : (space.recentDoc ? space.st("reading_page", { page: space.recentDoc.page }) : "")
                                         font.pixelSize: space.fpx(21); color: "#1F1E1B"
                                     }
                                     Rectangle {
@@ -922,10 +1040,10 @@ Rectangle {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { text: "我的应用"; font.pixelSize: space.fpx(32); font.weight: Font.Medium }
+                    Text { text: space.st("my_apps"); font.pixelSize: space.fpx(32); font.weight: Font.Medium }
                     Item { Layout.fillWidth: true }
                     Text {
-                        text: "全部应用 ›"
+                        text: space.st("all_apps")
                         font.pixelSize: space.fpx(24)
                         color: "#262626"
                         MouseArea { anchors.fill: parent; anchors.margins: -12; onClicked: space.tab = "apps" }
@@ -941,7 +1059,7 @@ Rectangle {
                 }
                 Text {
                     visible: space.listError === "" && space.apps.length === 0
-                    text: "还没有应用。到「发现」安装，或用手机扫码上传应用包 (zip)。"
+                    text: space.st("apps_empty")
                     font.pixelSize: space.fpx(24)
                     color: "#262626"
                     wrapMode: Text.WordWrap
@@ -1020,24 +1138,24 @@ Rectangle {
                     Column {
                         anchors.centerIn: parent
                         spacing: 8
-                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "让好工具"; font.pixelSize: space.fpx(34); font.weight: Font.Medium }
-                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "陪伴更好的你"; font.pixelSize: space.fpx(24); color: "#1A1A18" }
+                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("hero_tagline_1"); font.pixelSize: space.fpx(34); font.weight: Font.Medium }
+                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("hero_tagline_2"); font.pixelSize: space.fpx(24); color: "#1A1A18" }
                     }
                 }
                 Text {
                     visible: !space.storeLoaded
-                    text: "正在获取应用列表…"
+                    text: space.st("store_loading")
                     font.pixelSize: space.fpx(24); color: "#1A1A18"
                 }
                 Text {
                     visible: space.storeError !== ""
                     Layout.fillWidth: true
-                    text: space.storeError + "\n应用商店需要联网。也可以用手机扫码上传应用包 (zip) 安装。"
+                    text: space.storeError + "\n" + space.st("store_offline")
                     font.pixelSize: space.fpx(24); color: "#1A1A18"; wrapMode: Text.WordWrap
                 }
                 Text {
                     visible: space.storeLoaded && space.storeError === "" && space.storeApps.length === 0
-                    text: "商店里还没有应用。"
+                    text: space.st("store_empty")
                     font.pixelSize: space.fpx(24); color: "#1A1A18"
                 }
                 Repeater {
@@ -1063,7 +1181,7 @@ Rectangle {
                                 Text {
                                     text: (storeRow.modelData.description || "") + "  v" + (storeRow.modelData.version || "")
                                           + (storeRow.modelData.locked === true
-                                             ? "　· 需购买" + (storeRow.modelData.price ? " " + storeRow.modelData.price : "")
+                                             ? "\u3000" + space.st("need_purchase") + (storeRow.modelData.price ? " " + storeRow.modelData.price : "")
                                              : "")
                                     font.pixelSize: space.fpx(22); color: "#26251F"; elide: Text.ElideRight; Layout.fillWidth: true
                                 }
@@ -1072,19 +1190,19 @@ Rectangle {
                             Kit.SButton {
                                 ui: space.fs
                                 visible: storeRow.installed !== ""
-                                text: "删除"
+                                text: space.st("act_delete")
                                 onClicked: space.ask(
-                                    "删除「" + (storeRow.modelData.name || storeRow.modelData.id) + "」？\n"
-                                    + "应用数据会保留，重新安装后还在。",
+                                    space.st("confirm_delete", { name: storeRow.modelData.name || storeRow.modelData.id }) + "\n"
+                                    + space.st("confirm_delete_note"),
                                     function () { space.uninstallApp(storeRow.modelData) })
                             }
                             Kit.SButton {
                                 ui: space.fs
                                 readonly property bool locked: storeRow.modelData.locked === true
                                 enabled: locked || storeRow.installed !== storeRow.modelData.version
-                                text: locked ? "购买"
-                                      : (storeRow.installed === "" ? "获取"
-                                         : (storeRow.installed === storeRow.modelData.version ? "已安装" : "更新"))
+                                text: locked ? space.st("act_buy")
+                                      : (storeRow.installed === "" ? space.st("act_get")
+                                         : (storeRow.installed === storeRow.modelData.version ? space.st("act_installed") : space.st("act_update")))
                                 primary: locked || storeRow.installed === ""
                                 onClicked: {
                                     if (locked) space.buyPrompt(storeRow.modelData)
@@ -1123,9 +1241,17 @@ Rectangle {
                 Kit.SRow {
                     Layout.fillWidth: true
                     ui: space.fs
+                    iconSource: space.kitDir + "/icons/translate.svg"
+                    text: space.st("set_language")
+                    detail: space.lang === "zh-CN" ? "\u4e2d\u6587\uff08\u7b80\u4f53\uff09" : "English"
+                    onClicked: space.chooseLang(space.lang === "zh-CN" ? "en" : "zh-CN")
+                }
+                Kit.SRow {
+                    Layout.fillWidth: true
+                    ui: space.fs
                     iconSource: space.kitDir + "/icons/sun.svg"
-                    text: "刷新效果"
-                    detail: space.screenMode === "content" ? "高清" : "快刷"
+                    text: space.st("set_screenmode")
+                    detail: space.screenMode === "content" ? space.st("screenmode_hd") : space.st("screenmode_fast")
                     onClicked: {
                         space.screenMode = (space.screenMode === "content") ? "ui" : "content"
                         space.saveShellCfg()
@@ -1135,7 +1261,7 @@ Rectangle {
                     Layout.fillWidth: true
                     ui: space.fs
                     iconSource: space.kitDir + "/icons/squares-four.svg"
-                    text: "关于空间"
+                    text: space.st("about")
                     detail: "V1.0　Copyright © 2026 Boangs"
                     interactive: false
                 }
@@ -1151,7 +1277,7 @@ Rectangle {
         Text {
             visible: space.appError !== ""
             anchors.fill: parent
-            text: "应用加载失败：\n" + space.appError
+            text: space.st("app_load_failed") + "\n" + space.appError
             font.pixelSize: space.fpx(24)
             color: "#a00000"
             wrapMode: Text.WrapAnywhere
@@ -1175,10 +1301,10 @@ Rectangle {
             spacing: 0
             Repeater {
                 model: [
-                    { key: "home", label: "空间", icon: "house" },
-                    { key: "apps", label: "应用", icon: "squares-four" },
-                    { key: "discover", label: "发现", icon: "compass" },
-                    { key: "settings", label: "设置", icon: "gear" }
+                    { key: "home", label: space.st("tab_home"), icon: "house" },
+                    { key: "apps", label: space.st("app_fallback_name"), icon: "squares-four" },
+                    { key: "discover", label: space.st("tab_store"), icon: "compass" },
+                    { key: "settings", label: space.st("tab_settings"), icon: "gear" }
                 ]
                 delegate: Item {
                     id: tabItem
@@ -1262,12 +1388,12 @@ Rectangle {
                     Layout.alignment: Qt.AlignRight
                     spacing: 24
                     Kit.SButton {
-                        ui: space.fs; text: "取消"
+                        ui: space.fs; text: space.st("cancel")
                         visible: !space.askNotice
                         onClicked: { if (space.askText !== "") space.askDone(false); else space.confirmApp = null }
                     }
                     Kit.SButton {
-                        ui: space.fs; text: space.askNotice ? "知道了" : "确定"; primary: true
+                        ui: space.fs; text: space.askNotice ? space.st("got_it") : space.st("ok"); primary: true
                         onClicked: { if (space.askText !== "") space.askDone(true); else space.launch(space.confirmApp) }
                     }
                 }

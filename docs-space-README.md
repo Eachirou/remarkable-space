@@ -114,6 +114,57 @@ Item {
 - `fontScale = 1 + (unit − 1) × 0.35`：字号只温和放大（Paper Pro 24 → 30px）。
 - 列数按内容宽度算：`floor(contentWidth / (最小磁贴宽 × fontScale))`，横屏自动变多列。
 
+## 多语言
+
+界面语言跟随 reMarkable 的系统设置，应用不用自己判断，也不用自己存偏好。
+
+外壳按这个顺序定稿，结果放在 `space.lang`（`zh-CN` / `en`）：
+
+1. `languageSettings.languageCode` —— xochitl 的实时值，用户在系统设置里选的那个
+2. `/space/apps` 返回的 `lang` —— 外壳读不到上面那个时的兜底，后端按
+   `xochitl.conf` 的 `Language` → `Keyboard` → 环境变量往下猜
+3. `en`
+
+写法归一：`zh_CN` / `zh-Hans` / `zh` 都算 `zh-CN`，繁体暂时也给简体词典（比掉到英文贴近）。
+
+### 应用怎么用
+
+包里加 `i18n/`，一个语言一个 JSON，键值都是平的：
+
+```
+app/
+  manifest.json
+  main.qml
+  i18n/
+    en.json       必备 —— 缺词时回落到它
+    zh-CN.json
+```
+
+```json
+{ "add_task": "添加任务", "done": "完成", "empty_hint": "还没有任务" }
+```
+
+QML 里：
+
+```qml
+Text { text: space.tr("empty_hint") }
+Button { text: space.tr("add_task") }
+```
+
+查不到词条时先回落 `en.json`，再回落 key 本身 —— **永远不会显示成空白**，最差也是露出一个英文 key，一眼能看出漏翻了哪条。
+
+词典在外壳挂载应用时异步读入，首帧可能短暂显示 key。文案多的应用若在意这一下闪动，可以在根 Item 上等 `space.lang` 就绪再渲染。
+
+### 不要用 `qsTr`
+
+注入进来的 QML 查不到 Qt 的翻译表（实测），`qsTr("添加")` 会原样返回中文。一律走 `space.tr()`。
+
+### 为什么文案不放进二进制
+
+实测 `qt_add_qml_module` 编出来的 `.so` 里，QML 源码连注释一起原样可读，并不能保护源码；而把文案留在里面会让「加一种语言」变成「重编两个架构」。所以文案走外部 JSON：翻译的人不碰代码，加语言不用编译。
+
+真要保护的逻辑应当放在 Go 后端（`service.exec`），那里编译后确实读不出源码。
+
 ## 后端接口
 
 | 方法 | 路径 | 说明 |

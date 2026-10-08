@@ -17,14 +17,14 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             Text {
-                text: "\u624b\u673a\u626b\u7801\u4e0a\u4f20\u6587\u6863\u3001\u5b57\u4f53\u3001\u58c1\u7eb8\uff08\u9700\u4e0e\u624b\u673a\u540c Wi-Fi\uff09"
+                text: space.tr("hint")
                 font.pixelSize: 24
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
             IconButton {
                 iconSource: "qrc:/ark/icons/restore"
-                title: "\u5237\u65b0"
+                title: space.tr("refresh")
                 onClicked: root.refreshQr()
             }
         }
@@ -48,7 +48,7 @@ Item {
         Text {
             id: _rmhQrEmpty
             Layout.alignment: Qt.AlignHCenter
-            text: "\u8bf7\u5148\u8fde\u63a5 Wi-Fi"
+            text: space.tr("no_wifi")
             font.pixelSize: 22
             color: "#c62828"
             visible: !_rmhQrImage.visible
