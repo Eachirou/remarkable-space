@@ -29,13 +29,13 @@ Item {
             Layout.fillWidth: true
             spacing: 16
             Text {
-                text: "\u7c7b\u578b"
+                text: space.tr("type")
                 font.pixelSize: 26
                 Layout.preferredWidth: 160
             }
             Repeater {
                 model: [
-                    { key: "openai",    label: "OpenAI \u517c\u5bb9" },
+                    { key: "openai",    label: space.tr("openai_compat") },
                     { key: "anthropic", label: "Anthropic" }
                 ]
                 delegate: Rectangle {
@@ -134,7 +134,7 @@ Item {
             Layout.fillWidth: true
             spacing: 16
             Text {
-                text: "\u6a21\u578b"
+                text: space.tr("model")
                 font.pixelSize: 26
                 Layout.preferredWidth: 160
             }
@@ -165,8 +165,8 @@ Item {
             Layout.fillWidth: true
             spacing: 16
             Text {
-                // "思考模式"
-                text: "\u601d\u8003\u6a21\u5f0f"
+                // space.tr("thinking")
+                text: space.tr("thinking")
                 font.pixelSize: 26
                 Layout.preferredWidth: 160
             }
@@ -179,8 +179,8 @@ Item {
                 border.width: 1
                 Text {
                     anchors.centerIn: parent
-                    // "开" / "关"
-                    text: root._rmhAiThinking ? "\u5f00" : "\u5173"
+                    // space.tr("on") / space.tr("off")
+                    text: root._rmhAiThinking ? space.tr("on") : space.tr("off")
                     font.pixelSize: 26
                     color: root._rmhAiThinking ? "#ffffff" : "#1a0f04"
                 }
@@ -193,7 +193,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignVCenter
                 // "仅 Qwen3 等支持的模型有效, 关闭可加速响应"
-                text: "\u4ec5 Qwen3 \u7b49\u652f\u6301\u7684\u6a21\u578b\u6709\u6548\uff0c\u5173\u95ed\u53ef\u52a0\u901f\u54cd\u5e94"
+                text: space.tr("thinking_hint")
                 font.pixelSize: 22
                 color: "#666666"
                 wrapMode: Text.Wrap
@@ -208,26 +208,26 @@ Item {
 
             IconButton {
                 iconSource: "qrc:/ark/icons/checkmark"
-                title: "\u4fdd\u5b58"
+                title: space.tr("save")
                 onClicked: {
                     root.aiSaveConfig()
-                    root._rmhAiTestStatus = "\u5df2\u4fdd\u5b58 \u2713"
+                    root._rmhAiTestStatus = space.tr("saved")
                 }
             }
             IconButton {
                 iconSource: "qrc:/ark/icons/restore"
-                title: "\u5237\u65b0"
+                title: space.tr("refresh")
                 onClicked: {
                     root.aiLoadConfig()
                     root.aiRefreshQr()
-                    root._rmhAiTestStatus = "\u5df2\u5237\u65b0"
+                    root._rmhAiTestStatus = space.tr("refreshed")
                 }
             }
             IconButton {
                 iconSource: "qrc:/ark/icons/wifi_3"
                 title: root._rmhAiTesting
-                    ? "\u6d4b\u8bd5\u4e2d\u2026"
-                    : "\u6d4b\u8bd5\u8fde\u63a5"
+                    ? space.tr("testing")
+                    : space.tr("test")
                 enabled: !root._rmhAiTesting
                 onClicked: {
                     root.aiSaveConfig()
@@ -275,13 +275,13 @@ Item {
             }
             Text {
                 Layout.alignment: Qt.AlignHCenter
-                text: "\u624b\u673a\u626b\u7801\u540c\u6b65 AI \u914d\u7f6e\uff08\u4e0e\u624b\u673a\u540c Wi-Fi\uff0c\u4fdd\u5b58\u540e\u70b9\u4e0a\u65b9\u201c\u5237\u65b0\u201d\u540c\u6b65\u672c\u9875\uff09"
+                text: space.tr("qr_hint")
                 font.pixelSize: 24
                 color: "#000000"
             }
             Text {
                 Layout.alignment: Qt.AlignHCenter
-                text: "\u8bf7\u5148\u8fde\u63a5 Wi-Fi"
+                text: space.tr("no_wifi")
                 font.pixelSize: 22
                 color: "#c62828"
                 visible: !_rmhAiQrImage.visible
@@ -368,7 +368,7 @@ Item {
     function aiTestConnection() {
         if (_rmhAiTesting) return
         _rmhAiTesting = true
-        _rmhAiTestStatus = "\u6d4b\u8bd5\u4e2d..."
+        _rmhAiTestStatus = space.tr("testing")
         var x = new XMLHttpRequest()
         var url, headers, body
         if (_rmhAiKind === "anthropic") {
@@ -397,9 +397,9 @@ Item {
             if (x.readyState !== XMLHttpRequest.DONE) return
             _rmhAiTesting = false
             if (x.status >= 200 && x.status < 300) {
-                _rmhAiTestStatus = "\u8fde\u63a5\u6210\u529f \u2713"
+                _rmhAiTestStatus = space.tr("test_ok")
             } else if (x.status === 0) {
-                _rmhAiTestStatus = "\u7f51\u7edc\u4e0d\u53ef\u8fbe (\u68c0\u67e5 URL / \u8bbe\u5907\u8054\u7f51)"
+                _rmhAiTestStatus = space.tr("test_unreachable")
             } else {
                 var msg = "HTTP " + x.status
                 try {

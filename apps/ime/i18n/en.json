@@ -1,0 +1,10 @@
+{
+  "title": "Input schemes",
+  "refresh": "Refresh",
+  "active": "Active",
+  "hint": "Tap to switch — takes effect at once and survives a restart. Wubi uses the Baishuang 86 table; type z in Wubi to look a character up by pinyin.",
+  "svc_down": "The input method service isn't responding",
+  "parse_failed": "Couldn't read the response",
+  "switching": "Switching…",
+  "switch_failed": "Switch failed"
+}

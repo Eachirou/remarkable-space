@@ -1,0 +1,22 @@
+{
+  "backend_down": "后端未响应 ({code})",
+  "bt_off_hint": "蓝牙未启用，点“扫描”会自动开启",
+  "bt_off": "蓝牙未上电",
+  "no_audio": "未安装音频组件，只能配对不能出声",
+  "scanning": "扫描中 (10 秒)… 让耳机进入配对模式",
+  "scan_failed": "扫描失败: {err}",
+  "nothing_found": "没扫到带名字的设备，确认耳机在配对模式后再扫",
+  "pairing": "配对中…",
+  "connecting": "连接中…",
+  "working": "处理中…",
+  "failed": "失败 ({code})",
+  "headset": "耳机",
+  "scan": "扫描设备",
+  "empty": "还没有设备。把耳机调到配对模式，点右上角“扫描设备”。",
+  "connected": "  已连接",
+  "paired": "  已配对",
+  "disconnect": "断开",
+  "connect": "连接",
+  "pair": "配对",
+  "forget": "忘记"
+}

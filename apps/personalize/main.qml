@@ -63,7 +63,7 @@ Item {
 
     Component.onCompleted: { refreshFonts(); refreshScreens(); refreshHero() }
 
-    // 有变更时右上角出"应用" (放在外壳标题那一行的右侧)
+    // 有变更时右上角出space.tr("apply") (放在外壳标题那一行的右侧)
     IconButton {
         id: _rmhApply
         visible: root._rmhDirty
@@ -72,7 +72,7 @@ Item {
         anchors.bottomMargin: Math.round(48 * root.space.unit)
         anchors.right: parent.right
         iconSource: "qrc:/ark/icons/checkmark"
-        title: "\u5e94\u7528"
+        title: space.tr("apply")
         onClicked: _rmhConfirmApply.visible = true
     }
 
@@ -94,8 +94,8 @@ Item {
                 Layout.bottomMargin: 8
                 spacing: 0
                 Repeater {
-                    model: [{ k: "font", t: "字体" }, { k: "screen", t: "休眠壁纸" },
-                            { k: "hero", t: "空间插图" }]
+                    model: [{ k: "font", t: space.tr("tab_font") }, { k: "screen", t: space.tr("tab_wallpaper") },
+                            { k: "hero", t: space.tr("tab_hero") }]
                     delegate: Rectangle {
                         required property var modelData
                         readonly property bool on: root.sect === modelData.k
@@ -121,21 +121,21 @@ Item {
                 visible: root.sect === "font"
                 Layout.fillWidth: true
                 Text {
-                    text: "\u5b57\u4f53"
+                    text: space.tr("tab_font")
                     font.pixelSize: 32
                     font.weight: Font.Medium
                 }
                 Item { Layout.fillWidth: true }
                 IconButton {
                     iconSource: "qrc:/ark/icons/restore"
-                    title: "\u5237\u65b0"
+                    title: space.tr("refresh")
                     onClicked: root.refreshFonts()
                 }
             }
 
             Text {
                 visible: root.sect === "font" && _rmhFontsModel.count === 0
-                text: "\u6682\u65e0\u5b57\u4f53\uff0c\u8bf7\u5148\u626b\u7801\u4e0a\u4f20"
+                text: space.tr("font_empty")
                 font.pixelSize: 24
                 Layout.fillWidth: true
             }
@@ -182,7 +182,7 @@ Item {
                         Text {
                             Layout.alignment: Qt.AlignVCenter
                             visible: _rmhFontRow.rowApplied
-                            text: "\u5f53\u524d\u751f\u6548"
+                            text: space.tr("active")
                             font.pixelSize: 22
                             verticalAlignment: Text.AlignVCenter
                         }
@@ -208,21 +208,21 @@ Item {
                 visible: root.sect === "screen"
                 Layout.fillWidth: true
                 Text {
-                    text: "\u4f11\u7720\u58c1\u7eb8"
+                    text: space.tr("tab_wallpaper")
                     font.pixelSize: 32
                     font.weight: Font.Medium
                 }
                 Item { Layout.fillWidth: true }
                 IconButton {
                     iconSource: "qrc:/ark/icons/restore"
-                    title: "\u5237\u65b0"
+                    title: space.tr("refresh")
                     onClicked: root.refreshScreens()
                 }
             }
 
             Text {
                 visible: root.sect === "screen" && _rmhScreensModel.count === 0
-                text: "\u6682\u65e0\u58c1\u7eb8\uff0c\u8bf7\u5148\u626b\u7801\u4e0a\u4f20"
+                text: space.tr("wallpaper_empty")
                 font.pixelSize: 24
                 Layout.fillWidth: true
             }
@@ -279,7 +279,7 @@ Item {
                                 visible: _rmhScreenCell.rowApplied
                                 Layout.fillWidth: true
                                 horizontalAlignment: Text.AlignHCenter
-                                text: "\u5f53\u524d\u751f\u6548"
+                                text: space.tr("active")
                                 font.pixelSize: 16
                                 color: "#666666"
                             }
@@ -314,19 +314,19 @@ Item {
             RowLayout {
                 visible: root.sect === "hero"
                 Layout.fillWidth: true
-                Text { text: "空间首页插图"; font.pixelSize: 32; font.weight: Font.Medium }
+                Text { text: space.tr("hero_title"); font.pixelSize: 32; font.weight: Font.Medium }
                 Item { Layout.fillWidth: true }
                 IconButton {
                     iconSource: "qrc:/ark/icons/restore"
-                    title: "刷新"
+                    title: space.tr("refresh")
                     onClicked: root.refreshHero()
                 }
             }
             Text {
                 visible: root.sect === "hero"
                 Layout.fillWidth: true
-                text: "首页顶部那张大卡垫什么。装了天气时可以让天气接管，也可以固定用一幅画。"
-                      + "插图经扫码上传页的「插图」那栏传进来，横幅比例（宽约为高的两倍）最合适。"
+                text: space.tr("hero_hint_1")
+                      + space.tr("hero_hint_2")
                 font.pixelSize: 22
                 color: "#4A4A46"
                 wrapMode: Text.WordWrap
@@ -341,7 +341,7 @@ Item {
                         index === 0 ? "" : (index === 1 ? "none"
                                             : _rmhHeroModel.get(index - 2).rowName)
                     readonly property string rowLabel:
-                        index === 0 ? "跟随应用" : (index === 1 ? "内置插图" : rowKey)
+                        index === 0 ? space.tr("hero_auto") : (index === 1 ? space.tr("hero_builtin") : rowKey)
                     readonly property string rowPreview:
                         index === 0 ? ""
                         : (index === 1 ? root.space.kitDir + "/images/hero-default.jpg"
@@ -369,7 +369,7 @@ Item {
                         anchors.top: parent.top; anchors.topMargin: 6
                         anchors.right: parent.right; anchors.rightMargin: 10
                         iconSource: "qrc:/ark/icons/trash"
-                        title: "删除"
+                        title: space.tr("delete")
                         onClicked: root.deleteHero(_rmhHeroCell.rowKey)
                     }
                     Image {
@@ -388,7 +388,7 @@ Item {
                         anchors.verticalCenterOffset: 18
                         width: parent.width - 80
                         visible: _rmhHeroCell.rowPreview === ""
-                        text: "装了天气就显示天气，没装则用内置插图"
+                        text: space.tr("hero_auto_hint")
                         font.pixelSize: 22
                         color: "#6B6B66"
                         wrapMode: Text.WordWrap
@@ -429,13 +429,13 @@ Item {
                 spacing: 12
 
                 Text {
-                    text: "\u5e94\u7528\u66f4\u6539"
+                    text: space.tr("confirm_title")
                     font.pixelSize: 26
                     font.weight: Font.Medium
                 }
                 Text {
                     visible: root._rmhSelectedFont !== root._rmhAppliedFont
-                    text: "\u5b57\u4f53: " + root._rmhSelectedFont
+                    text: space.tr("confirm_font") + root._rmhSelectedFont
                     font.pixelSize: 20
                     color: "#444444"
                     wrapMode: Text.WordWrap
@@ -444,7 +444,7 @@ Item {
                 }
                 Text {
                     visible: root._rmhSelectedScreen !== root._rmhAppliedScreen
-                    text: "\u58c1\u7eb8: " + root._rmhSelectedScreen
+                    text: space.tr("confirm_wallpaper") + root._rmhSelectedScreen
                     font.pixelSize: 20
                     color: "#444444"
                     wrapMode: Text.WordWrap
@@ -452,7 +452,7 @@ Item {
                     Layout.fillWidth: true
                 }
                 Text {
-                    text: "\u786e\u8ba4\u540e\u5c06\u91cd\u542f\u754c\u9762"
+                    text: space.tr("confirm_restart")
                     font.pixelSize: 22
                     Layout.fillWidth: true
                 }
@@ -462,12 +462,12 @@ Item {
                     spacing: 12
                     IconButton {
                         iconSource: "qrc:/ark/icons/chevron_left"
-                        title: "\u53d6\u6d88"
+                        title: space.tr("cancel")
                         onClicked: _rmhConfirmApply.visible = false
                     }
                     IconButton {
                         iconSource: "qrc:/ark/icons/checkmark"
-                        title: "\u786e\u8ba4\u5e94\u7528"
+                        title: space.tr("confirm")
                         onClicked: {
                             _rmhConfirmApply.visible = false
                             root.applyAll()

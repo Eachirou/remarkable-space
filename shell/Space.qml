@@ -221,7 +221,7 @@ Rectangle {
         readonly property string lang: space.lang
         // 查本应用 i18n/<lang>.json 的词条; 缺词回落 en, 再回落 key 本身。
         // 不要用 qsTr —— 注入进来的 QML 查不到 Qt 的翻译表 (已验证), tr 走自己的词典。
-        function tr(key) { return space.tr(key) }
+        function tr(key, args) { return space.tr(key, args) }
         // 应用数据: 存到 dataDir/<key>.json (纯 QML 应用的持久化); 小组件要传自己的 app.id
         function dataGet(id, key, cb) { space.request("GET", space.baseUrl + "/space/apps/" + id + "/data/" + key, null, cb) }
         function dataPut(id, key, obj, cb) { space.request("PUT", space.baseUrl + "/space/apps/" + id + "/data/" + key, obj, cb) }
@@ -321,13 +321,15 @@ Rectangle {
     }
 
     // 查应用词典。缺词先回落 en, 再回落 key 本身 —— 永远不会显示成空白。
-    function tr(key) {
+    function tr(key, args) {
         if (key === undefined || key === null) return ""
         var v = dict[key]
-        if (v !== undefined) return v
-        v = dictEn[key]
-        if (v !== undefined) return v
-        return key
+        if (v === undefined) v = dictEn[key]
+        if (v === undefined) v = key
+        if (args !== undefined && args !== null) {
+            for (var k in args) v = v.split("{" + k + "}").join(args[k])
+        }
+        return v
     }
 
     // 载入某个应用目录下的词典。两份都读: 当前语言 + en, 后者用于缺词回落。

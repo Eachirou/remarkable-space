@@ -1,0 +1,23 @@
+{
+  "apply": "Apply",
+  "tab_font": "Font",
+  "tab_wallpaper": "Sleep screen",
+  "tab_hero": "Space artwork",
+  "refresh": "Refresh",
+  "font_empty": "No fonts yet — upload some by scanning the QR code",
+  "active": "In use",
+  "wallpaper_empty": "No wallpapers yet — upload some by scanning the QR code",
+  "hero_title": "Space home artwork",
+  "hero_hint_1": "What sits behind the big card at the top of the home screen. With Weather installed you can let it take over, or always use a picture.",
+  "hero_hint_2": "Upload artwork from the Artwork section of the upload page. A banner shape works best — about twice as wide as it is tall.",
+  "hero_auto": "Follow apps",
+  "hero_builtin": "Built-in artwork",
+  "delete": "Delete",
+  "hero_auto_hint": "Shows Weather when it's installed, the built-in artwork otherwise",
+  "confirm_title": "Apply changes",
+  "confirm_font": "Font: ",
+  "confirm_wallpaper": "Wallpaper: ",
+  "confirm_restart": "The interface will restart",
+  "cancel": "Cancel",
+  "confirm": "Apply"
+}

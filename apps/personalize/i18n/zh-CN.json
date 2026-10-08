@@ -1,0 +1,23 @@
+{
+  "apply": "应用",
+  "tab_font": "字体",
+  "tab_wallpaper": "休眠壁纸",
+  "tab_hero": "空间插图",
+  "refresh": "刷新",
+  "font_empty": "暂无字体，请先扫码上传",
+  "active": "当前生效",
+  "wallpaper_empty": "暂无壁纸，请先扫码上传",
+  "hero_title": "空间首页插图",
+  "hero_hint_1": "首页顶部那张大卡垫什么。装了天气时可以让天气接管，也可以固定用一幅画。",
+  "hero_hint_2": "插图经扫码上传页的「插图」那栏传进来，横幅比例（宽约为高的两倍）最合适。",
+  "hero_auto": "跟随应用",
+  "hero_builtin": "内置插图",
+  "delete": "删除",
+  "hero_auto_hint": "装了天气就显示天气，没装则用内置插图",
+  "confirm_title": "应用更改",
+  "confirm_font": "字体: ",
+  "confirm_wallpaper": "壁纸: ",
+  "confirm_restart": "确认后将重启界面",
+  "cancel": "取消",
+  "confirm": "确认应用"
+}

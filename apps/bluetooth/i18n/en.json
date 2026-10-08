@@ -1,0 +1,22 @@
+{
+  "backend_down": "Backend not responding ({code})",
+  "bt_off_hint": "Bluetooth is off — tapping Scan will turn it on",
+  "bt_off": "Bluetooth is off",
+  "no_audio": "Audio components aren't installed — you can pair but not play sound",
+  "scanning": "Scanning (10s)… put your headphones in pairing mode",
+  "scan_failed": "Scan failed: {err}",
+  "nothing_found": "No named devices found. Make sure your headphones are in pairing mode, then scan again.",
+  "pairing": "Pairing…",
+  "connecting": "Connecting…",
+  "working": "Working…",
+  "failed": "Failed ({code})",
+  "headset": "Headphones",
+  "scan": "Scan",
+  "empty": "No devices yet. Put your headphones in pairing mode, then tap Scan at the top right.",
+  "connected": "  Connected",
+  "paired": "  Paired",
+  "disconnect": "Disconnect",
+  "connect": "Connect",
+  "pair": "Pair",
+  "forget": "Forget"
+}

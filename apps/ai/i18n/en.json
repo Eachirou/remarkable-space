@@ -1,0 +1,19 @@
+{
+  "type": "Type",
+  "openai_compat": "OpenAI-compatible",
+  "model": "Model",
+  "thinking": "Thinking mode",
+  "on": "On",
+  "off": "Off",
+  "thinking_hint": "Only works on models that support it, such as Qwen3. Turning it off speeds up replies.",
+  "save": "Save",
+  "saved": "Saved ✓",
+  "refresh": "Refresh",
+  "refreshed": "Refreshed",
+  "testing": "Testing…",
+  "test": "Test connection",
+  "qr_hint": "Scan with your phone to sync AI settings (same Wi-Fi network). After saving, tap Refresh above to update this page.",
+  "no_wifi": "Connect to Wi-Fi first",
+  "test_ok": "Connected ✓",
+  "test_unreachable": "Network unreachable (check the URL and the device's connection)"
+}

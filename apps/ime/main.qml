@@ -23,14 +23,14 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             Text {
-                text: "\u8f93\u5165\u65b9\u6848"
+                text: space.tr("title")
                 font.pixelSize: 32
                 font.weight: Font.Medium
             }
             Item { Layout.fillWidth: true }
             IconButton {
                 iconSource: "qrc:/ark/icons/restore"
-                title: "\u5237\u65b0"
+                title: space.tr("refresh")
                 onClicked: root.imeLoadSchema()
             }
         }
@@ -75,7 +75,7 @@ Item {
                     }
                     Text {
                         visible: _rmhImeRow.rowApplied
-                        text: "\u5f53\u524d\u751f\u6548"
+                        text: space.tr("active")
                         font.pixelSize: 22
                     }
                 }
@@ -91,7 +91,7 @@ Item {
             wrapMode: Text.WordWrap
             font.pixelSize: 22
             color: "#555555"
-            text: "\u70b9\u9009\u5373\u5207\u6362\uff0c\u7acb\u5373\u751f\u6548\uff0c\u91cd\u542f\u540e\u4fdd\u6301\u3002\u4e94\u7b14\u4e3a\u767d\u971c 86 \u7248\u7801\u8868\uff1b\u4e94\u7b14\u4e0b\u8f93\u5165 z \u53ef\u4e34\u65f6\u62fc\u97f3\u53cd\u67e5\u3002"
+            text: space.tr("hint")
         }
     }
 
@@ -100,7 +100,7 @@ Item {
         x.onreadystatechange = function() {
             if (x.readyState !== XMLHttpRequest.DONE) return
             if (x.status !== 200) {
-                root._rmhImeStatus = "\u8f93\u5165\u6cd5\u670d\u52a1\u672a\u54cd\u5e94"
+                root._rmhImeStatus = space.tr("svc_down")
                 return
             }
             try {
@@ -109,7 +109,7 @@ Item {
                 root._rmhImeSchema = r.schema || ""
                 root._rmhImeStatus = ""
             } catch (e) {
-                root._rmhImeStatus = "\u89e3\u6790\u5931\u8d25"
+                root._rmhImeStatus = space.tr("parse_failed")
             }
         }
         x.open("GET", "http://127.0.0.1:19876/rime/schema")
@@ -117,13 +117,13 @@ Item {
     }
     function imeSelectSchema(id) {
         if (!id || id === root._rmhImeSchema) return
-        root._rmhImeStatus = "\u5207\u6362\u4e2d..."
+        root._rmhImeStatus = space.tr("switching")
         var x = new XMLHttpRequest()
         x.onreadystatechange = function() {
             if (x.readyState !== XMLHttpRequest.DONE) return
             var ok = false
             try { ok = x.status === 200 && JSON.parse(x.responseText).ok === true } catch (e) {}
-            root._rmhImeStatus = ok ? "" : "\u5207\u6362\u5931\u8d25"
+            root._rmhImeStatus = ok ? "" : space.tr("switch_failed")
             root.imeLoadSchema()
         }
         x.open("GET", "http://127.0.0.1:19876/rime/schema?id=" + encodeURIComponent(id))
