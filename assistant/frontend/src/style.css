@@ -46,3 +46,44 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
 .progress div { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
 .hidden { display: none; }
 .ver { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 8px; }
+
+/* —— 一屏一件事的版面 ———————————————————————————— */
+body { max-width: 760px; margin: 0 auto; }
+.card.step { padding: 20px 22px; }
+.card.step h2 { font-size: 18px; margin-bottom: 12px; }
+.row.big { margin: 14px 0; }
+.row.big button { padding: 10px 22px; font-size: 15px; }
+button.go { min-width: 160px; }
+button.link { border: none; background: none; padding: 4px 6px; color: var(--muted); text-decoration: underline; }
+button.link:hover { color: var(--ink); }
+
+/* 设备摘要条: 一行讲完连的是哪台 */
+.devbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 14px; margin-bottom: 12px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.devbar .spacer { flex: 1; }
+.dim { color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.dot.ok { background: var(--accent); }
+.dot.amber { background: #c98a00; }
+
+/* 选要装什么 */
+.picks { display: flex; gap: 12px; flex-wrap: wrap; }
+.pick { flex: 1 1 260px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+  text-align: left; padding: 16px 18px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.pick:hover:not(:disabled) { border-color: var(--accent); background: #f7fbfa; }
+.pick b { font-size: 16px; }
+.pick span { color: var(--muted); line-height: 1.5; }
+.pick em { font-style: normal; font-size: 12px; color: var(--accent); }
+
+.ok { color: var(--accent); margin: 10px 0; }
+
+/* 高级与日志: 默认收起 */
+details.adv { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 10px; }
+details.adv > summary { color: var(--muted); }
+details.card.log > summary { color: var(--muted); }
+details.card.log:not([open]) { padding: 12px 18px; }
+/* 设备条: 左边信息可收缩, 右边按钮永不换行 */
+.devbar { flex-wrap: nowrap; }
+.devbar b { flex: none; }
+.devbar .dim { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devbar .acts { display: flex; gap: 2px; flex: none; }
