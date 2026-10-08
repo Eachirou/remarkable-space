@@ -451,13 +451,16 @@ func TapAt(profile DeviceProfile, x, y int) error {
 	sendOne := func(events []struct {
 		T, C uint16
 		V    int32
-	}) error { for _, e := range events {
-		ev := rawInputEvent{Type: e.T, Code: e.C, Value: e.V}
-		buf := (*[unsafe.Sizeof(ev)]byte)(unsafe.Pointer(&ev))[:]
-		if _, err := f.Write(buf); err != nil {
-			return err
+	}) error {
+		for _, e := range events {
+			ev := rawInputEvent{Type: e.T, Code: e.C, Value: e.V}
+			buf := (*[unsafe.Sizeof(ev)]byte)(unsafe.Pointer(&ev))[:]
+			if _, err := f.Write(buf); err != nil {
+				return err
+			}
 		}
-	}; return nil }
+		return nil
+	}
 
 	// touch_start
 	if err := sendOne([]struct {
