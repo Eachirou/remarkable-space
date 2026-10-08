@@ -1,7 +1,7 @@
 {
   "id": "ai",
   "name": "AI 设置",
-  "name_en": "AI",
+  "name_en": "AI Settings",
   "version": "1.0.0",
   "description": "AI 接口类型、地址、密钥、模型",
   "icon": "icon.svg",
