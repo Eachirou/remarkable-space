@@ -1,4 +1,5 @@
 import './style.css'
+import { deviceArt } from './device'
 import {
   Connect, Disconnect, Probe, ChooseBundle, DownloadBundle, PlanSpace, RunSpace, UninstallSpace,
   PlanAndroid, RunAndroid, UninstallAndroid, BootAndroid, ReturnToStock, ResetAndroidData, ChooseAPKs, InstallAPKs, Cancel, OpenLogDir, LogDir, DetectProxy, Confirm, LoadPassword, ForgetPassword, DiagnoseAndroid, Version, RepairPanel,
@@ -27,7 +28,7 @@ const state = {
   bundles: { space: null as BundleInfo | null, android: null as BundleInfo | null },
   busy: false,
   busyOn: null as Action | null,
-  open: { space: false, android: false },   // 「查看详情」展开了没
+  open: { space: false, android: false },
   settings: false,
   replaceSystem: false,
   removeData: false,
@@ -43,73 +44,67 @@ const RELEASE_BASE = 'https://boangs.com/space/'
 const BUNDLE_NAME: Record<Action, string> = { space: 'space-bundle.zip', android: 'android-rmppm-bundle.zip' }
 const COMPONENT: Record<Action, string> = { space: 'space', android: 'android-rmppm' }
 const APPROX: Record<Action, string> = { space: '约 135 MB', android: '约 600 MB' }
+const LABEL: Record<Action, string> = { space: '空间', android: 'Android' }
 
 const $ = (sel: string) => document.querySelector(sel) as HTMLElement
 const mb = (n: number) => (n / 1e6).toFixed(1) + ' MB'
+const num = (n: number) => n.toLocaleString('en-US')
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
+// 机器串 (路径、版本哈希、固件戳) 走等宽; 人话永远不走。
+const mono = (s: string) => `<span class="mono">${esc(s)}</span>`
 
-// Android 只在 Paper Pro Move 上验证过, 别的机型连卡片都不该出现。
+// Android 只在 Paper Pro Move 上验证过, 别的机型连这一行都不该出现。
 const androidOK = (i: Info | null) => !!i && i.modelKey === 'rmppm'
-// 同是 aarch64 但不是一回事: chiappa 是 A55, ferrari 是 A53 不认 LSE 指令。
 const CODENAME: Record<string, string> = { rmppm: 'Chiappa', rmpp: 'Ferrari', rm2: 'Zero Sugar' }
 
 const ICON = {
-  space: `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>`,
-  android: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 9h12v7a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9Zm-2.2 0A1.3 1.3 0 0 1 5 10.3v4.4a1.2 1.2 0 1 1-2.4 0v-4.4A1.3 1.3 0 0 1 3.8 9Zm16.4 0a1.3 1.3 0 0 1 1.2 1.3v4.4a1.2 1.2 0 1 1-2.4 0v-4.4A1.3 1.3 0 0 1 20.2 9ZM9 19h2v2.8a1.2 1.2 0 1 1-2.4 0V19Zm4.4 0h2v2.8a1.2 1.2 0 1 1-2.4 0V19ZM8.3 3.4 7.4 2a.4.4 0 0 1 .7-.4l.9 1.5A6.6 6.6 0 0 1 12 2.5c1.1 0 2.1.2 3 .6l.9-1.5a.4.4 0 1 1 .7.4l-.9 1.4A5.6 5.6 0 0 1 18 8H6a5.6 5.6 0 0 1 2.3-4.6ZM9.5 5.6a.65.65 0 1 0 0 1.3.65.65 0 0 0 0-1.3Zm5 0a.65.65 0 1 0 0 1.3.65.65 0 0 0 0-1.3Z"/></svg>`,
-  device: `<svg viewBox="0 0 48 62" fill="none"><rect x="1" y="1" width="46" height="60" rx="5" fill="#fff" stroke="currentColor" stroke-width="1.6"/><path d="M8 44l9-12 7 8 6-7 10 11" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" opacity=".55"/><circle cx="31" cy="20" r="3.2" stroke="currentColor" stroke-width="1.6" opacity=".55"/></svg>`,
-  refresh: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>`,
-  up: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16V8m0 0-3.5 3.5M12 8l3.5 3.5"/></svg>`,
-  down: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>`,
-  folder: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>`,
-  trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-9 0 1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/></svg>`,
-  gear: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V20a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H4a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H10a1.6 1.6 0 0 0 1-1.5V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V10a1.6 1.6 0 0 0 1.5 1H20a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/></svg>`,
-  doc: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5"/></svg>`,
+  gear: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V20a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H4a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H10a1.6 1.6 0 0 0 1-1.5V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V10a1.6 1.6 0 0 0 1.5 1H20a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/></svg>`,
   info: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M12 11v5" stroke-linecap="round"/><circle cx="12" cy="7.8" r=".9" fill="currentColor" stroke="none"/></svg>`,
-  chip: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3"/></svg>`,
+  chev: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>`,
 }
 
-// 说明文字不往界面上堆: 做成一个 ⓘ, 要看的人悬停自然看得到。
+// 说明不往界面上堆: 做成一个 ⓘ, 要看的人悬停自然看得到。
 const tip = (text: string) => `<span class="tip" title="${esc(text)}">${ICON.info}</span>`
 
 function render() {
   const i = state.info
   $('#app').innerHTML = `
-    <header class="top">
-      <div class="brand">
-        <span class="applogo">${ICON.device}</span>
-        <div>
-          <h1>空间助手</h1>
-          <p class="sub">一键安装「空间」和 Android，让你的 reMarkable 更强大</p>
-        </div>
-      </div>
-      ${i ? `<button id="btn-settings" class="ghost">${ICON.gear}设置</button>` : ''}
+    <header class="masthead">
+      <h1>空间助手</h1>
+      ${i ? `<button id="btn-settings" class="icon" title="设置">${ICON.gear}</button>` : ''}
     </header>
-    ${i ? renderDevice(i) + renderCards(i) + renderSpecs(i) : renderConnect()}
+    ${i ? renderDevice(i) : renderConnect()}
+    ${i ? renderItems(i) : ''}
     ${renderLog()}
     ${state.settings ? renderSettings() : ''}
   `
   bind()
 }
 
-// —— 没连设备时 ——————————————————————————————————————
+// —— 没连设备 ——————————————————————————————————————
 
 function renderConnect() {
   return `
-    <section class="card pad">
-      <h2>把设备用 USB 线连上电脑</h2>
-      <div class="row big">
-        <label>SSH 密码 <input id="password" type="password" size="18" value="${esc(state.password)}" placeholder="在设备上查"></label>
-        <button id="btn-connect" class="primary">连接</button>
-      </div>
-      <p class="hint">密码在设备 <b>设置 → 帮助 → 版权与许可</b> 页面最底部。${tip('用 USB 线连上后设备默认地址就是 10.11.99.1。Windows 首次连接可能要先装 reMarkable 的 USB 网卡驱动。Android 模式下的密码和 reMarkable 系统的一样。')}</p>
-      <label class="check"><input type="checkbox" id="chk-remember" ${state.remember ? 'checked' : ''}> 记住密码${tip('存进系统钥匙串（Mac 钥匙串 / Windows 凭据管理器），不写进任何文件。')}</label>
-      <details class="adv">
-        <summary>连不上？</summary>
-        <div class="row">
-          <label>地址 <input id="host" value="10.11.99.1" size="14"></label>
-          <button id="btn-forget" class="secondary" ${state.password ? '' : 'disabled'}>忘记已保存的密码</button>
+    <section class="stage">
+      ${deviceArt({ connected: false, space: false, android: false, inAndroid: false })}
+      <div class="stagebody">
+        <h2>用 USB 线把设备连上</h2>
+        <div class="field">
+          <label for="password">SSH 密码</label>
+          <input id="password" type="password" value="${esc(state.password)}" placeholder="在设备上查" autocomplete="off">
+          <button id="btn-connect" class="go">连接</button>
         </div>
-      </details>
+        <p class="note">密码在设备的 设置 → 帮助 → 版权与许可 最底部。${tip('用 USB 线连上后设备默认地址就是 10.11.99.1。Windows 首次连接可能要先装 reMarkable 的 USB 网卡驱动。Android 模式下的密码和 reMarkable 系统的一样。')}</p>
+        <label class="opt"><input type="checkbox" id="chk-remember" ${state.remember ? 'checked' : ''}> 记住密码${tip('存进系统钥匙串（Mac 钥匙串 / Windows 凭据管理器），不写进任何文件。')}</label>
+        <details class="fallback">
+          <summary>连不上</summary>
+          <div class="field">
+            <label for="host">地址</label>
+            <input id="host" value="10.11.99.1">
+            <button id="btn-forget" class="flat" ${state.password ? '' : 'disabled'}>忘记已存的密码</button>
+          </div>
+        </details>
+      </div>
     </section>
   `
 }
@@ -117,79 +112,71 @@ function renderConnect() {
 // —— 设备 ——————————————————————————————————————
 
 function renderDevice(i: Info) {
-  const code = CODENAME[i.modelKey] || ''
+  const specs: [string, string][] = [
+    ['固件', mono(i.fwVersion || '未知')],
+    ['架构', `${mono(i.arch)}${CODENAME[i.modelKey] ? `<span class="dim">（${CODENAME[i.modelKey]}）</span>` : ''}`],
+    ['启动槽', i.activeSlot ? `${mono(i.activeSlot)}<span class="dim">　错误计数 ${mono(`a=${i.errcntA} b=${i.errcntB}`)}</span>` : '<span class="dim">该机型无 A/B 槽</span>'],
+    ['剩余空间', `系统分区 <span class="qty">${num(i.rootFreeMB)}</span> MB<span class="dim">　/home <span class="qty">${num(i.homeFreeMB)}</span> MB</span>`],
+  ]
   return `
-    <section class="card devcard">
-      <span class="thumb">${ICON.device}</span>
-      <div class="devmain">
+    <section class="stage">
+      ${deviceArt({ connected: true, space: i.spaceInstalled, android: i.androidInstalled, inAndroid: i.inAndroidMode })}
+      <div class="stagebody">
         <h2>${esc(i.model)}</h2>
-        <p class="meta">固件 <b>${esc(i.fwVersion || '未知')}</b> &nbsp;·&nbsp; 架构 <b>${esc(i.arch)}</b>${code ? `（${code}）` : ''}</p>
-        <p class="status"><span class="dot ${i.inAndroidMode ? 'amber' : 'ok'}"></span> 已连接 · ${i.inAndroidMode ? '当前在 Android' : 'reMarkable 系统' + (i.xochitlActive ? '运行中' : '未运行')} ${tip('USB 线直连，不经过服务器，不读取你的笔记。')}</p>
-      </div>
-      <div class="devacts">
-        <button id="btn-probe" class="secondary" ${state.busy ? 'disabled' : ''}>${ICON.refresh}重新检测</button>
-        <button id="btn-disconnect" class="link" ${state.busy ? 'disabled' : ''}>断开连接</button>
+        <p class="live"><span class="dot"></span>已连接，${i.inAndroidMode ? '当前在 Android' : 'reMarkable 系统' + (i.xochitlActive ? '运行中' : '未运行')}${tip('USB 线直连，不经过服务器，不读取你的笔记。')}</p>
+        <dl class="spec">${specs.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+        <div class="field">
+          <button id="btn-probe" class="flat" ${state.busy ? 'disabled' : ''}>重新检测</button>
+          <button id="btn-disconnect" class="flat" ${state.busy ? 'disabled' : ''}>断开</button>
+        </div>
       </div>
     </section>
   `
 }
 
-// —— 两张功能卡片 ————————————————————————————————————
+// —— 可安装的东西: 账本式的行, 不是卡片 ——————————————————
 
-function renderCards(i: Info) {
-  return `<div class="cards">${renderCard(i, 'space')}${androidOK(i) ? renderCard(i, 'android') : ''}</div>`
+function renderItems(i: Info) {
+  return `<div class="ledger">${renderItem(i, 'space')}${androidOK(i) ? renderItem(i, 'android') : ''}</div>`
 }
 
-function renderCard(i: Info, a: Action) {
+function renderItem(i: Info, a: Action) {
   const isSpace = a === 'space'
   const b = state.bundles[a]
   const ready = !!b && b.component === COMPONENT[a]
   const installed = isSpace ? i.spaceInstalled : i.androidInstalled
   const busy = state.busy ? 'disabled' : ''
-  const name = isSpace ? '空间' : 'Android'
   const verb = installed ? '更新' : '安装'
   // 中文动词接英文词要留空格, 不然挤成"更新Android"
   const title = isSpace ? verb + '空间' : verb + ' Android'
+  const cur = isSpace ? (i.spaceVersion || '') : ''
+
+  let stateCell: string
+  if (installed && cur) stateCell = `<span class="on">已安装</span> ${mono(cur)}`
+  else if (installed) stateCell = `<span class="on">已安装</span>`
+  else stateCell = `<span class="dim">未安装，下载 ${APPROX[a]}</span>`
+
   return `
-    <section class="card feat ${a} ${state.busyOn === a ? 'running' : ''}">
-      <div class="feathead">
-        <span class="featicon">${isSpace ? ICON.space : ICON.android}</span>
-        <div>
-          <h2>${name} ${installed ? '<span class="badge on">已安装</span>' : '<span class="badge">未安装</span>'}</h2>
-          <p class="meta">${cardMeta(i, a, b, ready)}</p>
+    <section class="item ${state.busyOn === a ? 'working' : ''}">
+      <div class="itemrow">
+        <div class="what">
+          <h3>${LABEL[a]}</h3>
+          <p>${isSpace ? '中文界面、输入法、应用商店' : '双系统启动，开机时选进哪一个'}</p>
+        </div>
+        <div class="stat">${stateCell}${ready ? `<span class="pending">安装包 ${mono(b!.version)}　${mb(b!.bytes)}</span>` : ''}</div>
+        <div class="acts">
+          <button class="go act-run" data-a="${a}" ${busy}>${ready ? title : '下载并' + verb}</button>
+          ${installed
+            ? `<button class="peril ${isSpace ? 'act-uninstall' : 'act-uninstall-android'}" data-a="${a}" ${busy}>卸载</button>`
+            : `<button class="flat act-choose" data-a="${a}" ${busy}>从本地安装</button>`}
         </div>
       </div>
-      <p class="desc">${isSpace
-        ? '中文界面、输入法、应用商店'
-        : '双系统启动，开机时选进哪一个'}</p>
-
-      ${!isSpace && installed ? `<label class="check"><input type="checkbox" class="chk-replace" ${state.replaceSystem ? 'checked' : ''} ${busy}> 覆盖已有系统${tip('重新解包 Android 系统到 /home，应用数据目录不受影响。')}</label>` : ''}
-
-      <div class="featacts">
-        <button class="primary act-run" data-a="${a}" ${busy}>${ready ? ICON.up : ICON.down}${ready ? title : '下载并' + verb}</button>
-        ${installed
-          ? `<button class="danger ${isSpace ? 'act-uninstall' : 'act-uninstall-android'}" data-a="${a}" ${busy}>${ICON.trash}卸载</button>`
-          : `<button class="secondary act-choose" data-a="${a}" ${busy}>${ICON.folder}从本地安装</button>`}
-      </div>
-      <div class="progress hidden" id="dl-${a}"><div></div></div>
-
-      <button class="more act-more" data-a="${a}">查看详情 <span>${state.open[a] ? '⌃' : '›'}</span></button>
+      ${!isSpace && installed ? `<label class="opt"><input type="checkbox" class="chk-replace" ${state.replaceSystem ? 'checked' : ''} ${busy}> 覆盖已有系统${tip('重新解包 Android 系统到 /home，应用数据目录不受影响。')}</label>` : ''}
+      <div class="progress ${state.busyOn === a ? '' : 'hidden'}" id="dl-${a}"><div></div></div>
+      <button class="disclose act-more" data-a="${a}" aria-expanded="${state.open[a]}">${ICON.chev}详情</button>
       ${state.open[a] ? renderDetail(i, a) : ''}
     </section>
   `
-}
-
-// 卡片副行写什么: 装过就先报当前版本 (设备上 .space_version), 手里有包就再报包的版本。
-// 两个都没有时才说"大概多大" —— 那是给还没下过的人看的。
-function cardMeta(i: Info, a: Action, b: BundleInfo | null, ready: boolean): string {
-  const installed = a === 'space' ? i.spaceInstalled : i.androidInstalled
-  const cur = a === 'space' ? (i.spaceVersion || '') : ''
-  const parts: string[] = []
-  if (cur) parts.push(`当前 ${esc(cur)}`)
-  if (ready) parts.push(`安装包 ${esc(b!.version)} · ${mb(b!.bytes)}`)
-  // "大小 约 135 MB" 是给还没装的人估下载量的, 装过的人看了只会困惑
-  if (!parts.length && !installed) parts.push(`下载 ${APPROX[a]}`)
-  return parts.join(' &nbsp;·&nbsp; ')
 }
 
 function renderDetail(i: Info, a: Action) {
@@ -200,48 +187,38 @@ function renderDetail(i: Info, a: Action) {
     : '出厂内核链接不动，Android 系统与数据都在 /home，重启不切槽。'
   return `
     <div class="detail">
-      <h4>安装${tip(safety)}</h4>
-      <div class="row">
-        <button class="secondary act-choose" data-a="${a}" ${busy}>选择本地安装包…</button>
-        <button class="secondary act-plan" data-a="${a}" ${busy || !ready ? 'disabled' : ''}>预览将写入的内容</button>
+      <div class="grp">
+        <h4>安装${tip(safety)}</h4>
+        <div class="field">
+          <button class="flat act-choose" data-a="${a}" ${busy}>选择本地安装包</button>
+          <button class="flat act-plan" data-a="${a}" ${busy || !ready ? 'disabled' : ''}>预览将写入的内容</button>
+        </div>
       </div>
       ${a === 'space' ? `
-        <h4>维护</h4>
-        <div class="row">
-          <button id="btn-repair" class="secondary" ${busy || !i.rmkitInstalled || i.inAndroidMode ? 'disabled' : ''} title="侧栏入口或中文突然消失时用: 清除防砖熔断并重启一次 xochitl">恢复侧栏入口</button>
+        <div class="grp">
+          <h4>维护</h4>
+          <div class="field">
+            <button id="btn-repair" class="flat" ${busy || !i.rmkitInstalled || i.inAndroidMode ? 'disabled' : ''} title="侧栏入口或中文突然消失时用：清除防砖熔断并重启一次 xochitl">恢复侧栏入口</button>
+          </div>
         </div>` : `
-        <h4>切换系统</h4>
-        <div class="row">
-          <button id="btn-boot-android" class="secondary" ${busy || !i.androidInstalled || i.inAndroidMode ? 'disabled' : ''}>重启进 Android</button>
-          <button id="btn-stock" class="secondary" ${busy || !i.inAndroidMode ? 'disabled' : ''}>回 reMarkable 系统</button>
+        <div class="grp">
+          <h4>切换系统</h4>
+          <div class="field">
+            <button id="btn-boot-android" class="flat" ${busy || !i.androidInstalled || i.inAndroidMode ? 'disabled' : ''}>重启进 Android</button>
+            <button id="btn-stock" class="flat" ${busy || !i.inAndroidMode ? 'disabled' : ''}>回 reMarkable 系统</button>
+          </div>
         </div>
-        <h4>维护</h4>
-        <div class="row">
-          <button id="btn-apks" class="secondary" ${busy || !i.inAndroidMode ? 'disabled' : ''} title="需要设备在 Android 模式">安装 APK…</button>
-          <button id="btn-diag" class="secondary" ${busy}>启动诊断</button>
-          <button id="btn-reset-data" class="danger" ${busy || !i.androidInstalled || i.inAndroidMode ? 'disabled' : ''} title="清空 Android 的应用与设置, 下次进 Android 重新首次开机">重置数据</button>
-        </div>
-        <label class="check"><input type="checkbox" id="chk-removedata" ${state.removeData ? 'checked' : ''} ${busy}> 连数据一起删${tip('卸载时连同 /home 里的 Android 系统与应用数据一起删除，不勾选则只移除启动组件。')}</label>`}
+        <div class="grp">
+          <h4>维护</h4>
+          <div class="field">
+            <button id="btn-apks" class="flat" ${busy || !i.inAndroidMode ? 'disabled' : ''} title="需要设备在 Android 模式">安装 APK</button>
+            <button id="btn-diag" class="flat" ${busy}>启动诊断</button>
+            <button id="btn-reset-data" class="peril" ${busy || !i.androidInstalled || i.inAndroidMode ? 'disabled' : ''} title="清空 Android 的应用与设置，下次进 Android 重新首次开机">重置数据</button>
+          </div>
+          <label class="opt"><input type="checkbox" id="chk-removedata" ${state.removeData ? 'checked' : ''} ${busy}> 连数据一起删${tip('卸载时连同 /home 里的 Android 系统与应用数据一起删除，不勾选则只移除启动组件。')}</label>
+        </div>`}
       <div class="plan" id="plan-${a}"></div>
     </div>
-  `
-}
-
-// —— 设备信息 ————————————————————————————————————
-
-function renderSpecs(i: Info) {
-  const cells: [string, string][] = [
-    ['型号', `${i.model}\n${i.arch} · ${i.resolution}`],
-    ['固件', `${i.fwVersion || '未知'}\n${i.rmkitInstalled ? '底座适配 ' + (i.rmkitFW || '未知') : '未装底座'}`],
-    ['当前系统', i.inAndroidMode ? 'Android' : `reMarkable 系统\n${i.xochitlActive ? 'xochitl 运行中' : 'xochitl 未运行'}`],
-    ['启动槽', i.activeSlot ? `${i.activeSlot}\n错误计数 a=${i.errcntA} b=${i.errcntB}` : '该机型无 A/B 槽'],
-    ['剩余空间', `系统分区 ${i.rootFreeMB} MB\n/home ${i.homeFreeMB} MB`],
-  ]
-  return `
-    <section class="card pad">
-      <h3 class="blk">${ICON.chip}设备信息</h3>
-      <div class="specs">${cells.map(([k, v]) => `<div><span>${k}</span><p>${esc(v).replace(/\n/g, '<br>')}</p></div>`).join('')}</div>
-    </section>
   `
 }
 
@@ -249,12 +226,11 @@ function renderSpecs(i: Info) {
 
 function renderLog() {
   return `
-    <section class="card pad">
-      <div class="logbar">
-        <h3 class="blk">${ICON.doc}安装日志</h3>
-        <span class="spacer"></span>
-        ${state.busy ? '<button id="btn-cancel" class="danger">取消</button>' : ''}
-        <button id="btn-logdir" class="secondary">打开日志目录</button>
+    <section class="journal">
+      <div class="jhead">
+        <h4>日志</h4>
+        ${state.busy ? '<button id="btn-cancel" class="peril">取消</button>' : ''}
+        <button id="btn-logdir" class="flat">打开日志目录</button>
       </div>
       <pre id="log"></pre>
     </section>
@@ -265,15 +241,19 @@ function renderLog() {
 
 function renderSettings() {
   return `
-    <div class="mask" id="mask">
-      <div class="sheet">
+    <div class="scrim" id="scrim">
+      <div class="panel" role="dialog" aria-label="设置">
         <h2>设置</h2>
-        <label class="block"><span>下载代理${tip('安装包从我们自己的服务器下载，直连即可。只有直连下不动时才需要填，格式如 http://127.0.0.1:7890')}</span>
-          <input id="proxy" value="${esc(state.proxy)}" placeholder="一般不用填" size="30">
-        </label>
-        <label class="check"><input type="checkbox" id="chk-remember2" ${state.remember ? 'checked' : ''}> 记住 SSH 密码${tip('存进系统钥匙串（Mac 钥匙串 / Windows 凭据管理器），不写进任何文件。')}</label>
-        <div class="row"><button id="btn-forget2" class="secondary">忘记已保存的密码</button></div>
-        <div class="row end"><button id="btn-close-settings" class="primary">完成</button></div>
+        <div class="field stack">
+          <label for="proxy">下载代理${tip('安装包从我们自己的服务器下载，直连即可。只有直连下不动时才需要填，格式如 http://127.0.0.1:7890')}</label>
+          <input id="proxy" value="${esc(state.proxy)}" placeholder="一般不用填">
+        </div>
+        <label class="opt"><input type="checkbox" id="chk-remember2" ${state.remember ? 'checked' : ''}> 记住 SSH 密码${tip('存进系统钥匙串（Mac 钥匙串 / Windows 凭据管理器），不写进任何文件。')}</label>
+        <div class="field"><button id="btn-forget2" class="flat">忘记已存的密码</button></div>
+        <div class="field right">
+          <span class="ver">${esc(state.version)}</span>
+          <button id="btn-close-settings" class="go">完成</button>
+        </div>
       </div>
     </div>
   `
@@ -284,24 +264,24 @@ function renderSettings() {
 function renderSpacePlan(p: SpacePlan) {
   const flags = [
     p.needXovi ? '设备没有 xovi，会先自动部署' : 'xovi 已在',
-    p.deployRime ? '整句输入（librime，拼音+五笔86）' : '纯 Go 输入引擎（安装包无 librime）',
+    p.deployRime ? '整句输入（librime，拼音加五笔86）' : '纯 Go 输入引擎（安装包无 librime）',
     p.qmlInject ? '运行时 QML 注入' : 'qmd 注入',
     p.librarian ? '文件热导入 librarian' : '不装 librarian（rm2）',
   ]
   return `
-    <p>将写入 <b>${(p.files ?? []).length}</b> 个文件，共 ${mb(p.totalBytes)}。</p>
-    <p>${flags.map((f) => `<span class="pill">${f}</span>`).join('')}</p>
-    ${(p.warnings ?? []).map((w) => `<p class="warn">⚠ ${esc(w)}</p>`).join('')}
+    <p class="sum">写入 <span class="qty">${(p.files ?? []).length}</span> 个文件，共 ${mb(p.totalBytes)}</p>
+    <ul class="flags">${flags.map((f) => `<li>${f}</li>`).join('')}</ul>
+    ${(p.warnings ?? []).map((w) => `<p class="warn">${esc(w)}</p>`).join('')}
     <details><summary>文件清单</summary><pre class="files">${(p.files ?? []).map((f) => `${esc(f.device)}  ←  ${esc(f.source)}  (${(f.size / 1024).toFixed(0)} KB)`).join('\n')}</pre></details>
   `
 }
 
 function renderAndroidPlan(p: AndroidPlan) {
   return `
-    ${(p.blockers ?? []).map((b) => `<p class="error">✗ ${esc(b)}</p>`).join('')}
-    ${(p.warnings ?? []).map((w) => `<p class="warn">⚠ ${esc(w)}</p>`).join('')}
-    <p>本槽 ${esc(p.slot)}，固件 ${esc(p.fwVersion)}。将上传 <b>${(p.files ?? []).length}</b> 个文件，共 ${mb(p.totalBytes)}。${p.hasSystemPkg ? (p.systemPresent && !p.replaceSystem ? '设备已有 Android 系统，本次不覆盖。' : '包含 Android 系统包（解包到 /home）。') : '安装包不含系统包，沿用设备上已有的。'}</p>
-    <p class="hint">写入位置 ${tip('/boot 里新增 android 内核（出厂内核链接不动）、/lib/modules 新增一个模块目录、/usr/bin 四个宿主程序、/sbin/init 换成带回落的包装脚本（原链接备份为 /sbin/init.systemd-orig）')}</p>
+    ${(p.blockers ?? []).map((b) => `<p class="stop">${esc(b)}</p>`).join('')}
+    ${(p.warnings ?? []).map((w) => `<p class="warn">${esc(w)}</p>`).join('')}
+    <p class="sum">写入 <span class="qty">${(p.files ?? []).length}</span> 个文件，共 ${mb(p.totalBytes)}，本槽 ${mono(p.slot)}</p>
+    <p class="note">${p.hasSystemPkg ? (p.systemPresent && !p.replaceSystem ? '设备已有 Android 系统，本次不覆盖。' : '包含 Android 系统包，解包到 /home。') : '安装包不含系统包，沿用设备上已有的。'}${tip('/boot 里新增 android 内核（出厂内核链接不动）、/lib/modules 新增一个模块目录、/usr/bin 四个宿主程序、/sbin/init 换成带回落的包装脚本（原链接备份为 /sbin/init.systemd-orig）')}</p>
     <details><summary>文件清单</summary><pre class="files">${(p.files ?? []).map((f) => esc(f)).join('\n')}</pre></details>
   `
 }
@@ -312,7 +292,7 @@ function appendLog(line: string) {
   const el = document.querySelector('#log') as HTMLPreElement | null
   if (!el) return
   const t = new Date().toTimeString().slice(0, 8)
-  el.textContent += `[${t}] ` + line + '\n'
+  el.textContent += `${t}  ` + line + '\n'
   el.scrollTop = el.scrollHeight
 }
 
@@ -341,23 +321,25 @@ async function guarded(on: Action, fn: () => Promise<void>) {
   } finally {
     try { state.info = (await Probe()) as Info } catch { /* 设备可能已重启 */ }
     setBusy(false)
+    // 唯一一处非用户触发的动效: 装完了, 画像像真机那样闪一下重绘。
+    const art = document.querySelector('.device')
+    if (art) { art.classList.remove('refresh'); void (art as SVGElement).getBoundingClientRect(); art.classList.add('refresh') }
   }
 }
 
-// 下载 + 安装一条龙: 没有包就先下, 有包直接装。
+// 下载加安装一条龙: 没有包就先下, 有包直接装。
 async function runAction(a: Action) {
   const i = state.info as Info
   const have = () => !!state.bundles[a] && state.bundles[a]!.component === COMPONENT[a]
   if (!have()) {
     await guarded(a, async () => {
-      $(`#dl-${a}`)?.classList.remove('hidden')
       try {
         state.bundles[a] = (await DownloadBundle([RELEASE_BASE + BUNDLE_NAME[a]], '', state.proxy)) as BundleInfo
       } catch (e) {
         // 下不动的时候才提代理。探测到系统代理就告诉他可以去「设置」里填上再试。
         if (!state.proxy) {
           const sys = await DetectProxy().catch(() => '')
-          if (sys) appendLog('提示：检测到系统代理 ' + sys + '，若直连下不动，可在右上角「设置」里填上再试。')
+          if (sys) appendLog('检测到系统代理 ' + sys + '，若直连下不动，可在设置里填上再试')
         }
         throw e
       }
@@ -400,7 +382,7 @@ function bind() {
   $('#btn-disconnect')?.addEventListener('click', async () => { await Disconnect(); state.info = null; keepLog(render) })
   $('#btn-probe')?.addEventListener('click', async () => { try { state.info = (await Probe()) as Info; keepLog(render) } catch (e) { appendLog('✗ ' + String(e)) } })
 
-  // 卡片
+  // 条目
   document.querySelectorAll<HTMLButtonElement>('.act-more').forEach((t) => t.addEventListener('click', () => {
     const a = t.dataset.a as Action
     state.open[a] = !state.open[a]
@@ -412,7 +394,7 @@ function bind() {
     try {
       const b = (await ChooseBundle()) as BundleInfo | null
       if (!b) return
-      if (b.component !== COMPONENT[a]) { appendLog(`✗ 选的是「${b.component}」的安装包，不是${a === 'space' ? '「空间」' : ' Android '}的`); return }
+      if (b.component !== COMPONENT[a]) { appendLog(`选的是「${b.component}」的安装包，不是${LABEL[a]}的`); return }
       state.bundles[a] = b
       keepLog(render)
     } catch (e) { appendLog('✗ ' + String(e)) }
@@ -422,23 +404,23 @@ function bind() {
     const box = $(`#plan-${a}`)
     try {
       box.innerHTML = a === 'space' ? renderSpacePlan((await PlanSpace()) as SpacePlan) : renderAndroidPlan((await PlanAndroid(state.replaceSystem)) as AndroidPlan)
-    } catch (e) { box.innerHTML = `<p class="error">✗ ${esc(String(e))}</p>` }
+    } catch (e) { box.innerHTML = `<p class="stop">${esc(String(e))}</p>` }
   }))
   document.querySelectorAll<HTMLButtonElement>('.act-uninstall').forEach((t) => t.addEventListener('click', async () => {
     if (await Confirm('确认', '确定卸载空间及其注入底座？设备会恢复出厂启动配置。')) guarded('space', () => UninstallSpace())
+  }))
+  document.querySelectorAll<HTMLButtonElement>('.act-uninstall-android').forEach((t) => t.addEventListener('click', async () => {
+    if (await Confirm('确认', state.removeData ? '确定卸载 Android 并删除 /home 里的系统与数据？' : '确定卸载 Android（保留 /home 数据）？')) guarded('android', () => UninstallAndroid(state.removeData))
   }))
   document.querySelectorAll<HTMLInputElement>('.chk-replace').forEach((t) => t.addEventListener('change', (e) => { state.replaceSystem = (e.target as HTMLInputElement).checked }))
   $('#chk-removedata')?.addEventListener('change', (e) => { state.removeData = (e.target as HTMLInputElement).checked })
 
   // 详情里的那些
   $('#btn-repair')?.addEventListener('click', () => guarded('space', () => RepairPanel()))
-  document.querySelectorAll<HTMLButtonElement>('.act-uninstall-android').forEach((t) => t.addEventListener('click', async () => {
-    if (await Confirm('确认', state.removeData ? '确定卸载 Android 并删除 /home 里的系统与数据？' : '确定卸载 Android（保留 /home 数据）？')) guarded('android', () => UninstallAndroid(state.removeData))
-  }))
   $('#btn-boot-android')?.addEventListener('click', async () => { if (await Confirm('确认', '设备将重启进入 Android，约 1 到 3 分钟。回来时可在 Android 桌面点“原厂系统”。继续？')) guarded('android', () => BootAndroid()) })
   $('#btn-stock')?.addEventListener('click', () => guarded('android', () => ReturnToStock()))
   $('#btn-diag')?.addEventListener('click', async () => {
-    try { const t = await DiagnoseAndroid(); appendLog('===== Android 启动诊断 =====\n' + t + '===== 诊断结束 (已保存到日志目录, 请把该文件发给开发者) =====') } catch (e) { appendLog('✗ ' + String(e)) }
+    try { const t = await DiagnoseAndroid(); appendLog('—— Android 启动诊断 ——\n' + t + '—— 诊断结束，已存进日志目录，请把该文件发给开发者 ——') } catch (e) { appendLog('✗ ' + String(e)) }
   })
   $('#btn-reset-data')?.addEventListener('click', async () => { if (await Confirm('确认', '清空 Android 的全部应用与设置？下次进 Android 会重新首次开机（约 5 分钟）。')) guarded('android', () => ResetAndroidData()) })
   $('#btn-apks')?.addEventListener('click', async () => {
@@ -451,7 +433,7 @@ function bind() {
   // 设置
   $('#btn-settings')?.addEventListener('click', () => { state.settings = true; keepLog(render) })
   $('#btn-close-settings')?.addEventListener('click', () => { state.settings = false; keepLog(render) })
-  $('#mask')?.addEventListener('click', (e) => { if (e.target === $('#mask')) { state.settings = false; keepLog(render) } })
+  $('#scrim')?.addEventListener('click', (e) => { if (e.target === $('#scrim')) { state.settings = false; keepLog(render) } })
   $('#proxy')?.addEventListener('change', (e) => {
     state.proxy = (e.target as HTMLInputElement).value.trim()
     try { localStorage.setItem('proxy.manual', state.proxy) } catch { /* 忽略 */ }
@@ -474,5 +456,5 @@ EventsOn('progress', (p: { done: number; total: number }) => {
 try { state.proxy = localStorage.getItem('proxy.manual') || '' } catch { /* 忽略 */ }
 render()
 LoadPassword('10.11.99.1').then((pw) => { if (pw) { state.password = pw; keepLog(render); appendLog('已从钥匙串读到保存的密码') } })
-LogDir().then((d) => appendLog('审计日志目录: ' + d))
+LogDir().then((d) => appendLog('日志目录 ' + d))
 Version().then((v) => { state.version = v; appendLog('空间助手 ' + v) })
