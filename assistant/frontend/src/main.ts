@@ -64,8 +64,12 @@ const ICON = {
   trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-9 0 1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/></svg>`,
   gear: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V20a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H4a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H10a1.6 1.6 0 0 0 1-1.5V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V10a1.6 1.6 0 0 0 1.5 1H20a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/></svg>`,
   doc: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5"/></svg>`,
+  info: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M12 11v5" stroke-linecap="round"/><circle cx="12" cy="7.8" r=".9" fill="currentColor" stroke="none"/></svg>`,
   chip: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3"/></svg>`,
 }
+
+// 说明文字不往界面上堆: 做成一个 ⓘ, 要看的人悬停自然看得到。
+const tip = (text: string) => `<span class="tip" title="${esc(text)}">${ICON.info}</span>`
 
 function render() {
   const i = state.info
@@ -97,15 +101,14 @@ function renderConnect() {
         <label>SSH 密码 <input id="password" type="password" size="18" value="${esc(state.password)}" placeholder="在设备上查"></label>
         <button id="btn-connect" class="primary">连接</button>
       </div>
-      <p class="hint">密码在设备 <b>设置 → 帮助 → 版权与许可</b> 页面最底部。</p>
-      <label class="check"><input type="checkbox" id="chk-remember" ${state.remember ? 'checked' : ''}> 记住密码（存系统钥匙串，不写文件）</label>
+      <p class="hint">密码在设备 <b>设置 → 帮助 → 版权与许可</b> 页面最底部。${tip('用 USB 线连上后设备默认地址就是 10.11.99.1。Windows 首次连接可能要先装 reMarkable 的 USB 网卡驱动。Android 模式下的密码和 reMarkable 系统的一样。')}</p>
+      <label class="check"><input type="checkbox" id="chk-remember" ${state.remember ? 'checked' : ''}> 记住密码${tip('存进系统钥匙串（Mac 钥匙串 / Windows 凭据管理器），不写进任何文件。')}</label>
       <details class="adv">
         <summary>连不上？</summary>
         <div class="row">
           <label>地址 <input id="host" value="10.11.99.1" size="14"></label>
           <button id="btn-forget" class="secondary" ${state.password ? '' : 'disabled'}>忘记已保存的密码</button>
         </div>
-        <p class="hint">用 USB 线连上后设备默认就是 10.11.99.1。Windows 首次连接可能要先装 reMarkable 的 USB 网卡驱动。Android 模式下的密码和 reMarkable 系统的一样。</p>
       </details>
     </section>
   `
@@ -121,8 +124,7 @@ function renderDevice(i: Info) {
       <div class="devmain">
         <h2>${esc(i.model)}</h2>
         <p class="meta">固件 <b>${esc(i.fwVersion || '未知')}</b> &nbsp;·&nbsp; 架构 <b>${esc(i.arch)}</b>${code ? `（${code}）` : ''}</p>
-        <p class="status"><span class="dot ${i.inAndroidMode ? 'amber' : 'ok'}"></span> 已连接 · ${i.inAndroidMode ? '当前在 Android' : 'reMarkable 系统' + (i.xochitlActive ? '运行中' : '未运行')}</p>
-        <p class="hint">USB 线直连，不经过服务器，不读取你的笔记。</p>
+        <p class="status"><span class="dot ${i.inAndroidMode ? 'amber' : 'ok'}"></span> 已连接 · ${i.inAndroidMode ? '当前在 Android' : 'reMarkable 系统' + (i.xochitlActive ? '运行中' : '未运行')} ${tip('USB 线直连，不经过服务器，不读取你的笔记。')}</p>
       </div>
       <div class="devacts">
         <button id="btn-probe" class="secondary" ${state.busy ? 'disabled' : ''}>${ICON.refresh}重新检测</button>
@@ -158,10 +160,10 @@ function renderCard(i: Info, a: Action) {
         </div>
       </div>
       <p class="desc">${isSpace
-        ? '中文界面、输入法、应用商店。装在 reMarkable 系统里，随时可卸载。'
-        : '在这台设备上装一套 Android，开机时可选择进入哪个系统。'}</p>
+        ? '中文界面、输入法、应用商店'
+        : '双系统启动，开机时选进哪一个'}</p>
 
-      ${!isSpace && installed ? `<label class="check"><input type="checkbox" class="chk-replace" ${state.replaceSystem ? 'checked' : ''} ${busy}> 覆盖已有的 Android 系统（应用数据不受影响）</label>` : ''}
+      ${!isSpace && installed ? `<label class="check"><input type="checkbox" class="chk-replace" ${state.replaceSystem ? 'checked' : ''} ${busy}> 覆盖已有系统${tip('重新解包 Android 系统到 /home，应用数据目录不受影响。')}</label>` : ''}
 
       <div class="featacts">
         <button class="primary act-run" data-a="${a}" ${busy}>${ready ? ICON.up : ICON.down}${ready ? title : '下载并' + verb}</button>
@@ -180,37 +182,46 @@ function renderCard(i: Info, a: Action) {
 // 卡片副行写什么: 装过就先报当前版本 (设备上 .space_version), 手里有包就再报包的版本。
 // 两个都没有时才说"大概多大" —— 那是给还没下过的人看的。
 function cardMeta(i: Info, a: Action, b: BundleInfo | null, ready: boolean): string {
+  const installed = a === 'space' ? i.spaceInstalled : i.androidInstalled
   const cur = a === 'space' ? (i.spaceVersion || '') : ''
   const parts: string[] = []
   if (cur) parts.push(`当前 ${esc(cur)}`)
   if (ready) parts.push(`安装包 ${esc(b!.version)} · ${mb(b!.bytes)}`)
-  if (!parts.length) parts.push(`大小 ${APPROX[a]}`)
+  // "大小 约 135 MB" 是给还没装的人估下载量的, 装过的人看了只会困惑
+  if (!parts.length && !installed) parts.push(`下载 ${APPROX[a]}`)
   return parts.join(' &nbsp;·&nbsp; ')
 }
 
 function renderDetail(i: Info, a: Action) {
   const busy = state.busy ? 'disabled' : ''
   const ready = !!state.bundles[a] && state.bundles[a]!.component === COMPONENT[a]
+  const safety = a === 'space'
+    ? '写入前会按你的固件重新生成注入表，全部命中才动系统配置；启动后观察 10 秒，任一步不对自动退回出厂启动。'
+    : '出厂内核链接不动，Android 系统与数据都在 /home，重启不切槽。'
   return `
     <div class="detail">
-      <p class="hint">${a === 'space'
-        ? '写入前会按你的固件重新生成注入表，全部命中才动系统配置；启动后观察 10 秒，任一步不对自动退回出厂启动。'
-        : '出厂内核链接不动，Android 系统与数据都在 /home，重启不切槽。'}</p>
+      <h4>安装${tip(safety)}</h4>
       <div class="row">
         <button class="secondary act-choose" data-a="${a}" ${busy}>选择本地安装包…</button>
         <button class="secondary act-plan" data-a="${a}" ${busy || !ready ? 'disabled' : ''}>预览将写入的内容</button>
-        ${a === 'space'
-          ? `<button id="btn-repair" class="secondary" ${busy || !i.rmkitInstalled || i.inAndroidMode ? 'disabled' : ''} title="侧栏入口/中文突然消失时用: 清除防砖熔断并重启一次 xochitl">恢复侧栏入口</button>`
-          : `<button id="btn-boot-android" class="secondary" ${busy || !i.androidInstalled || i.inAndroidMode ? 'disabled' : ''}>重启进 Android</button>
-             <button id="btn-stock" class="secondary" ${busy || !i.inAndroidMode ? 'disabled' : ''}>回 reMarkable 系统</button>`}
       </div>
-      ${a === 'android' ? `
+      ${a === 'space' ? `
+        <h4>维护</h4>
+        <div class="row">
+          <button id="btn-repair" class="secondary" ${busy || !i.rmkitInstalled || i.inAndroidMode ? 'disabled' : ''} title="侧栏入口或中文突然消失时用: 清除防砖熔断并重启一次 xochitl">恢复侧栏入口</button>
+        </div>` : `
+        <h4>切换系统</h4>
+        <div class="row">
+          <button id="btn-boot-android" class="secondary" ${busy || !i.androidInstalled || i.inAndroidMode ? 'disabled' : ''}>重启进 Android</button>
+          <button id="btn-stock" class="secondary" ${busy || !i.inAndroidMode ? 'disabled' : ''}>回 reMarkable 系统</button>
+        </div>
+        <h4>维护</h4>
         <div class="row">
           <button id="btn-apks" class="secondary" ${busy || !i.inAndroidMode ? 'disabled' : ''} title="需要设备在 Android 模式">安装 APK…</button>
           <button id="btn-diag" class="secondary" ${busy}>启动诊断</button>
-          <button id="btn-reset-data" class="danger" ${busy || !i.androidInstalled || i.inAndroidMode ? 'disabled' : ''} title="清空 Android 应用与设置, 下次进 Android 重新首启">重置数据</button>
+          <button id="btn-reset-data" class="danger" ${busy || !i.androidInstalled || i.inAndroidMode ? 'disabled' : ''} title="清空 Android 的应用与设置, 下次进 Android 重新首次开机">重置数据</button>
         </div>
-        <label class="check"><input type="checkbox" id="chk-removedata" ${state.removeData ? 'checked' : ''} ${busy}> 卸载时连同 /home 里的系统与数据一起删</label>` : ''}
+        <label class="check"><input type="checkbox" id="chk-removedata" ${state.removeData ? 'checked' : ''} ${busy}> 连数据一起删${tip('卸载时连同 /home 里的 Android 系统与应用数据一起删除，不勾选则只移除启动组件。')}</label>`}
       <div class="plan" id="plan-${a}"></div>
     </div>
   `
@@ -257,11 +268,10 @@ function renderSettings() {
     <div class="mask" id="mask">
       <div class="sheet">
         <h2>设置</h2>
-        <label class="block">下载代理
+        <label class="block"><span>下载代理${tip('安装包从我们自己的服务器下载，直连即可。只有直连下不动时才需要填，格式如 http://127.0.0.1:7890')}</span>
           <input id="proxy" value="${esc(state.proxy)}" placeholder="一般不用填" size="30">
         </label>
-        <p class="hint">安装包从我们自己的服务器下载，直连即可。只有直连下不动时才需要填，格式如 <code>http://127.0.0.1:7890</code>。</p>
-        <label class="check"><input type="checkbox" id="chk-remember2" ${state.remember ? 'checked' : ''}> 记住 SSH 密码（存系统钥匙串）</label>
+        <label class="check"><input type="checkbox" id="chk-remember2" ${state.remember ? 'checked' : ''}> 记住 SSH 密码${tip('存进系统钥匙串（Mac 钥匙串 / Windows 凭据管理器），不写进任何文件。')}</label>
         <div class="row"><button id="btn-forget2" class="secondary">忘记已保存的密码</button></div>
         <div class="row end"><button id="btn-close-settings" class="primary">完成</button></div>
       </div>
@@ -291,7 +301,7 @@ function renderAndroidPlan(p: AndroidPlan) {
     ${(p.blockers ?? []).map((b) => `<p class="error">✗ ${esc(b)}</p>`).join('')}
     ${(p.warnings ?? []).map((w) => `<p class="warn">⚠ ${esc(w)}</p>`).join('')}
     <p>本槽 ${esc(p.slot)}，固件 ${esc(p.fwVersion)}。将上传 <b>${(p.files ?? []).length}</b> 个文件，共 ${mb(p.totalBytes)}。${p.hasSystemPkg ? (p.systemPresent && !p.replaceSystem ? '设备已有 Android 系统，本次不覆盖。' : '包含 Android 系统包（解包到 /home）。') : '安装包不含系统包，沿用设备上已有的。'}</p>
-    <p class="hint">写入位置：/boot 里新增 android 内核（出厂内核链接不动）、/lib/modules 新增一个模块目录、/usr/bin 四个宿主程序、/sbin/init 换成带回落的包装脚本（原链接备份为 /sbin/init.systemd-orig）。</p>
+    <p class="hint">写入位置 ${tip('/boot 里新增 android 内核（出厂内核链接不动）、/lib/modules 新增一个模块目录、/usr/bin 四个宿主程序、/sbin/init 换成带回落的包装脚本（原链接备份为 /sbin/init.systemd-orig）')}</p>
     <details><summary>文件清单</summary><pre class="files">${(p.files ?? []).map((f) => esc(f)).join('\n')}</pre></details>
   `
 }

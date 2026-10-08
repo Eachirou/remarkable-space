@@ -145,3 +145,16 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
 }
 /* 设备图标在深色底上用描边版 (缩略图是浅底, 保留白填充) */
 .applogo svg rect { fill: none; }
+
+/* —— ⓘ: 说明走悬停, 不占版面 —— */
+.tip { display: inline-flex; vertical-align: -2px; margin-left: 4px; color: #9aa5a0; cursor: help; }
+.tip svg { width: 14px; height: 14px; }
+.tip:hover { color: var(--accent); }
+
+/* —— 详情区: 按用途分组, 按钮小一号 —— */
+.detail h4 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 13px 0 0;
+  letter-spacing: .4px; }
+.detail h4:first-child { margin-top: 0; }
+.detail .row { margin: 7px 0 0; gap: 7px; }
+.detail button { padding: 6px 12px; font-size: 13px; }
+.detail label.check { margin: 10px 0 0; font-size: 13px; }
