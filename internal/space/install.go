@@ -55,6 +55,15 @@ func (r *Registry) InstallZip(zr *zip.Reader, hdr http.Header, sup *Supervisor) 
 			_ = os.RemoveAll(final)
 			return App{}, err
 		}
+	} else if r.ModuleDir != "" {
+		// 从编译发布改回明文的应用: 旧版在模块目录里留了一份 qml/<URI>/, 不清掉的话
+		// import 还会解析到它 —— 装了新版行为却是旧的, 这种最难排查。
+		// 清哪个目录按 ID 猜不出来 (URI 是清单里自定的), 所以扫一遍找 qmldir 里
+		// 声明的模块名对得上旧 URI 的。这里简单处理: 按应用 ID 的首字母大写形式试一次,
+		// 再加上应用目录里残留的 qml/ 下的名字。
+		for _, name := range staleModuleNames(final, m.ID) {
+			_ = os.RemoveAll(filepath.Join(r.ModuleDir, name))
+		}
 	}
 	// 本体 (别人发布的那部分) 放最后装: 它要下几十 MB 又要跑脚本, 失败率比前面高,
 	// 而应用目录这时已经完整 —— 用户至少能看到这个应用、能再点一次重装。
@@ -364,4 +373,23 @@ func writeEntry(f *zip.File, target string, mode os.FileMode) error {
 	defer out.Close()
 	_, err = io.Copy(out, io.LimitReader(rc, maxAppBytes))
 	return err
+}
+
+// staleModuleNames 猜这个应用过去可能用过的模块目录名。
+// 应用从 module 改回 entry 之后, 新清单里不再有 URI, 没法直接知道该删哪个目录;
+// 这里按两条线索找: ① 包里残留的 qml/<Name>/ ② 应用 ID 的首字母大写形式
+// (约定俗成: id=plan 的模块 URI 就是 Plan)。多删一个不存在的目录没有副作用。
+func staleModuleNames(appDir, id string) []string {
+	var out []string
+	if ents, err := os.ReadDir(filepath.Join(appDir, "qml")); err == nil {
+		for _, e := range ents {
+			if e.IsDir() {
+				out = append(out, e.Name())
+			}
+		}
+	}
+	if id != "" {
+		out = append(out, strings.ToUpper(id[:1])+id[1:])
+	}
+	return out
 }
