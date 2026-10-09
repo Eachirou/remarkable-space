@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,24 +12,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/boangs/remarkable-space/internal/librarian"
+	"github.com/boangs/remarkable-space/internal/xolib"
 )
 
 func newTestServer(t *testing.T) (*Server, http.Handler, string) {
 	t.Helper()
 	root := t.TempDir()
 	cfg := Config{
-		StaticDir:     filepath.Join(root, "static"),
-		FontsDir:      filepath.Join(root, "fonts"),
-		ScreensDir:    filepath.Join(root, "screens"),
-		DocStagingDir: filepath.Join(root, "staging"),
-		MusicDir:      filepath.Join(root, "music"),
-		HeroDir:       filepath.Join(root, "hero"),
+		StaticDir:  filepath.Join(root, "static"),
+		FontsDir:   filepath.Join(root, "fonts"),
+		ScreensDir: filepath.Join(root, "screens"),
+		MusicDir:   filepath.Join(root, "music"),
+		HeroDir:    filepath.Join(root, "hero"),
+		XochitlDir: filepath.Join(root, "xochitl"),
 	}
 	if err := os.MkdirAll(cfg.StaticDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -40,6 +39,7 @@ func newTestServer(t *testing.T) (*Server, http.Handler, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	srv.lib.Queue.Next(context.Background(), 0) // 默认算「空间」开着; 测拦截的用例自己 Close
 	return srv, srv.Routes(), root
 }
 
@@ -143,203 +143,106 @@ func TestUploadScreenWrongFormat(t *testing.T) {
 	}
 }
 
-// ---- /documents (librarian pipe) ----
+// ---- /documents (xolib 热导入, 空间开着才收) ----
 
-type fakeLibCall struct {
-	signal string
-	value  string
-}
-
-type fakeLibrarian struct {
-	mu          sync.Mutex
-	history     []fakeLibCall
-	signal      atomic.Value
-	value       atomic.Value
-	stagedBytes atomic.Value
-	response    string
-	err         error
-	calls       atomic.Int32
-}
-
-func (f *fakeLibrarian) invoke(signal, value string, timeout time.Duration) (string, error) {
-	f.calls.Add(1)
-	f.mu.Lock()
-	f.history = append(f.history, fakeLibCall{signal, value})
-	f.mu.Unlock()
-	f.signal.Store(signal)
-	f.value.Store(value)
-	if b, err := os.ReadFile(value); err == nil {
-		f.stagedBytes.Store(b)
-	}
-	return f.response, f.err
-}
-
-func withFakeLibrarian(t *testing.T, fake *fakeLibrarian) {
+// fakeShell 扮演 xochitl 里的空间外壳: 长连接取活, 回报 ok。
+func fakeShell(t *testing.T, srv *Server, ok bool) {
 	t.Helper()
-	prev := invokeLibrarian
-	invokeLibrarian = fake.invoke
-	t.Cleanup(func() { invokeLibrarian = prev })
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() {
+		for ctx.Err() == nil {
+			for _, j := range srv.lib.Queue.Next(ctx, 200*time.Millisecond) {
+				srv.lib.Queue.Done(xolib.Result{Op: j.Op, ID: j.ID, OK: ok})
+			}
+		}
+	}()
+	time.Sleep(20 * time.Millisecond)
 }
 
-func TestUploadDocumentPDF(t *testing.T) {
-	_, h, _ := newTestServer(t)
-	fake := &fakeLibrarian{response: "abc-uuid-123"}
-	withFakeLibrarian(t, fake)
-
-	body, ct := multipartUpload(t, "file", "book.pdf", "application/pdf", []byte("%PDF-1.4 fake"))
+func postDoc(t *testing.T, h http.Handler, name string, content []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	body, ct := multipartUpload(t, "file", name, "application/octet-stream", content)
 	req := httptest.NewRequest("POST", "/documents", body)
 	req.Header.Set("Content-Type", ct)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
+	return rr
+}
 
+func TestUploadDocumentLoaded(t *testing.T) {
+	srv, h, root := newTestServer(t)
+	fakeShell(t, srv, true)
+	rr := postDoc(t, h, "book, 第2版.pdf", []byte("%PDF-1.4 fake"))
 	if rr.Code != 200 {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body)
 	}
 	var resp map[string]any
 	json.Unmarshal(rr.Body.Bytes(), &resp)
-	if resp["uuid"] != "abc-uuid-123" {
-		t.Errorf("expected uuid=abc-uuid-123, got %v", resp["uuid"])
+	id, _ := resp["uuid"].(string)
+	if resp["loaded"] != true || len(id) != 36 {
+		t.Fatalf("%v", resp)
 	}
-	if resp["name"] != "book.pdf" {
-		t.Errorf("expected name=book.pdf, got %v", resp["name"])
+	xdir := filepath.Join(root, "xochitl")
+	if b, _ := os.ReadFile(filepath.Join(xdir, id+".pdf")); string(b) != "%PDF-1.4 fake" {
+		t.Fatal("本体没写进 xochitl 目录")
 	}
-	fake.mu.Lock()
-	hist := append([]fakeLibCall(nil), fake.history...)
-	fake.mu.Unlock()
-	if len(hist) != 2 {
-		t.Fatalf("expected 2 librarian calls, got %d: %+v", len(hist), hist)
-	}
-	if hist[0].signal != "importDocument" {
-		t.Errorf("call[0] signal=%q want importDocument", hist[0].signal)
-	}
-	// staging 路径应不含原始文件名 (避免逗号/特殊字符), 仅 token + 扩展
-	if !strings.HasSuffix(hist[0].value, ".pdf") || strings.Contains(hist[0].value, "book") {
-		t.Errorf("call[0] staging path should be <token>.pdf, got %q", hist[0].value)
-	}
-	if hist[1].signal != "renameEntry" {
-		t.Errorf("call[1] signal=%q want renameEntry", hist[1].signal)
-	}
-	if hist[1].value != "abc-uuid-123,book" {
-		t.Errorf("call[1] value=%q want abc-uuid-123,book", hist[1].value)
-	}
-	if b, _ := fake.stagedBytes.Load().([]byte); !bytes.Equal(b, []byte("%PDF-1.4 fake")) {
-		t.Errorf("staged bytes mismatch: %q", b)
+	// 文件名里的逗号原样进显示名 (librarian 时代会被当分隔符切断)
+	b, _ := os.ReadFile(filepath.Join(xdir, id+".metadata"))
+	if !strings.Contains(string(b), `"visibleName": "book, 第2版"`) {
+		t.Fatalf("metadata: %s", b)
 	}
 }
 
-// 文件名含 ',' 的回归测试: librarian 用 lastIndexOf(',') 切 path/parentId,
-// staging 文件名必须不含原始字符, 否则会被误切.
-func TestUploadDocumentFilenameWithCommas(t *testing.T) {
-	_, h, _ := newTestServer(t)
-	fake := &fakeLibrarian{response: "uuid-with-commas"}
-	withFakeLibrarian(t, fake)
-
-	dirty := "Book (z-library.sk, 1lib.sk, z-lib.sk).epub"
-	body, ct := multipartUpload(t, "file", dirty, "application/epub+zip", []byte("epub"))
-	req := httptest.NewRequest("POST", "/documents", body)
-	req.Header.Set("Content-Type", ct)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != 200 {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body)
+// 外壳没来回报 (比如刚好在这几秒里关了空间): 文件照样写进去, 只是 loaded=false, 下次打开补上
+func TestUploadDocumentNotLoadedYet(t *testing.T) {
+	srv, h, _ := newTestServer(t)
+	srv.lib.Queue.Next(context.Background(), 0) // 算开着, 但没人取活
+	prev := LoadWait
+	LoadWait = 50 * time.Millisecond
+	t.Cleanup(func() { LoadWait = prev })
+	rr := postDoc(t, h, "a.epub", []byte("PK"))
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"loaded":false`) {
+		t.Fatalf("%d %s", rr.Code, rr.Body)
 	}
-	fake.mu.Lock()
-	hist := append([]fakeLibCall(nil), fake.history...)
-	fake.mu.Unlock()
-	if len(hist) != 2 {
-		t.Fatalf("expected 2 calls, got %d: %+v", len(hist), hist)
-	}
-	if strings.Contains(hist[0].value, ",") {
-		t.Errorf("staging path must not contain ',' but got %q", hist[0].value)
-	}
-	want := "uuid-with-commas," + strings.TrimSuffix(dirty, ".epub")
-	if hist[1].value != want {
-		t.Errorf("renameEntry value=%q want %q", hist[1].value, want)
+	if srv.lib.Queue.Pending() != 1 {
+		t.Fatal("应留在待通知队列里")
 	}
 }
 
 func TestUploadDocumentRejectsExe(t *testing.T) {
-	_, h, _ := newTestServer(t)
-	fake := &fakeLibrarian{}
-	withFakeLibrarian(t, fake)
-
-	body, ct := multipartUpload(t, "file", "evil.exe", "", []byte("MZ"))
-	req := httptest.NewRequest("POST", "/documents", body)
-	req.Header.Set("Content-Type", ct)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != 400 {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body)
-	}
-	if fake.calls.Load() != 0 {
-		t.Errorf("librarian should not be invoked for rejected ext")
+	srv, h, _ := newTestServer(t)
+	fakeShell(t, srv, true)
+	if rr := postDoc(t, h, "evil.exe", []byte("MZ")); rr.Code != 400 {
+		t.Fatalf("status=%d", rr.Code)
 	}
 }
 
-func TestUploadDocumentPipeMissing(t *testing.T) {
-	_, h, _ := newTestServer(t)
-	fake := &fakeLibrarian{err: librarian.ErrPipeMissing}
-	withFakeLibrarian(t, fake)
-	body, ct := multipartUpload(t, "file", "x.pdf", "", []byte("x"))
-	req := httptest.NewRequest("POST", "/documents", body)
+// 空间关着: 上传一律拒绝, 扫码页显示提示
+func TestUploadsNeedSpaceOpen(t *testing.T) {
+	srv, h, _ := newTestServer(t)
+	srv.lib.Queue.Close()
+	if rr := postDoc(t, h, "a.pdf", []byte("%PDF")); rr.Code != 503 || !strings.Contains(rr.Body.String(), "空间") {
+		t.Fatalf("%d %s", rr.Code, rr.Body)
+	}
+	body, ct := multipartUpload(t, "file", "a.ttf", "font/ttf", []byte("x"))
+	req := httptest.NewRequest("POST", "/fonts", body)
 	req.Header.Set("Content-Type", ct)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	if rr.Code != 503 {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body)
+		t.Fatalf("字体上传也应拦: %d", rr.Code)
 	}
-}
-
-func TestUploadDocumentTimeout(t *testing.T) {
-	_, h, _ := newTestServer(t)
-	fake := &fakeLibrarian{err: librarian.ErrTimeout}
-	withFakeLibrarian(t, fake)
-	body, ct := multipartUpload(t, "file", "x.pdf", "", []byte("x"))
-	req := httptest.NewRequest("POST", "/documents", body)
-	req.Header.Set("Content-Type", ct)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != 503 {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body)
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/qr", nil))
+	if rr.Code != 503 || !strings.Contains(rr.Body.String(), "没有打开") {
+		t.Fatalf("扫码页: %d", rr.Code)
 	}
-}
-
-func TestUploadDocumentLibrarianError(t *testing.T) {
-	_, h, _ := newTestServer(t)
-	fake := &fakeLibrarian{response: "ERROR: file does not exist: /tmp/foo"}
-	withFakeLibrarian(t, fake)
-	body, ct := multipartUpload(t, "file", "x.pdf", "", []byte("x"))
-	req := httptest.NewRequest("POST", "/documents", body)
-	req.Header.Set("Content-Type", ct)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != 500 {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body)
-	}
-	var resp map[string]string
-	json.Unmarshal(rr.Body.Bytes(), &resp)
-	if !strings.HasPrefix(resp["detail"], "ERROR:") {
-		t.Errorf("expected ERROR: prefix, got %q", resp["detail"])
-	}
-}
-
-func TestStagingFileCleanedUp(t *testing.T) {
-	_, h, root := newTestServer(t)
-	fake := &fakeLibrarian{response: "u-1"}
-	withFakeLibrarian(t, fake)
-	body, ct := multipartUpload(t, "file", "x.pdf", "", []byte("data"))
-	req := httptest.NewRequest("POST", "/documents", body)
-	req.Header.Set("Content-Type", ct)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	// 列表接口照常 (只读, 空间里的应用也在用)
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/fonts", nil))
 	if rr.Code != 200 {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body)
-	}
-	staging := filepath.Join(root, "staging")
-	entries, _ := os.ReadDir(staging)
-	if len(entries) != 0 {
-		t.Errorf("staging dir not cleaned: %v", entries)
+		t.Fatalf("列表: %d", rr.Code)
 	}
 }
 

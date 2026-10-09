@@ -2,3 +2,6 @@
 *.bak
 *.tmp
 dist/
+
+# 官方商店客户端标识, 只放本机 (Makefile 会读它)
+.store-key

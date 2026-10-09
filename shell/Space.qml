@@ -758,8 +758,89 @@ Rectangle {
     Timer { id: toastTimer; interval: 4000; repeat: false; onTriggered: space.toastText = "" }
     Timer { interval: 15000; running: space.visible; repeat: true; onTriggered: space.now = new Date() }
 
-    Component.onCompleted: { reload(); loadShellCfg(); loadDevice(); hideApploadEntry() }
-    onVisibleChanged: if (visible) hideApploadEntry()
+    Component.onCompleted: { reload(); loadShellCfg(); loadDevice(); hideApploadEntry(); libStart() }
+    onVisibleChanged: { if (visible) { hideApploadEntry(); libStart() } else libStop() }
+    Component.onDestruction: libStop()
+
+    // ─── 文件库桥 (热导入) ──────────────────────────────────────────
+    // 扫码上传的文档由 space-server (internal/xolib) 写进 xochitl 数据目录, 但要让文件库
+    // 「看见」它, 得调 xochitl 内存里 Library 对象的 requestLoadEntry —— 外部进程够不着,
+    // 只能由跑在 xochitl 里的外壳来调。所以外壳开着时长连接取活, 调完回报。
+    // 外壳一隐藏/关闭就断开并说一声, 服务端随即把扫码上传关掉 (空间关了, 上传也关)。
+    //
+    // 不用 librarian: 它在 3.28 找不到改名的 Library 单例, 无限重试漏堆。Library 也不是
+    // QML 单例 (527 个模块名都试过), 只能从界面树上拿 —— 文件库界面里 CalendarActions 的 .library。
+    property var xoLibrary: null
+    property var libXhr: null
+    property bool libOn: false
+    property int libFails: 0
+
+    function findXoLibrary() {
+        if (xoLibrary) return xoLibrary
+        var top = space
+        while (top.parent) top = top.parent
+        var stack = [top], seen = 0
+        while (stack.length && seen < 30000) {
+            var n = stack.pop(); seen++
+            if (String(n).indexOf("CalendarActions_") === 0 && n.library) { xoLibrary = n.library; return xoLibrary }
+            var ch = n.children
+            if (ch) for (var k = 0; k < ch.length; ++k) stack.push(ch[k])
+        }
+        return null
+    }
+    function libStart() {
+        if (libOn) return
+        libOn = true
+        libFails = 0
+        libPoll()
+    }
+    function libStop() {
+        if (!libOn) return
+        libOn = false
+        libRetry.stop()
+        if (libXhr) { try { libXhr.abort() } catch (e) {} libXhr = null }
+        var x = new XMLHttpRequest()
+        x.open("POST", baseUrl + "/space/library/bye")
+        x.send()
+    }
+    // 长连接: 有活立刻返回, 没活等 25 秒回 204 再连。后台没起来时按 1/2/4…秒退避, 最多 60 秒。
+    function libPoll() {
+        if (!libOn) return
+        var x = new XMLHttpRequest()
+        libXhr = x
+        x.onreadystatechange = function () {
+            if (x.readyState !== 4 || !space || !space.libOn || space.libXhr !== x) return
+            space.libXhr = null
+            if (x.status === 200) {
+                space.libFails = 0
+                var r = null
+                try { r = JSON.parse(x.responseText) } catch (e) { r = null }
+                var jobs = (r && r.jobs) ? r.jobs : []
+                for (var i = 0; i < jobs.length; ++i) space.libHandle(jobs[i])
+                space.libPoll()
+            } else if (x.status === 204) {
+                space.libFails = 0
+                space.libPoll()
+            } else {
+                space.libFails++
+                libRetry.interval = Math.min(60000, 1000 * Math.pow(2, Math.min(space.libFails, 6)))
+                libRetry.start()
+            }
+        }
+        x.open("GET", baseUrl + "/space/library/next?wait=25")
+        x.send()
+    }
+    function libHandle(job) {
+        var out = { op: job.op, id: job.id, ok: false }
+        var lib = findXoLibrary()
+        if (!lib) out.error = "找不到文件库对象 (CalendarActions.library)"
+        else if (job.op === "load") {
+            try { lib.requestLoadEntry(job.id); out.ok = true } catch (e) { out.error = String(e) }
+        } else out.error = "不认识的操作: " + job.op
+        console.warn("[space] 文件库 " + job.op + " " + job.id + " → " + (out.ok ? "ok" : out.error))
+        request("POST", baseUrl + "/space/library/done", out, null)
+    }
+    Timer { id: libRetry; repeat: false; onTriggered: space.libPoll() }
     onTabChanged: { if (tab === "discover" && !storeLoaded) loadStore(false) }
 
     // ─── 应用内导航栏 (返回 + 标题) ───────────────────────────────────

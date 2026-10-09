@@ -22,18 +22,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/boangs/remarkable-space/internal/librarian"
 	"github.com/boangs/remarkable-space/internal/qr"
+	"github.com/boangs/remarkable-space/internal/xolib"
 )
 
 const (
-	UploadPort       = 8080
-	LibrarianTimeout = 60 * time.Second
-	MaxUploadBytes   = 200 << 20 // 200 MiB
-	XochitlDir       = "/home/root/.local/share/remarkable/xochitl"
-	AIConfigPath     = "/home/root/.local/share/rmkit-cn/ai_config.json"
-	AIChatTimeout    = 90 * time.Second
+	UploadPort     = 8080
+	MaxUploadBytes = 200 << 20 // 200 MiB
+	AIConfigPath   = "/home/root/.local/share/rmkit-cn/ai_config.json"
+	AIChatTimeout  = 90 * time.Second
 )
+
+// LoadWait 上传后等外壳把文件通知进文件库的时间。外壳开着时通常 1 秒内就回报;
+// 等不到也不算失败 —— 文件已在磁盘上, 下次打开空间会补上。(变量: 测试里调短)
+var LoadWait = 8 * time.Second
 
 var (
 	allowedFontExts   = map[string]struct{}{".ttf": {}, ".otf": {}}
@@ -53,7 +55,7 @@ type Config struct {
 	ScreensDir     string // 锁屏图存放目录
 	MusicDir       string // 音乐存放目录 (音乐应用扫这里)
 	HeroDir        string // 「空间」首页插图目录 (用户自己传的)
-	DocStagingDir  string // /documents 上传暂存目录 (librarian 会从此处复制)
+	XochitlDir     string // xochitl 数据目录 (文档热导入写到这里), 空 = 设备默认路径
 	FontsActiveDir string // 字体激活符号链接目录 (~/.local/share/fonts)
 	XochitlConf    string // xochitl 配置路径 (~/.config/remarkable/xochitl.conf)
 	// 「空间 (SPACE)」启动台: 内置应用目录 (安装器管理) / 用户应用目录 (绿色安装) / 应用数据目录
@@ -69,12 +71,14 @@ type Config struct {
 type Server struct {
 	cfg   Config
 	space *space.Handler
+	lib   *xolib.Library // 往 xochitl 文件库里放东西 (热导入), 只在「空间」开着时可用
+	lan   *listeners     // 扫码上传的对外端口 (ServeExternal 启动后才有)
 }
 
 func New(cfg Config) (*Server, error) {
 	// 空 = 这项功能不启用 (比如没配插图目录就没有首页插图库)。拿空串去 MkdirAll
 	// 会直接失败, 让整个后端因为一个可选目录起不来 —— 不值得。
-	for _, d := range []string{cfg.FontsDir, cfg.ScreensDir, cfg.DocStagingDir, cfg.MusicDir, cfg.HeroDir} {
+	for _, d := range []string{cfg.FontsDir, cfg.ScreensDir, cfg.MusicDir, cfg.HeroDir} {
 		if d == "" {
 			continue
 		}
@@ -83,6 +87,15 @@ func New(cfg Config) (*Server, error) {
 		}
 	}
 	s := &Server{cfg: cfg}
+	xdir := cfg.XochitlDir
+	if xdir == "" {
+		xdir = xolib.DefaultDir
+	}
+	pending := ""
+	if cfg.SpaceDataDir != "" {
+		pending = filepath.Join(cfg.SpaceDataDir, "shell", "library-pending.json")
+	}
+	s.lib = xolib.New(xdir, pending)
 	if cfg.SpaceDir != "" {
 		s.space = space.New(filepath.Join(cfg.SpaceDir, "apps"), cfg.SpaceUserDir, cfg.SpaceDataDir,
 			cfg.SpaceModDir, deviceArch(), cfg.SpaceBaseURL)
@@ -122,27 +135,30 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /qr-info", s.qrInfo)
 	mux.HandleFunc("GET /qr.png", s.qrPNG)
 
+	// 扫码上传只在「空间」开着时可用: 文档热导入得由空间外壳通知 xochitl, 空间关了它就做不到;
+	// 其余几类一并关上, 免得手机上一半能传一半不能, 让人摸不着头脑。
 	mux.HandleFunc("GET /fonts", s.listFonts)
-	mux.HandleFunc("POST /fonts", s.uploadFont)
-	mux.HandleFunc("DELETE /fonts/{name}", s.deleteFont)
+	mux.HandleFunc("POST /fonts", s.needSpace(s.uploadFont))
+	mux.HandleFunc("DELETE /fonts/{name}", s.needSpace(s.deleteFont))
 	mux.HandleFunc("GET /fonts/active", s.activeFont)
 	mux.HandleFunc("POST /fonts/{name}/apply", s.applyFont)
 
 	mux.HandleFunc("GET /screens", s.listScreens)
-	mux.HandleFunc("POST /screens", s.uploadScreen)
+	mux.HandleFunc("POST /screens", s.needSpace(s.uploadScreen))
 	mux.HandleFunc("GET /hero", s.listHero)
-	mux.HandleFunc("POST /hero", s.uploadHero)
+	mux.HandleFunc("POST /hero", s.needSpace(s.uploadHero))
 	mux.HandleFunc("GET /hero/{name}", s.previewHero)
-	mux.HandleFunc("DELETE /hero/{name}", s.deleteHero)
+	mux.HandleFunc("DELETE /hero/{name}", s.needSpace(s.deleteHero))
 	mux.HandleFunc("GET /music", s.listMusic)
-	mux.HandleFunc("POST /music", s.uploadMusic)
-	mux.HandleFunc("DELETE /music/{name}", s.deleteMusic)
-	mux.HandleFunc("DELETE /screens/{name}", s.deleteScreen)
+	mux.HandleFunc("POST /music", s.needSpace(s.uploadMusic))
+	mux.HandleFunc("DELETE /music/{name}", s.needSpace(s.deleteMusic))
+	mux.HandleFunc("DELETE /screens/{name}", s.needSpace(s.deleteScreen))
 	mux.HandleFunc("GET /screens/active", s.activeScreen)
 	mux.HandleFunc("POST /screens/{name}/apply", s.applyScreen)
 	mux.HandleFunc("GET /screens/{name}/preview", s.previewScreen)
 
-	mux.HandleFunc("POST /documents", s.uploadDocument)
+	mux.HandleFunc("POST /documents", s.needSpace(s.uploadDocument))
+	s.lib.Mount(mux) // 空间外壳取「通知文件库」的活: /space/library/*
 
 	mux.HandleFunc("GET /screenshot", s.screenshotPNG) // 排版核对用: 当前屏幕 PNG
 
@@ -301,8 +317,36 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) qrPage(w http.ResponseWriter, r *http.Request) {
+	if !s.lib.Queue.Active() {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprint(w, spaceClosedPage)
+		return
+	}
 	http.ServeFile(w, r, filepath.Join(s.cfg.StaticDir, "qr.html"))
 }
+
+// needSpace: 「空间」没开着就拒绝。手机扫码页上看到的是这句提示。
+func (s *Server) needSpace(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.lib.Queue.Active() {
+			httpError(w, http.StatusServiceUnavailable, spaceClosedText)
+			return
+		}
+		h(w, r)
+	}
+}
+
+const spaceClosedText = "请先在 reMarkable 上打开「空间」, 再上传"
+
+const spaceClosedPage = `<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>上传到 reMarkable</title>
+<style>body{font-family:-apple-system,system-ui,sans-serif;margin:0;padding:48px 24px;color:#111;background:#fff}
+h1{font-size:22px;margin:0 0 12px}p{font-size:16px;line-height:1.6;color:#444;margin:0 0 20px}
+a{display:inline-block;padding:12px 20px;border:2px solid #111;border-radius:10px;color:#111;text-decoration:none}</style>
+</head><body><h1>「空间」没有打开</h1>
+<p>扫码上传只在 reMarkable 上打开「空间」时可用。请在设备侧栏点「空间」, 再刷新这个页面。</p>
+<a href="/qr">刷新</a></body></html>`
 
 // ---- QR ----
 
@@ -517,67 +561,12 @@ func (s *Server) deleteScreen(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": filepath.Base(name)})
 }
 
-// ---- 文档 (走 librarian pipe 热导入) ----
-
-// invokeLibrarian 是一个变量, 测试时可替换.
-var invokeLibrarian = librarian.Invoke
+// ---- 文档 (热导入: xolib 写进 xochitl 数据目录, 空间外壳通知文件库加载) ----
 
 func randomToken() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-// importDocAvoidingTrashDup 调 librarian importDocument; 若返回的 UUID 是
-// 用户之前删进回收站的旧条目 (librarian 按 hash 复用 UUID), 永久 deleteEntry
-// 该旧条目, 再 importDocument 一次, 拿到全新 UUID. 这样"删了就是删了, 重新上传 = 全新条目".
-func importDocAvoidingTrashDup(stagingPath string) (string, error) {
-	doImport := func() (string, error) {
-		out, err := invokeLibrarian("importDocument", stagingPath, LibrarianTimeout)
-		fmt.Fprintf(os.Stderr, "importDocument path=%s ret=%q err=%v\n", stagingPath, out, err)
-		if err != nil {
-			return "", err
-		}
-		out = strings.TrimSpace(out)
-		if strings.HasPrefix(out, "ERROR:") {
-			return "", fmt.Errorf("%s", out)
-		}
-		if out == "" {
-			return "", fmt.Errorf("librarian 返回空")
-		}
-		return out, nil
-	}
-
-	uuid, err := doImport()
-	if err != nil {
-		return "", err
-	}
-
-	if !isUUIDInTrash(uuid) {
-		return uuid, nil
-	}
-
-	// 旧条目在回收站里, 永久删除后再导入.
-	if _, delErr := invokeLibrarian("deleteEntry", uuid, LibrarianTimeout); delErr != nil {
-		fmt.Fprintf(os.Stderr, "deleteEntry %s (清理 trash dup) 失败: %v\n", uuid, delErr)
-		// 即便永久删除失败也尽量再导入一次, 不阻断
-	}
-	return doImport()
-}
-
-// isUUIDInTrash 读 metadata, 看 parent 是不是 "trash". 任何错误都视为不在回收站.
-func isUUIDInTrash(uuid string) bool {
-	data, err := os.ReadFile(filepath.Join(XochitlDir, uuid+".metadata"))
-	if err != nil {
-		return false
-	}
-	var meta struct {
-		Parent string `json:"parent"`
-	}
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return false
-	}
-	return meta.Parent == "trash"
 }
 
 func (s *Server) uploadDocument(w http.ResponseWriter, r *http.Request) {
@@ -597,7 +586,6 @@ func (s *Server) uploadDocument(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "文件名不能为空")
 		return
 	}
-	fmt.Fprintf(os.Stderr, "upload filename raw=%q hex=%x\n", header.Filename, []byte(header.Filename))
 	safe := filepath.Base(header.Filename)
 	ext := strings.ToLower(filepath.Ext(safe))
 	if _, ok := allowedDocExts[ext]; !ok {
@@ -605,58 +593,24 @@ func (s *Server) uploadDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// staging 用纯随机名 + 扩展名, 不含原始文件名:
-	// librarian 的 findArgSeparator 用 lastIndexOf(',') 切 path/parentId,
-	// 文件名里有 ',' 会被误切. 用纯 token 名规避.
-	stagingName := randomToken() + ext
-	stagingPath := filepath.Join(s.cfg.DocStagingDir, stagingName)
-	out, err := os.Create(stagingPath)
+	// 文件名原样当显示名 (去扩展名)。不再有 librarian 那套「逗号会被当分隔符」的坑:
+	// 显示名只进 .metadata 的 JSON, 磁盘上的文件名是新生成的 uuid。
+	e, err := s.lib.ImportDocument(file, strings.TrimSuffix(safe, ext), ext, "")
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, "创建暂存文件失败: "+err.Error())
+		httpError(w, http.StatusInternalServerError, "写入文件库失败: "+err.Error())
 		return
 	}
-	size, err := io.Copy(out, file)
-	out.Close()
-	if err != nil {
-		os.Remove(stagingPath)
-		httpError(w, http.StatusInternalServerError, "写入暂存文件失败: "+err.Error())
-		return
+	res, ok := s.lib.Queue.Wait(e.ID, LoadWait)
+	loaded := ok && res.OK
+	if !loaded {
+		fmt.Fprintf(os.Stderr, "文档 %s 已写入, 文件库尚未加载 (回报=%v %+v), 下次打开空间补上\n", e.ID, ok, res)
 	}
-
-	defer os.Remove(stagingPath) // librarian copy 完后清理
-
-	uuid, err := importDocAvoidingTrashDup(stagingPath)
-	if err != nil {
-		if errors.Is(err, librarian.ErrPipeMissing) || errors.Is(err, librarian.ErrTimeout) {
-			httpError(w, http.StatusServiceUnavailable, err.Error())
-			return
-		}
-		httpError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// 把 visibleName 改回原始文件名 (去掉扩展名).
-	// renameEntry 走 <UUID>,<newName> 路径, UUID 36 字符 + ',' 命中 findArgSeparator
-	// 的特殊分支, 即便 newName 含 ',' 也不会被误切.
-	//
-	// 给 broker 200ms 喘息: importDocument 在 broker 内涉及 xochitl model 注册 +
-	// metadata 写盘, 立刻接 renameEntry 偶尔会失败 (broker 写"ok" 但 setVisibleName 未生效).
-	visibleName := strings.TrimSuffix(safe, ext)
-	if visibleName != "" {
-		time.Sleep(200 * time.Millisecond)
-		renameArg := uuid + "," + visibleName
-		out, renameErr := invokeLibrarian("renameEntry", renameArg, LibrarianTimeout)
-		out = strings.TrimSpace(out)
-		fmt.Fprintf(os.Stderr, "renameEntry uuid=%s name=%q ret=%q err=%v\n", uuid, visibleName, out, renameErr)
-		if renameErr == nil && strings.HasPrefix(out, "ERROR:") {
-			fmt.Fprintf(os.Stderr, "renameEntry librarian 报错: %s\n", out)
-		}
-	}
-
+	size := header.Size
 	writeJSON(w, http.StatusOK, map[string]any{
-		"name": safe,
-		"size": size,
-		"uuid": uuid,
+		"name":   safe,
+		"size":   size,
+		"uuid":   e.ID,
+		"loaded": loaded,
 	})
 }
 

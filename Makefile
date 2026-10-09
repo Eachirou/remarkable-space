@@ -1,9 +1,9 @@
 # 产物放 dist/, 两个架构都出 (rm2 是 armv7, Paper Pro / Move 是 aarch64)
 
 # 官方商店的客户端标识。带上它取索引才有东西, 浏览器直接打开索引地址是 404。
-# 不进仓库 —— 发版时 make STORE_KEY=xxx, 或放进环境变量 SPACE_STORE_KEY。
+# 不进仓库 —— 发版时 make STORE_KEY=xxx, 或写进仓库根的 .store-key (已 gitignore, 一行即可)。
 # 留空照样能编, 自建商店与本地开发不受影响。
-STORE_KEY ?=
+STORE_KEY ?= $(strip $(shell cat .store-key 2>/dev/null))
 KEY_PKG   := github.com/boangs/remarkable-space/internal/space
 
 # 助手打包直接拿 dist/ 里的产物, 漏了密钥装出来的设备看不到商店且没有任何提示,

@@ -13,22 +13,26 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/boangs/remarkable-space/internal/server"
 )
 
 func main() {
 	var (
-		listen         = flag.String("listen", ":8080", "监听地址")
-		staticDir      = flag.String("static", "", "静态资源目录 (默认: <二进制所在目录>/static)")
-		fontsDir       = flag.String("fonts", "", "字体存放目录 (默认: $HOME/.local/share/rmkit-cn/fonts)")
-		screensDir     = flag.String("screens", "", "锁屏图存放目录 (默认: $HOME/.local/share/rmkit-cn/screens)")
-		musicDir       = flag.String("music", "", "音乐存放目录 (默认: $HOME/.local/share/rmkit-cn/music)")
-		heroDir        = flag.String("hero", "", "「空间」首页插图目录 (默认: $HOME/.local/share/rmkit-cn/space/hero)")
-		stagingDir     = flag.String("staging", "/tmp/rmkit_upload", "文档上传暂存目录")
+		listen     = flag.String("listen", ":8080", "监听地址")
+		staticDir  = flag.String("static", "", "静态资源目录 (默认: <二进制所在目录>/static)")
+		fontsDir   = flag.String("fonts", "", "字体存放目录 (默认: $HOME/.local/share/rmkit-cn/fonts)")
+		screensDir = flag.String("screens", "", "锁屏图存放目录 (默认: $HOME/.local/share/rmkit-cn/screens)")
+		musicDir   = flag.String("music", "", "音乐存放目录 (默认: $HOME/.local/share/rmkit-cn/music)")
+		heroDir    = flag.String("hero", "", "「空间」首页插图目录 (默认: $HOME/.local/share/rmkit-cn/space/hero)")
+		// 已不用: 文档改由 xolib 直接写进 xochitl 数据目录。保留这个参数是因为装好的 systemd 单元还在传它,
+		// 删掉的话旧单元会因"未知参数"起不来。
+		_              = flag.String("staging", "", "(已废弃, 忽略)")
 		fontsActiveDir = flag.String("fonts-active", "", "字体激活符号链接目录 (默认: $HOME/.local/share/fonts)")
 		xochitlConf    = flag.String("xochitl-conf", "", "xochitl 配置路径 (默认: $HOME/.config/remarkable/xochitl.conf)")
 		spaceDir       = flag.String("space", "/home/root/rmkit-cn/space", "「空间」内置应用目录 (含 shell/ kit/ apps/)")
@@ -94,7 +98,6 @@ func main() {
 		ScreensDir:     *screensDir,
 		MusicDir:       *musicDir,
 		HeroDir:        *heroDir,
-		DocStagingDir:  *stagingDir,
 		FontsActiveDir: *fontsActiveDir,
 		XochitlConf:    *xochitlConf,
 		SpaceDir:       *spaceDir,
@@ -112,10 +115,24 @@ func main() {
 	srv.Space().AutoStart()   // 「空间」里声明了 autostart 的应用后台
 
 	fmt.Printf("space-server listening on %s\n", *listen)
-	fmt.Printf("  static = %s\n  fonts  = %s\n  screens = %s\n  staging = %s\n  fonts-active = %s\n  xochitl-conf = %s\n",
-		*staticDir, *fontsDir, *screensDir, *stagingDir, *fontsActiveDir, *xochitlConf)
+	fmt.Printf("  static = %s\n  fonts  = %s\n  screens = %s\n  fonts-active = %s\n  xochitl-conf = %s\n",
+		*staticDir, *fontsDir, *screensDir, *fontsActiveDir, *xochitlConf)
 
-	if err := http.ListenAndServe(*listen, srv.Routes()); err != nil {
+	// 本机端口一直开着 (AI 按钮、空间外壳、应用后台都在设备上); 对外的两类端口另外管:
+	// USB 网段常开, 局域网 (扫码上传) 只在空间开着时开 —— 见 internal/server/lan.go。
+	// 装好的 systemd 单元传的是 -listen 0.0.0.0:8080: 这里把"所有地址"收窄成本机,
+	// 对外那部分交给 ServeExternal, 免得改单元文件 (改 /etc 有变砖风险)。
+	host, portStr, err := net.SplitHostPort(*listen)
+	if err != nil {
+		log.Fatalf("listen 参数不对: %v", err)
+	}
+	port, _ := strconv.Atoi(portStr)
+	h := srv.Routes()
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		go srv.ServeExternal(port, h)
+		*listen = net.JoinHostPort("127.0.0.1", portStr)
+	}
+	if err := http.ListenAndServe(*listen, h); err != nil {
 		log.Fatalf("listen: %v", err)
 	}
 }
