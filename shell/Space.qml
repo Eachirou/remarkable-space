@@ -321,10 +321,21 @@ Rectangle {
 
     // 外壳自己的文案。args 传对象做占位替换: st("downloading", {name: "天气"})
     // 词典里写 "正在下载 {name}…" / "Downloading {name}…" —— 占位符位置随语言走。
+    // 查词: 先当前语言再 en 再 key 本身。args.n === 1 时先试 <key>_one ——
+    // 英文单复数不同 ("1 album" / "2 albums"), 中文词典不用写 _one, 找不到就落回原 key。
+    function lookup(d, dEn, key, args) {
+        if (args && args.n === 1) {
+            var one = d[key + "_one"]
+            if (one === undefined && d[key] === undefined) one = dEn[key + "_one"]
+            if (one !== undefined) return one
+        }
+        var v = d[key]
+        if (v === undefined) v = dEn[key]
+        return v === undefined ? key : v
+    }
+
     function st(key, args) {
-        var v = shellDict[key]
-        if (v === undefined) v = shellDictEn[key]
-        if (v === undefined) v = key
+        var v = lookup(shellDict, shellDictEn, key, args)
         if (args !== undefined && args !== null) {
             for (var k in args) v = v.split("{" + k + "}").join(args[k])
         }
@@ -340,9 +351,7 @@ Rectangle {
     // 查应用词典。缺词先回落 en, 再回落 key 本身 —— 永远不会显示成空白。
     function tr(key, args) {
         if (key === undefined || key === null) return ""
-        var v = dict[key]
-        if (v === undefined) v = dictEn[key]
-        if (v === undefined) v = key
+        var v = lookup(dict, dictEn, key, args)
         if (args !== undefined && args !== null) {
             for (var k in args) v = v.split("{" + k + "}").join(args[k])
         }
