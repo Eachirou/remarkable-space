@@ -151,6 +151,14 @@ Text { text: space.tr("empty_hint") }
 Button { text: space.tr("add_task") }
 ```
 
+**小组件里要用 `space.trApp(app.id, "key")`，不能用 `space.tr`。** 小组件和应用共用同一个 `space` 对象，而 `space.tr` 查的是「当前打开的应用」的词典 —— 首页上通常没有打开任何应用，会查到空词典（露出 key）或上一个打开的应用的词典。
+
+```qml
+Text { text: space.trApp(app.id, "now_playing") }
+```
+
+`n` 等于 1 时会先找 `<key>_one`，英文单复数用得上（`"n_albums": "{n} albums"`, `"n_albums_one": "1 album"`）；中文词典不用写。
+
 查不到词条时先回落 `en.json`，再回落 key 本身 —— **永远不会显示成空白**，最差也是露出一个英文 key，一眼能看出漏翻了哪条。
 
 词典由外壳**同步读入**（外壳自己的在属性初始化阶段，应用的在 `createComponent` 之前），所以首帧就是正确的文字，应用不用自己等 `space.lang` 就绪。都是本地 `file://` 的几 KB JSON，几毫秒的事。

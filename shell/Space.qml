@@ -222,6 +222,9 @@ Rectangle {
         // 查本应用 i18n/<lang>.json 的词条; 缺词回落 en, 再回落 key 本身。
         // 不要用 qsTr —— 注入进来的 QML 查不到 Qt 的翻译表 (已验证), tr 走自己的词典。
         function tr(key, args) { return space.tr(key, args) }
+        // 小组件里用这个 —— space.trApp(app.id, "key")。首页上通常没有挂载应用,
+        // 用 tr 会查到空词典 (露出 key) 或别的应用的词典。
+        function trApp(appId, key, args) { return space.trApp(appId, key, args) }
         // 应用数据: 存到 dataDir/<key>.json (纯 QML 应用的持久化); 小组件要传自己的 app.id
         function dataGet(id, key, cb) { space.request("GET", space.baseUrl + "/space/apps/" + id + "/data/" + key, null, cb) }
         function dataPut(id, key, obj, cb) { space.request("PUT", space.baseUrl + "/space/apps/" + id + "/data/" + key, obj, cb) }
@@ -362,12 +365,35 @@ Rectangle {
     // 读不到就留空字典, tr() 会把 key 原样显示出来, 不至于白屏。
     // 同步读, 理由同 readJsonSync 上面那段: 应用首帧不该闪 key。
     // 这是在 mount 里、createComponent 之前调用的, 读完才开始实例化界面。
-    function loadDict(app) {
-        dict = ({}); dictEn = ({})
-        if (!app || !app.dir) return
+    // 每个应用一份词典, 按 id + 版本 + 语言缓存。小组件和应用共用 api 对象, 但首页上
+    // 显示小组件时往往没有挂载任何应用 —— 只按"当前应用"查词, 小组件会露出 key,
+    // 或者查到上一个打开的应用的词典。所以小组件要按自己的 app.id 查 (见 trApp)。
+    property var dictCache: ({})
+    function appDict(app) {
+        if (!app || !app.dir) return { cur: ({}), en: ({}) }
+        var ck = app.id + "@" + (app.rev || 0) + "@" + lang
+        var hit = dictCache[ck]
+        if (hit) return hit
         var base = "file://" + app.dir + "/i18n/"
-        dictEn = readJsonSync(base + "en.json") || ({})
-        dict = (lang === "en") ? dictEn : (readJsonSync(base + lang + ".json") || ({}))
+        var en = readJsonSync(base + "en.json") || ({})
+        var d = { en: en, cur: (lang === "en") ? en : (readJsonSync(base + lang + ".json") || ({})) }
+        dictCache[ck] = d
+        return d
+    }
+    function loadDict(app) {
+        var d = appDict(app)
+        dict = d.cur; dictEn = d.en
+    }
+    // 小组件用: 按应用 id 查它自己的词典, 不受当前挂载的是哪个应用影响
+    function trApp(appId, key, args) {
+        var app = null
+        for (var i = 0; i < apps.length; i++) if (apps[i].id === appId) { app = apps[i]; break }
+        var d = appDict(app)
+        var v = lookup(d.cur, d.en, key, args)
+        if (args !== undefined && args !== null) {
+            for (var k in args) v = v.split("{" + k + "}").join(args[k])
+        }
+        return v
     }
 
     function reload() {
