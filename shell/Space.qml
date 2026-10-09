@@ -255,9 +255,32 @@ Rectangle {
     property string langPref: ""   // 用户在设置里显式选的; 空 = 跟着后端推断走
     property var dict: ({})        // 当前应用的词典
     property var dictEn: ({})      // 应用的 en 词典, 缺词时回落用
-    property var shellDict: ({})   // 外壳自己的词典 (shell/i18n/<lang>.json)
-    property var shellDictEn: ({})
     readonly property string shellDir: "file:///home/root/rmkit-cn/space/shell"
+
+    // 词典必须在首帧之前就位 —— 异步读会让界面先闪一下 key (tab_home) 再变成文字。
+    // 都是本地 file:// 的几 KB JSON, 同步读几毫秒, 换一个不闪的首帧值得。
+    function readJsonSync(url) {
+        var x = new XMLHttpRequest()
+        try {
+            x.open("GET", url, false)   // false = 同步
+            x.send(null)
+            return JSON.parse(x.responseText)
+        } catch (e) {
+            return null
+        }
+    }
+
+    // 开机语言: 同步读用户存的偏好。后端那套推断是异步的, 来不及赶上首帧,
+    // 所以这里只认用户显式选过的; 没选过就按中文 —— 现有用户都是中文,
+    // 真要英文的人设置里选一次就记住了, 下次开就不闪。
+    readonly property string bootLang: {
+        var cfg = readJsonSync("file:///home/root/.local/share/rmkit-cn/space/data/shell/config.json")
+        var l = normLang(cfg && cfg.lang ? cfg.lang : "")
+        return l || "zh-CN"
+    }
+    property var shellDict: readJsonSync(shellDir + "/i18n/" + bootLang + ".json") || ({})
+    property var shellDictEn: bootLang === "en" ? shellDict
+                                                : (readJsonSync(shellDir + "/i18n/en.json") || ({}))
 
     function detectLang() {
         var code = ""
@@ -309,15 +332,9 @@ Rectangle {
     }
 
     function loadShellDict() {
-        shellDict = ({}); shellDictEn = ({})
         var base = shellDir + "/i18n/"
-        function grab(code, assign) {
-            request("GET", base + code + ".json?t=" + Date.now(), null, function(st2, r) {
-                if (r && typeof r === "object") assign(r)
-            })
-        }
-        grab("en", function(r) { shellDictEn = r; if (lang === "en") shellDict = r })
-        if (lang !== "en") grab(lang, function(r) { shellDict = r })
+        shellDictEn = readJsonSync(base + "en.json") || ({})
+        shellDict = (lang === "en") ? shellDictEn : (readJsonSync(base + lang + ".json") || ({}))
     }
 
     // 查应用词典。缺词先回落 en, 再回落 key 本身 —— 永远不会显示成空白。
@@ -334,20 +351,14 @@ Rectangle {
 
     // 载入某个应用目录下的词典。两份都读: 当前语言 + en, 后者用于缺词回落。
     // 读不到就留空字典, tr() 会把 key 原样显示出来, 不至于白屏。
-    function loadDict(app, done) {
+    // 同步读, 理由同 readJsonSync 上面那段: 应用首帧不该闪 key。
+    // 这是在 mount 里、createComponent 之前调用的, 读完才开始实例化界面。
+    function loadDict(app) {
         dict = ({}); dictEn = ({})
-        if (!app || !app.dir) { if (done) done(); return }
+        if (!app || !app.dir) return
         var base = "file://" + app.dir + "/i18n/"
-        var pending = (lang === "en") ? 1 : 2
-        function finish() { if (--pending <= 0 && done) done() }
-        function grab(code, assign) {
-            request("GET", bust(base + code + ".json", app.rev || 0), null, function(st, r) {
-                if (r && typeof r === "object") assign(r)
-                finish()
-            })
-        }
-        grab("en", function(r) { dictEn = r; if (lang === "en") dict = r })
-        if (lang !== "en") grab(lang, function(r) { dict = r })
+        dictEn = readJsonSync(base + "en.json") || ({})
+        dict = (lang === "en") ? dictEn : (readJsonSync(base + lang + ".json") || ({}))
     }
 
     function reload() {
@@ -365,7 +376,8 @@ Rectangle {
             var raw  = detectLang()
             var live = normLang(raw)
             setLang(pref || live || r.lang || "en")
-            loadShellDict()
+            // bootLang 阶段已经同步读过一次了; 只有最终定的语言和开机猜的不一样才重读
+            if (lang !== bootLang) loadShellDict()
             console.warn("SPACE-LANG: pref=" + JSON.stringify(r.langPref || "")
                 + " live=" + JSON.stringify(raw) + "→" + JSON.stringify(live)
                 + " backend=" + JSON.stringify(r.lang || "") + " ⇒ " + lang)
@@ -612,7 +624,7 @@ Rectangle {
         //   明文: entryUrl 指向应用目录里的 .qml, 直接 createComponent
         //   编译: manifest 声明 module, 包里只有 .so —— 用一段即时 QML 去 import 它。
         //        模块装在固定的 qmlmods 目录, 由 xochitl 的 QML_IMPORT_PATH 指过去。
-        loadDict(app)   // 异步; tr() 在词典到位前回落 key, 不阻塞首帧
+        loadDict(app)   // 同步: 必须在 createComponent 之前读完, 否则应用首帧闪 key
         var c = app.module && app.module.main
                 ? moduleComponent(app)
                 : Qt.createComponent(bust(app.entryUrl, app.rev))
