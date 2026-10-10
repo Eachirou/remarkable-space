@@ -73,7 +73,6 @@ type Server struct {
 	space *space.Handler
 	lib   *xolib.Library // 往 xochitl 文件库里放东西 (热导入), 只在「空间」开着时可用
 	lan   *listeners     // 扫码上传的对外端口 (ServeExternal 启动后才有)
-	ink   *xolib.Ink     // 手写画布: 借 xochitl 原生算法存 .rm, 正本放应用数据目录
 }
 
 func New(cfg Config) (*Server, error) {
@@ -97,10 +96,6 @@ func New(cfg Config) (*Server, error) {
 		pending = filepath.Join(cfg.SpaceDataDir, "shell", "library-pending.json")
 	}
 	s.lib = xolib.New(xdir, pending)
-	if cfg.SpaceDataDir != "" {
-		s.ink = &xolib.Ink{Lib: s.lib, DataDir: cfg.SpaceDataDir,
-			State: filepath.Join(cfg.SpaceDataDir, "shell", "ink-state.json")}
-	}
 	if cfg.SpaceDir != "" {
 		s.space = space.New(filepath.Join(cfg.SpaceDir, "apps"), cfg.SpaceUserDir, cfg.SpaceDataDir,
 			cfg.SpaceModDir, deviceArch(), cfg.SpaceBaseURL)
@@ -164,9 +159,6 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("POST /documents", s.needSpace(s.uploadDocument))
 	s.lib.Mount(mux) // 空间外壳取「通知文件库」的活: /space/library/*
-	if s.ink != nil {
-		s.ink.Mount(mux) // 手写画布: /space/ink/*
-	}
 
 	mux.HandleFunc("GET /screenshot", s.screenshotPNG) // 排版核对用: 当前屏幕 PNG
 

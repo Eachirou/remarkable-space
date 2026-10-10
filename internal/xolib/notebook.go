@@ -39,8 +39,9 @@ type Notebook struct {
 // 页面上第一次落笔时 xochitl 自己生成 <ID>/<页ID>.rm。
 // template 是页面模板名 ("Blank" 空白, "P Lines small" 等), 空 = Blank。
 //
-// hidden: 写 "deleted": true, 文件库不显示。xochitl 会择机清理这种条目, 所以它只能当
-// 「载体」—— 笔迹的正本由应用自己存, 用时拷进来、写完拷回去, 载体没了就重建。
+// hidden: 写 "deleted": true。注意 3.28 不认它 (照样显示, 3.5 起删除改用 .tombstone);
+// 想藏起来要 parent = "trash" —— 回收站里的笔记本照样能在后台打开写入 (手写载体就这么用,
+// 见应用仓库 lib/ink)。
 func (l *Library) CreateNotebook(name, parent, template string, hidden bool) (Notebook, error) {
 	id, err := newUUID()
 	if err != nil {

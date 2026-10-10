@@ -18,7 +18,9 @@ Rectangle {
     visible: true
     z: 99999
 
-    readonly property int shellVersion: 1
+    // 2: 文件库桥 (/space/library/*: 热导入、建文件夹/笔记本, 外壳调 requestLoadEntry)。
+    //    用到它的应用 (如手写画布 lib/ink) 在 manifest 里写 min_shell: 2
+    readonly property int shellVersion: 2
     readonly property string kitDir: "file:///home/root/rmkit-cn/space/kit"
     property string baseUrl: "http://127.0.0.1:8080"
     // ─── 尺寸基准: 不写死任何机型 ───
