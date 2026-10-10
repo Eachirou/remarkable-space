@@ -18,8 +18,11 @@ import (
 )
 
 // ShellVersion 是外壳 (Space.qml) 与本后端共同遵守的应用契约版本。
-// manifest.min_shell 大于它的应用不会被加载。
-const ShellVersion = 1
+// manifest.min_shell 大于它的应用不会被加载。必须与 Space.qml 的 shellVersion 一致。
+//
+//	1: 初版
+//	2: 文件库桥 /space/library/* (热导入、建文件夹/笔记本); 手写画布 (应用仓库 lib/ink) 要它
+const ShellVersion = 2
 
 // ManifestName 是应用目录里清单文件的固定名字。
 const ManifestName = "manifest.json"
