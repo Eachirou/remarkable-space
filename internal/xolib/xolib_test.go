@@ -181,3 +181,45 @@ func TestHTTP(t *testing.T) {
 		t.Fatal(rr.Body)
 	}
 }
+
+func TestCreateFolderAndNotebook(t *testing.T) {
+	dir := t.TempDir()
+	l := New(dir, "")
+	f, err := l.CreateFolder("空间", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nb, err := l.CreateNotebook("空间画板", f.ID, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta, content map[string]any
+	b, _ := os.ReadFile(filepath.Join(dir, f.ID+".metadata"))
+	json.Unmarshal(b, &meta)
+	if meta["type"] != "CollectionType" || meta["visibleName"] != "空间" {
+		t.Fatalf("folder: %s", b)
+	}
+	b, _ = os.ReadFile(filepath.Join(dir, nb.ID+".metadata"))
+	json.Unmarshal(b, &meta)
+	if meta["parent"] != f.ID || meta["type"] != "DocumentType" {
+		t.Fatalf("notebook meta: %s", b)
+	}
+	b, _ = os.ReadFile(filepath.Join(dir, nb.ID+".content"))
+	json.Unmarshal(b, &content)
+	pages := content["cPages"].(map[string]any)["pages"].([]any)
+	if content["fileType"] != "notebook" || len(pages) != 1 || pages[0].(map[string]any)["id"] != nb.PageID {
+		t.Fatalf("notebook content: %s", b)
+	}
+	if l.Queue.Pending() != 2 {
+		t.Fatal("文件夹和笔记本都要排队加载")
+	}
+}
+
+func TestHiddenNotebook(t *testing.T) {
+	dir := t.TempDir()
+	nb, _ := New(dir, "").CreateNotebook("载体", "", "", true)
+	b, _ := os.ReadFile(filepath.Join(dir, nb.ID+".metadata"))
+	if !strings.Contains(string(b), `"deleted": true`) {
+		t.Fatalf("%s", b)
+	}
+}
