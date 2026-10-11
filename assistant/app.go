@@ -97,11 +97,14 @@ type ReleaseInfo struct {
 	Tag      string `json:"tag"`      // 发布标签; 空 = 开发版 (下 latest, 不验 sha)
 	SpaceSHA string `json:"spaceSha"` // 空间安装包整包 sha256
 	CNBase   string `json:"cnBase"`   // 国内镜像的根地址 (以 / 结尾); 空 = 没有国内镜像
+	// Android 包所在的发布标签 (GitHub Release / 国内镜像目录) 与整包 sha256
+	AndroidTag string `json:"androidTag"`
+	AndroidSHA string `json:"androidSha"`
 }
 
 // Release 给前端拼下载地址用。
 func (a *App) Release() ReleaseInfo {
-	return ReleaseInfo{Tag: releaseTag, SpaceSHA: spaceSHA, CNBase: cnMirror}
+	return ReleaseInfo{Tag: releaseTag, SpaceSHA: spaceSHA, CNBase: cnMirror, AndroidTag: androidTag, AndroidSHA: androidSHA}
 }
 
 // LogDir 返回审计日志目录。

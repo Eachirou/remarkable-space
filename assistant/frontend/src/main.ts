@@ -42,21 +42,24 @@ const state = {
 // 安装包两处都有: GitHub Release (仓库公开) 和国内镜像 (GitHub 在国内常下不动)。用户在设置里
 // 选先从哪下, 下不动自动换另一处。每版助手写死配套安装包的标签和 sha256 (构建时注入, 见
 // Makefile), 下完对不上就不装 —— 国内镜像走明文 http 也不怕被换包。
-// Android 包只放在自己的服务器上 (太大, 也只给 Paper Pro Move)。
+// Android 包几个月才变一次, 不跟着每版重传, 单独记它放在哪个发布标签下 (androidTag)。
+// 自己的服务器 (boangs.com) 留作最后的后备: 旧版助手只认那里。
 type Source = 'cn' | 'github'
-type Release = { tag: string; spaceSha: string; cnBase: string }
-let release: Release = { tag: '', spaceSha: '', cnBase: '' }
+type Release = { tag: string; spaceSha: string; cnBase: string; androidTag: string; androidSha: string }
+let release: Release = { tag: '', spaceSha: '', cnBase: '', androidTag: '', androidSha: '' }
 const GITHUB = 'https://github.com/boangs/remarkable-space/releases/'
 const OWN_SERVER = 'https://boangs.com/space/'
 const BUNDLE_NAME: Record<Action, string> = { space: 'space-bundle.zip', android: 'android-rmppm-bundle.zip' }
 function bundleURLs(a: Action): string[] {
   const name = BUNDLE_NAME[a]
-  if (a === 'android') return [OWN_SERVER + name]
-  const gh = GITHUB + (release.tag ? 'download/' + release.tag + '/' : 'latest/download/') + name
-  const cn = release.cnBase ? release.cnBase + (release.tag || 'latest') + '/' + name : ''
+  const tag = a === 'android' ? release.androidTag : release.tag
+  const gh = GITHUB + (tag ? 'download/' + tag + '/' : 'latest/download/') + name
+  const cn = release.cnBase ? release.cnBase + (tag || 'latest') + '/' + name : ''
   const order = state.source === 'github' ? [gh, cn] : [cn, gh]
+  if (a === 'android') order.push(OWN_SERVER + name)
   return order.filter((u) => u !== '')
 }
+const bundleSHA = (a: Action) => (a === 'space' ? release.spaceSha : release.androidSha)
 const COMPONENT: Record<Action, string> = { space: 'space', android: 'android-rmppm' }
 const APPROX: Record<Action, string> = { space: '约 135 MB', android: '约 600 MB' }
 const LABEL: Record<Action, string> = { space: '空间', android: 'Android' }
@@ -356,7 +359,7 @@ async function runAction(a: Action) {
   if (!have()) {
     await guarded(a, async () => {
       try {
-        state.bundles[a] = (await DownloadBundle(bundleURLs(a), a === 'space' ? release.spaceSha : '', state.proxy)) as BundleInfo
+        state.bundles[a] = (await DownloadBundle(bundleURLs(a), bundleSHA(a), state.proxy)) as BundleInfo
       } catch (e) {
         // 下不动的时候才提代理。探测到系统代理就告诉他可以去「设置」里填上再试。
         if (!state.proxy) {
