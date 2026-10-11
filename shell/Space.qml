@@ -1397,6 +1397,21 @@ Rectangle {
                     detail: "V1.0　Copyright © 2026 Boangs"
                     interactive: false
                 }
+                // 关于空间下面: 作者的小红书二维码, 居中, 文字在下面
+                Column {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.topMargin: space.fpx(48)
+                    spacing: space.fpx(10)
+                    Image {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: space.fpx(300); height: width
+                        source: space.kitDir + "/images/xhs-qr.png?v=4"   // 换图要改这个号: xochitl 按地址缓存图片, 不改地址换了文件也不重读
+                        sourceSize.width: 600; sourceSize.height: 600
+                        fillMode: Image.PreserveAspectFit
+                    }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("about_xhs"); font.pixelSize: space.fpx(24); color: "#000000" }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("about_xhs_id"); font.pixelSize: space.fpx(20); color: "#000000" }
+                }
             }
         }
 
