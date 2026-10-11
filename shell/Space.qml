@@ -68,12 +68,14 @@ Rectangle {
             if (st === 200 && r && r.screenMode) space.screenMode = r.screenMode
             else space.applyScreenMode()
             if (st === 200 && r && r.hero !== undefined) space.heroChoice = r.hero
+            if (st === 200 && r && r.timezone) space.tzPref = r.timezone
         })
         loadHeroList()
     }
-    function saveShellCfg() {
+    function saveShellCfg(cb) {
         request("PUT", baseUrl + "/space/apps/shell/data/config",
-                { screenMode: space.screenMode, hero: space.heroChoice, lang: space.langPref }, null)
+                { screenMode: space.screenMode, hero: space.heroChoice, lang: space.langPref,
+                  timezone: space.tzPref }, cb || null)
     }
 
     // 首页顶部那张大卡放什么:
@@ -154,6 +156,29 @@ Rectangle {
     property string storeError: ""
     property bool storeLoaded: false
     property int tzOffset: 480            // 后端给的本地时区偏移 (分钟); 设备系统时区是 UTC
+    property string tzName: "Asia/Shanghai" // 后端最终定的时区名
+    property string tzPref: ""            // 用户在设置里选的 (shell/config.json 的 timezone); 空 = 默认北京时间
+    property var tzList: []               // 设置里可选的时区 (GET /space/timezones)
+    property bool tzOpen: false           // 设置页时区列表是否展开
+    function tzLabel(name) {
+        for (var i = 0; i < tzList.length; i++)
+            if (tzList[i].name === name) return lang === "zh-CN" ? tzList[i].zh : tzList[i].en
+        return name
+    }
+    function tzOffsetText(min) {
+        var sign = min < 0 ? "-" : "+", a = Math.abs(min)
+        var h = Math.floor(a / 60), m = a % 60
+        return "UTC" + sign + h + (m ? ":" + (m < 10 ? "0" : "") + m : "")
+    }
+    function loadTimezones() {
+        request("GET", baseUrl + "/space/timezones", null, function (st, r) { if (st === 200 && r) space.tzList = r })
+    }
+    // 选时区: 写进外壳配置, 写完重读 /space/apps 拿新的 tzOffset (时钟、日期、小组件都跟着变)
+    function chooseTimezone(name) {
+        tzPref = name
+        tzOpen = false
+        saveShellCfg(function () { space.reload() })
+    }
     property bool devMode: false          // 后端 .dev 标记: 打开应用绕过 QML 组件缓存
     property date now: new Date()
     // 本地时间 = 当前时刻按 tzOffset 平移后, 用进程时区 (UTC) 的表示来显示; 若进程时区不是 UTC 也能纠正
@@ -405,6 +430,7 @@ Rectangle {
             // 先设开发模式与时区: apps 一赋值就会触发小组件挂载, 那时 devMode 必须已经就位,
             // 否则第一次加载不带免缓存后缀, Qt 会把旧版编译结果缓存住, 之后改 QML 都不生效
             if (r.tzOffset !== undefined) tzOffset = r.tzOffset
+            if (r.timezone) tzName = r.timezone
             devMode = !!r.dev
             // 优先级: 用户在空间里显式选的 > xochitl 的实时值 > 后端猜的。
             // 后端猜的 (按键盘语言) 不能压过 xochitl 实时值, 否则改了系统语言不生效。
@@ -771,7 +797,7 @@ Rectangle {
     Timer { id: toastTimer; interval: 4000; repeat: false; onTriggered: space.toastText = "" }
     Timer { interval: 15000; running: space.visible; repeat: true; onTriggered: space.now = new Date() }
 
-    Component.onCompleted: { reload(); loadShellCfg(); loadDevice(); hideApploadEntry(); libStart() }
+    Component.onCompleted: { reload(); loadShellCfg(); loadTimezones(); loadDevice(); hideApploadEntry(); libStart() }
     onVisibleChanged: { if (visible) { hideApploadEntry(); libStart() } else libStop() }
     Component.onDestruction: libStop()
 
@@ -1401,6 +1427,65 @@ Rectangle {
                     onClicked: {
                         space.screenMode = (space.screenMode === "content") ? "ui" : "content"
                         space.saveShellCfg()
+                    }
+                }
+                Kit.SRow {
+                    Layout.fillWidth: true
+                    ui: space.fs
+                    iconSource: space.kitDir + "/icons/clock.svg"
+                    text: space.st("set_timezone")
+                    detail: space.tzLabel(space.tzName) + "\u3000" + space.tzOffsetText(space.tzOffset)
+                    onClicked: {
+                        if (!space.tzOpen && space.tzList.length === 0) space.loadTimezones()
+                        space.tzOpen = !space.tzOpen
+                    }
+                }
+                // 时区列表: 就地展开, 当前的打勾; 选完收起
+                Text {
+                    visible: space.tzOpen
+                    Layout.fillWidth: true
+                    Layout.leftMargin: space.fpx(72)
+                    Layout.rightMargin: space.fpx(16)
+                    Layout.topMargin: space.fpx(8)
+                    text: space.st("tz_hint")
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: space.fpx(20)
+                    color: "#26251F"
+                }
+                Repeater {
+                    model: space.tzOpen ? space.tzList : []
+                    delegate: Item {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        implicitHeight: space.fpx(76)
+                        Rectangle { anchors.fill: parent; color: tzMouse.pressed ? "#eeeeee" : "transparent" }
+                        Text {
+                            anchors.left: parent.left; anchors.leftMargin: space.fpx(72)
+                            anchors.right: tzOff.left; anchors.rightMargin: space.fpx(16)
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: space.lang === "zh-CN" ? modelData.zh : modelData.en
+                            font.pixelSize: space.fpx(26)
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            id: tzOff
+                            anchors.right: tzCheck.left; anchors.rightMargin: space.fpx(16)
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: space.tzOffsetText(modelData.offset)
+                            font.pixelSize: space.fpx(22)
+                            color: "#26251F"
+                        }
+                        Image {
+                            id: tzCheck
+                            anchors.right: parent.right; anchors.rightMargin: space.fpx(24)
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: space.fpx(28); height: width
+                            sourceSize.width: width; sourceSize.height: height
+                            source: space.kitDir + "/icons/check.svg"
+                            opacity: modelData.name === space.tzName ? 1 : 0
+                        }
+                        Rectangle { anchors.left: parent.left; anchors.leftMargin: space.fpx(72); anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: "#E2DED6" }
+                        MouseArea { id: tzMouse; anchors.fill: parent; onClicked: space.chooseTimezone(modelData.name) }
                     }
                 }
                 Kit.SRow {
