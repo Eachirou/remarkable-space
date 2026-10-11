@@ -186,3 +186,5 @@ pre.files { max-height: 230px; overflow: auto; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+.seg { display: flex; gap: 24px; }
+.seg .opt { margin: 4px 0 0; }

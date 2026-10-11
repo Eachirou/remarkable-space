@@ -2,7 +2,7 @@ import './style.css'
 import { deviceArt } from './device'
 import {
   Connect, Disconnect, Probe, ChooseBundle, DownloadBundle, PlanSpace, RunSpace, UninstallSpace,
-  PlanAndroid, RunAndroid, UninstallAndroid, BootAndroid, ReturnToStock, ResetAndroidData, ChooseAPKs, InstallAPKs, Cancel, OpenLogDir, LogDir, DetectProxy, Confirm, LoadPassword, ForgetPassword, DiagnoseAndroid, Version, RepairPanel,
+  PlanAndroid, RunAndroid, UninstallAndroid, BootAndroid, ReturnToStock, ResetAndroidData, ChooseAPKs, InstallAPKs, Cancel, OpenLogDir, LogDir, DetectProxy, Confirm, LoadPassword, ForgetPassword, DiagnoseAndroid, Version, RepairPanel, Release,
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
@@ -33,15 +33,30 @@ const state = {
   replaceSystem: false,
   removeData: false,
   proxy: '',
+  source: 'cn' as Source,   // 安装包从哪下: 国内镜像 / GitHub (另一个当后备)
   version: '',
   remember: true,
   password: '',
 }
 
-// 安装包放自己的服务器: remarkable-space 是私有仓库, GitHub Release 的 download 链接
-// 要带 token 才下得动, 普通用户点下载只会得到 404。
-const RELEASE_BASE = 'https://boangs.com/space/'
+// 安装包两处都有: GitHub Release (仓库公开) 和国内镜像 (GitHub 在国内常下不动)。用户在设置里
+// 选先从哪下, 下不动自动换另一处。每版助手写死配套安装包的标签和 sha256 (构建时注入, 见
+// Makefile), 下完对不上就不装 —— 国内镜像走明文 http 也不怕被换包。
+// Android 包只放在自己的服务器上 (太大, 也只给 Paper Pro Move)。
+type Source = 'cn' | 'github'
+type Release = { tag: string; spaceSha: string; cnBase: string }
+let release: Release = { tag: '', spaceSha: '', cnBase: '' }
+const GITHUB = 'https://github.com/boangs/remarkable-space/releases/'
+const OWN_SERVER = 'https://boangs.com/space/'
 const BUNDLE_NAME: Record<Action, string> = { space: 'space-bundle.zip', android: 'android-rmppm-bundle.zip' }
+function bundleURLs(a: Action): string[] {
+  const name = BUNDLE_NAME[a]
+  if (a === 'android') return [OWN_SERVER + name]
+  const gh = GITHUB + (release.tag ? 'download/' + release.tag + '/' : 'latest/download/') + name
+  const cn = release.cnBase ? release.cnBase + (release.tag || 'latest') + '/' + name : ''
+  const order = state.source === 'github' ? [gh, cn] : [cn, gh]
+  return order.filter((u) => u !== '')
+}
 const COMPONENT: Record<Action, string> = { space: 'space', android: 'android-rmppm' }
 const APPROX: Record<Action, string> = { space: '约 135 MB', android: '约 600 MB' }
 const LABEL: Record<Action, string> = { space: '空间', android: 'Android' }
@@ -245,7 +260,14 @@ function renderSettings() {
       <div class="panel" role="dialog" aria-label="设置">
         <h2>设置</h2>
         <div class="field stack">
-          <label for="proxy">下载代理${tip('安装包从我们自己的服务器下载，直连即可。只有直连下不动时才需要填，格式如 http://127.0.0.1:7890')}</label>
+          <label>下载来源${tip('先从这里下安装包，下不动会自动换另一个。两处是同一个包，下完都会校验。')}</label>
+          <div class="seg" role="radiogroup">
+            <label class="opt"><input type="radio" name="src" value="cn" ${state.source === 'cn' ? 'checked' : ''}> 国内下载</label>
+            <label class="opt"><input type="radio" name="src" value="github" ${state.source === 'github' ? 'checked' : ''}> GitHub 下载</label>
+          </div>
+        </div>
+        <div class="field stack">
+          <label for="proxy">下载代理${tip('一般不用填。两处都下不动时才需要，格式如 http://127.0.0.1:7890')}</label>
           <input id="proxy" value="${esc(state.proxy)}" placeholder="一般不用填">
         </div>
         <label class="opt"><input type="checkbox" id="chk-remember2" ${state.remember ? 'checked' : ''}> 记住 SSH 密码${tip('存进系统钥匙串（Mac 钥匙串 / Windows 凭据管理器），不写进任何文件。')}</label>
@@ -334,7 +356,7 @@ async function runAction(a: Action) {
   if (!have()) {
     await guarded(a, async () => {
       try {
-        state.bundles[a] = (await DownloadBundle([RELEASE_BASE + BUNDLE_NAME[a]], '', state.proxy)) as BundleInfo
+        state.bundles[a] = (await DownloadBundle(bundleURLs(a), a === 'space' ? release.spaceSha : '', state.proxy)) as BundleInfo
       } catch (e) {
         // 下不动的时候才提代理。探测到系统代理就告诉他可以去「设置」里填上再试。
         if (!state.proxy) {
@@ -434,6 +456,10 @@ function bind() {
   $('#btn-settings')?.addEventListener('click', () => { state.settings = true; keepLog(render) })
   $('#btn-close-settings')?.addEventListener('click', () => { state.settings = false; keepLog(render) })
   $('#scrim')?.addEventListener('click', (e) => { if (e.target === $('#scrim')) { state.settings = false; keepLog(render) } })
+  document.querySelectorAll('input[name="src"]').forEach((el) => el.addEventListener('change', (e) => {
+    state.source = (e.target as HTMLInputElement).value === 'github' ? 'github' : 'cn'
+    try { localStorage.setItem('download.source', state.source) } catch { /* 忽略 */ }
+  }))
   $('#proxy')?.addEventListener('change', (e) => {
     state.proxy = (e.target as HTMLInputElement).value.trim()
     try { localStorage.setItem('proxy.manual', state.proxy) } catch { /* 忽略 */ }
@@ -454,6 +480,8 @@ EventsOn('progress', (p: { done: number; total: number }) => {
 // 填错了反而连不上, 不懂的人也不知道那一栏该删。现在只有用户自己填过才记住。
 // (key 换过名: 老版本自动探测写进 'proxy' 的值就此失效)
 try { state.proxy = localStorage.getItem('proxy.manual') || '' } catch { /* 忽略 */ }
+try { state.source = localStorage.getItem('download.source') === 'github' ? 'github' : 'cn' } catch { /* 忽略 */ }
+Release().then((r) => { release = r as Release }).catch(() => { /* 开发版: 用默认 */ })
 render()
 LoadPassword('10.11.99.1').then((pw) => { if (pw) { state.password = pw; keepLog(render); appendLog('已从钥匙串读到保存的密码') } })
 LogDir().then((d) => appendLog('日志目录 ' + d))

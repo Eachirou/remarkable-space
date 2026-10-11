@@ -5,3 +5,6 @@ dist/
 
 # 官方商店客户端标识, 只放本机 (Makefile 会读它)
 .store-key
+
+# 助手的国内镜像地址, 只放本机 (assistant/Makefile 会读它)
+assistant/.cn-mirror

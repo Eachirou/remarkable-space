@@ -12,7 +12,14 @@ ANDROID_DIR ?= ../../paper-move-android/android-bundle
 RMKIT_REPO ?= ../../rmkit-cn
 VERSION ?= $(shell git -C .. describe --tags --always 2>/dev/null || echo dev)
 BUILD_TIME := $(shell date +%Y-%m-%d\ %H:%M)
-LDFLAGS := -X main.version=$(VERSION) -X "main.buildTime=$(BUILD_TIME)"
+# 发布: 先 make bundle 出安装包, 再 make build-mac / build-win —— 助手里会写死这个安装包的
+# sha256 和发布标签 (RELEASE_TAG, 默认 = VERSION), 下载后对不上就不装。
+# 国内镜像地址放在不进仓库的 assistant/.cn-mirror (一行, 如 http://x.x.x.x/space/)
+RELEASE_TAG ?= $(VERSION)
+SPACE_SHA := $(shell [ -f dist/space-bundle.zip ] && shasum -a 256 dist/space-bundle.zip | cut -d' ' -f1)
+CN_MIRROR ?= $(strip $(shell cat .cn-mirror 2>/dev/null))
+LDFLAGS := -X main.version=$(VERSION) -X "main.buildTime=$(BUILD_TIME)" \
+	-X main.releaseTag=$(RELEASE_TAG) -X main.spaceSHA=$(SPACE_SHA) -X main.cnMirror=$(CN_MIRROR)
 
 .PHONY: bundle bundle-android build-mac build-win cli dev vet
 

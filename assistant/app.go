@@ -92,6 +92,18 @@ func (a *App) Version() string {
 	return version + " (" + buildTime + ")"
 }
 
+// ReleaseInfo 这一版助手配套的空间安装包从哪下、怎么验。
+type ReleaseInfo struct {
+	Tag      string `json:"tag"`      // 发布标签; 空 = 开发版 (下 latest, 不验 sha)
+	SpaceSHA string `json:"spaceSha"` // 空间安装包整包 sha256
+	CNBase   string `json:"cnBase"`   // 国内镜像的根地址 (以 / 结尾); 空 = 没有国内镜像
+}
+
+// Release 给前端拼下载地址用。
+func (a *App) Release() ReleaseInfo {
+	return ReleaseInfo{Tag: releaseTag, SpaceSHA: spaceSHA, CNBase: cnMirror}
+}
+
 // LogDir 返回审计日志目录。
 func (a *App) LogDir() string { return a.logDir }
 

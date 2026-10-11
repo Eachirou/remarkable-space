@@ -20,6 +20,12 @@ var assets embed.FS
 var (
 	version   = "dev"
 	buildTime = ""
+	// 这一版助手配套的空间安装包: 发布标签 (GitHub Release 与国内镜像的目录都按它分),
+	// 安装包的 sha256 (下载后必须对上, 国内镜像走明文 http 也不怕被换包),
+	// 国内镜像地址 (放在不进仓库的 .cn-mirror 里, 源码公开也不写死)
+	releaseTag = ""
+	spaceSHA   = ""
+	cnMirror   = ""
 )
 
 func main() {
