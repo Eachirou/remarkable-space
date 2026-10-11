@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -116,7 +118,59 @@ func runAppScript(appDir, rel, work, id string) error {
 }
 
 // fetchVerified 下载并核对 sha256。校验不过就删掉, 绝不留下一个"可能是对的"文件。
+//
+// 下载会断: 网友反馈过取微信读书本体时 "read: connection reset by peer" —— 设备走中国
+// 移动的 IPv6 去腾讯 CDN, 下到一半被对端重置。只试一次的话 40 MB 一断就前功尽弃, 所以:
+//   - 最多试 fetchAttempts 次, 每次用 Range 从断点接着下 (服务器不支持续传就从头来);
+//   - 断过一次之后只走 IPv4 —— 断在某条 IPv6 线路上的, 换 IPv4 多半就通了;
+//   - 4xx (地址错、没权限) 重试也没用, 直接报。
+//
+// 续传过的文件无法边下边算摘要, 所以下完整个文件再算一遍 sha256。
 func fetchVerified(url, dst, want string, hdr http.Header) error {
+	part := dst + ".part"
+	_ = os.Remove(part)
+	var err error
+	for attempt := 1; attempt <= fetchAttempts; attempt++ {
+		if attempt > 1 {
+			logStore("下载 %s 第 %d 次失败 (%v), %d 秒后改走 IPv4 续传", path.Base(dst), attempt-1, err, attempt*2)
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+		}
+		if err = fetchOnce(url, part, hdr, attempt > 1); err == nil {
+			break
+		}
+		var se *httpStatusError
+		if errors.As(err, &se) && se.code >= 400 && se.code < 500 && se.code != 408 && se.code != 429 {
+			break
+		}
+	}
+	if err != nil {
+		_ = os.Remove(part)
+		return err
+	}
+	got, err := fileSHA256(part)
+	if err != nil {
+		_ = os.Remove(part)
+		return err
+	}
+	if !strings.EqualFold(got, want) {
+		_ = os.Remove(part)
+		return fmt.Errorf("校验不符 (期望 %s…, 实际 %s…) —— 对方可能换了包, 别装", want[:12], got[:12])
+	}
+	return os.Rename(part, dst)
+}
+
+const fetchAttempts = 5
+
+type httpStatusError struct{ code int }
+
+func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
+
+// fetchOnce 下一次: part 里已有的部分用 Range 续上。ipv4 为真时只拨 IPv4。
+func fetchOnce(url, part string, hdr http.Header, ipv4 bool) error {
+	var off int64
+	if st, err := os.Stat(part); err == nil {
+		off = st.Size()
+	}
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -129,35 +183,62 @@ func fetchVerified(url, dst, want string, hdr http.Header) error {
 			}
 		}
 	}
-	resp, err := (&http.Client{Timeout: 30 * time.Minute}).Do(req)
+	if off > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", off))
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	if ipv4 {
+		d := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+		tr.DialContext = func(ctx context.Context, _, addr string) (net.Conn, error) {
+			return d.DialContext(ctx, "tcp4", addr)
+		}
+	}
+	resp, err := (&http.Client{Timeout: 30 * time.Minute, Transport: tr}).Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	flags := os.O_CREATE | os.O_WRONLY
+	switch {
+	case off > 0 && resp.StatusCode == http.StatusPartialContent:
+		flags |= os.O_APPEND
+	case off > 0 && resp.StatusCode == http.StatusRequestedRangeNotSatisfiable:
+		return nil // 上次其实已经下完了, 交给 sha256 判定
+	case resp.StatusCode == http.StatusOK:
+		flags |= os.O_TRUNC // 服务器不支持续传: 从头来
+		off = 0
+	default:
+		return &httpStatusError{resp.StatusCode}
 	}
-	f, err := os.Create(dst + ".part")
+	f, err := os.OpenFile(part, flags, 0o644)
 	if err != nil {
 		return err
 	}
-	h := sha256.New()
-	cr := &countingReader{r: io.TeeReader(resp.Body, h)}
-	setProgress(func(p *Progress) { p.Total = resp.ContentLength })
+	cr := &countingReader{r: resp.Body, n: off}
+	setProgress(func(p *Progress) {
+		p.Got = off
+		if resp.ContentLength >= 0 {
+			p.Total = off + resp.ContentLength
+		}
+	})
 	_, err = io.Copy(f, cr)
-	cerr := f.Close()
-	if err == nil {
+	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
+	return err
+}
+
+func fileSHA256(p string) (string, error) {
+	f, err := os.Open(p)
 	if err != nil {
-		_ = os.Remove(dst + ".part")
-		return err
+		return "", err
 	}
-	if got := hex.EncodeToString(h.Sum(nil)); !strings.EqualFold(got, want) {
-		_ = os.Remove(dst + ".part")
-		return fmt.Errorf("校验不符 (期望 %s…, 实际 %s…) —— 对方可能换了包, 别装", want[:12], got[:12])
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
 	}
-	return os.Rename(dst+".part", dst)
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // isOurStore 判断这个地址是不是我们自己的商店。只有它才配带上票。
