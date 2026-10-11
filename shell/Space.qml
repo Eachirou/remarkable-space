@@ -449,6 +449,17 @@ Rectangle {
         })
     }
 
+    // 比版本号: 按数字逐段比 ("1.6.13" > "1.2.0"), a 比 b 新返回正数。
+    // 商店只在线上版本比本机新时才给「更新」—— 只比相不相等的话, 本机装了更新的
+    // (开发版 / 直装) 也会显示「更新」, 一点就降级回旧版。
+    function versionCmp(a, b) {
+        var x = String(a || "").match(/\d+/g) || [], y = String(b || "").match(/\d+/g) || []
+        for (var i = 0; i < Math.max(x.length, y.length); i++) {
+            var d = (parseInt(x[i] || "0", 10)) - (parseInt(y[i] || "0", 10))
+            if (d !== 0) return d
+        }
+        return 0
+    }
     function installedVersion(id) {
         for (var i = 0; i < apps.length; i++) if (apps[i].id === id) return apps[i].version || "?"
         return ""
@@ -1331,10 +1342,13 @@ Rectangle {
                             Kit.SButton {
                                 ui: space.fs
                                 readonly property bool locked: storeRow.modelData.locked === true
-                                enabled: locked || storeRow.installed !== storeRow.modelData.version
+                                // 线上比本机新才算有更新 (本机更新或一样 = 已安装, 不让点, 免得降级)
+                                readonly property bool newer: storeRow.installed !== ""
+                                    && space.versionCmp(storeRow.modelData.version, storeRow.installed) > 0
+                                enabled: locked || storeRow.installed === "" || newer
                                 text: locked ? space.st("act_buy")
                                       : (storeRow.installed === "" ? space.st("act_get")
-                                         : (storeRow.installed === storeRow.modelData.version ? space.st("act_installed") : space.st("act_update")))
+                                         : (newer ? space.st("act_update") : space.st("act_installed")))
                                 primary: locked || storeRow.installed === ""
                                 onClicked: {
                                     if (locked) space.buyPrompt(storeRow.modelData)
