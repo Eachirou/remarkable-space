@@ -57,6 +57,14 @@ Rectangle {
     //   mono      极速: 只有黑白两色, 最快; 照片、彩色图标会变成黑白
     readonly property var screenModes: ["content", "ui", "animation", "mono"]
     property bool screenModeOpen: false   // 设置页档位列表是否展开
+    // 选档位: 必须放在外壳自己的函数里做 —— 收起列表会当场销毁被点的那一行,
+    // 写在行的 onClicked 里的话, 收起之后的语句找不到 space, 配置没存上,
+    // 下次重读配置 (开关应用时) 又变回原来的档位
+    function chooseScreenMode(m) {
+        screenMode = m
+        saveShellCfg()
+        screenModeOpen = false
+    }
     function screenModeEnum(m) {
         return ({ content: "Content", animation: "Animation", mono: "Mono" })[m] || "UI"
     }
@@ -1473,11 +1481,7 @@ Rectangle {
                         MouseArea {
                             id: smMouse
                             anchors.fill: parent
-                            onClicked: {
-                                space.screenMode = modelData
-                                space.screenModeOpen = false
-                                space.saveShellCfg()
-                            }
+                            onClicked: space.chooseScreenMode(modelData)
                         }
                     }
                 }
