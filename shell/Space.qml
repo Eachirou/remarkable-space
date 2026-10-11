@@ -50,12 +50,25 @@ Rectangle {
     // 应用跑在 appHost 里自然继承, 所以应用侧不要再自己挂。
     property string screenMode: "ui"
     property var _screenModeItem: null
+    // 刷新档位 (从慢到快)。值存进外壳配置, 对应 xochitl 的 ScreenModeItem 波形:
+    //   content   高清: 灰阶、颜色最准, 最慢, 会闪
+    //   ui        快刷 (默认)
+    //   animation 流畅: 再快一档, 灰阶和颜色更粗
+    //   mono      极速: 只有黑白两色, 最快; 照片、彩色图标会变成黑白
+    readonly property var screenModes: ["content", "ui", "animation", "mono"]
+    property bool screenModeOpen: false   // 设置页档位列表是否展开
+    function screenModeEnum(m) {
+        return ({ content: "Content", animation: "Animation", mono: "Mono" })[m] || "UI"
+    }
+    function screenModeLabel(m) {
+        return space.st(({ content: "screenmode_hd", animation: "screenmode_anim", mono: "screenmode_mono" })[m] || "screenmode_fast")
+    }
     function applyScreenMode() {
         if (space._screenModeItem) { space._screenModeItem.destroy(); space._screenModeItem = null }
         try {
             space._screenModeItem = Qt.createQmlObject(
                 'import QtQuick; import xofm.libs.epaper; ScreenModeItem { anchors.fill: parent; mode: ScreenModeItem.'
-                + (space.screenMode === "content" ? "Content" : "UI") + ' }',
+                + space.screenModeEnum(space.screenMode) + ' }',
                 space, "spaceScreenMode")
         } catch (e) {
             console.warn("[space] ScreenModeItem 不可用, 沿用默认刷新: " + e)
@@ -65,7 +78,7 @@ Rectangle {
     // 外壳自己的设置存在应用数据区的保留 id "shell" 下 (后端 id 正则不允许下划线开头)
     function loadShellCfg() {
         request("GET", baseUrl + "/space/apps/shell/data/config", null, function (st, r) {
-            if (st === 200 && r && r.screenMode) space.screenMode = r.screenMode
+            if (st === 200 && r && r.screenMode && space.screenModes.indexOf(r.screenMode) >= 0) space.screenMode = r.screenMode
             else space.applyScreenMode()
             if (st === 200 && r && r.hero !== undefined) space.heroChoice = r.hero
             if (st === 200 && r && r.timezone) space.tzPref = r.timezone
@@ -212,7 +225,7 @@ Rectangle {
         readonly property string baseUrl: space.baseUrl
         readonly property string kitDir: space.kitDir
         readonly property bool largeScreen: space.largeScreen
-        readonly property string screenMode: space.screenMode   // ui / content, 整个空间统一, 应用别自己挂
+        readonly property string screenMode: space.screenMode   // content / ui / animation / mono, 整个空间统一, 应用别自己挂
         readonly property real unit: space.unit           // 版式缩放基准 (Move 竖屏 = 1)
         // 纵向另算一套: Paper Pro 宽是 Move 的 1.70 倍而高只有 1.27 倍, 纵向尺寸
         // 再跟着 unit 走就会把一屏撑爆。卡片高度、上下留白、纵向间距用它。
@@ -1423,10 +1436,49 @@ Rectangle {
                     ui: space.fs
                     iconSource: space.kitDir + "/icons/sun.svg"
                     text: space.st("set_screenmode")
-                    detail: space.screenMode === "content" ? space.st("screenmode_hd") : space.st("screenmode_fast")
-                    onClicked: {
-                        space.screenMode = (space.screenMode === "content") ? "ui" : "content"
-                        space.saveShellCfg()
+                    detail: space.screenModeLabel(space.screenMode)
+                    onClicked: space.screenModeOpen = !space.screenModeOpen
+                }
+                // 刷新档位: 就地展开, 当前的打勾; 选了立刻生效并收起
+                Repeater {
+                    model: space.screenModeOpen ? space.screenModes : []
+                    delegate: Item {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        implicitHeight: space.fpx(96)
+                        Rectangle { anchors.fill: parent; color: smMouse.pressed ? "#eeeeee" : "transparent" }
+                        Column {
+                            anchors.left: parent.left; anchors.leftMargin: space.fpx(72)
+                            anchors.right: smCheck.left; anchors.rightMargin: space.fpx(16)
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: space.fpx(4)
+                            Text { text: space.screenModeLabel(modelData); font.pixelSize: space.fpx(26) }
+                            Text {
+                                width: parent.width
+                                text: space.st("screenmode_" + modelData + "_hint")
+                                font.pixelSize: space.fpx(20); color: "#26251F"
+                                elide: Text.ElideRight
+                            }
+                        }
+                        Image {
+                            id: smCheck
+                            anchors.right: parent.right; anchors.rightMargin: space.fpx(24)
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: space.fpx(28); height: width
+                            sourceSize.width: width; sourceSize.height: height
+                            source: space.kitDir + "/icons/check.svg"
+                            opacity: modelData === space.screenMode ? 1 : 0
+                        }
+                        Rectangle { anchors.left: parent.left; anchors.leftMargin: space.fpx(72); anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: "#E2DED6" }
+                        MouseArea {
+                            id: smMouse
+                            anchors.fill: parent
+                            onClicked: {
+                                space.screenMode = modelData
+                                space.screenModeOpen = false
+                                space.saveShellCfg()
+                            }
+                        }
                     }
                 }
                 Kit.SRow {
