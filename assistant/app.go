@@ -100,11 +100,12 @@ type ReleaseInfo struct {
 	// Android 包所在的发布标签 (GitHub Release / 国内镜像目录) 与整包 sha256
 	AndroidTag string `json:"androidTag"`
 	AndroidSHA string `json:"androidSha"`
+	AndroidVer string `json:"androidVer"`
 }
 
 // Release 给前端拼下载地址用。
 func (a *App) Release() ReleaseInfo {
-	return ReleaseInfo{Tag: releaseTag, SpaceSHA: spaceSHA, CNBase: cnMirror, AndroidTag: androidTag, AndroidSHA: androidSHA}
+	return ReleaseInfo{Tag: releaseTag, SpaceSHA: spaceSHA, CNBase: cnMirror, AndroidTag: androidTag, AndroidSHA: androidSHA, AndroidVer: androidVer}
 }
 
 // LogDir 返回审计日志目录。

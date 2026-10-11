@@ -19,13 +19,14 @@ RELEASE_TAG ?= $(VERSION)
 SPACE_SHA := $(shell [ -f dist/space-bundle.zip ] && shasum -a 256 dist/space-bundle.zip | cut -d' ' -f1)
 CN_MIRROR ?= $(strip $(shell cat .cn-mirror 2>/dev/null))
 # Android 包 (几百 MB, 几个月才变一次) 不跟着每版重传: ANDROID_TAG 是它放在哪个发布标签下
-# (GitHub Release 与国内镜像同名目录), ANDROID_SHA 是它的 sha256。换了 Android 包就把新包传到
-# 当次发布, 再改这两个值。
+# (GitHub Release 与国内镜像同名目录), ANDROID_SHA 是它的 sha256, ANDROID_VER 是包里 manifest
+# 的版本 (和设备上记的比, 判断「已是最新」)。换了 Android 包就把新包传到当次发布, 再改这三个值。
 ANDROID_TAG ?= v1.0.0
 ANDROID_SHA ?= e3e2ec81916f0984b490c1b135c919c20f5aa53af2f6b3d691f5fd3de21f0453
+ANDROID_VER ?= v1.2.1-23-g288baa3
 LDFLAGS := -X main.version=$(VERSION) -X "main.buildTime=$(BUILD_TIME)" \
 	-X main.releaseTag=$(RELEASE_TAG) -X main.spaceSHA=$(SPACE_SHA) -X main.cnMirror=$(CN_MIRROR) \
-	-X main.androidTag=$(ANDROID_TAG) -X main.androidSHA=$(ANDROID_SHA)
+	-X main.androidTag=$(ANDROID_TAG) -X main.androidSHA=$(ANDROID_SHA) -X main.androidVer=$(ANDROID_VER)
 
 .PHONY: bundle bundle-android build-mac build-win cli dev vet
 

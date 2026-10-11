@@ -133,8 +133,19 @@ func Run(ctx context.Context, c *sshx.Client, b *bundle.Bundle, p *Plan, log ssh
 		_ = c.RunLogged(ctx, "rm -rf "+stageDir, nil)
 		return fmt.Errorf("设备端安装失败: %w", err)
 	}
+	// 记一笔装的是哪个安装包 (和空间的 .space_version 放一起): 助手下次连上才分得清
+	// 「已是最新」还是「有更新」—— 以前没记, 只要装过就一律显示「下载并更新」
+	if v := b.Manifest.Version; v != "" {
+		_ = c.RunLogged(ctx, "mkdir -p /home/root/rmkit-cn", nil) // 只装 Android 没装空间时这个目录还没有
+		if err := c.WriteFile(ctx, AndroidVersionFile, strings.NewReader(v), "644"); err != nil {
+			log("⚠ 记版本失败 (不影响使用): " + err.Error())
+		}
+	}
 	return nil
 }
+
+// AndroidVersionFile 设备上记录已装 Android 安装包版本的文件 (probe 读它)
+const AndroidVersionFile = "/home/root/rmkit-cn/.android_version"
 
 // Uninstall 卸载单槽 Android。
 func Uninstall(ctx context.Context, c *sshx.Client, removeData bool) error {
@@ -142,7 +153,10 @@ func Uninstall(ctx context.Context, c *sshx.Client, removeData bool) error {
 	if removeData {
 		env["REMOVE_DATA"] = "1"
 	}
-	return c.RunScript(ctx, scripts.AndroidUninstall, env)
+	if err := c.RunScript(ctx, scripts.AndroidUninstall, env); err != nil {
+		return err
+	}
+	return c.RunLogged(ctx, "rm -f "+AndroidVersionFile, nil)
 }
 
 // Diagnose 收集一次 Android 启动诊断 (给用户复制发到 Issue): 固件/槽位/计数/内核链接/包装状态

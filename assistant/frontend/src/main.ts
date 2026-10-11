@@ -11,7 +11,7 @@ type Info = {
   arch: string; fwVersion: string; resolution: string; model: string; modelKey: string
   activeSlot: string; errcntA: number; errcntB: number; secboot: string; hasLSE: boolean
   rootFreeMB: number; homeFreeMB: number; haveXovi: boolean; rmkitInstalled: boolean; rmkitFW: string
-  spaceInstalled: boolean; spaceActive: boolean; spaceVersion: string
+  spaceInstalled: boolean; spaceActive: boolean; spaceVersion: string; androidVersion: string
   xochitlActive: boolean; inAndroidMode: boolean; androidInstalled: boolean; initIsWrapper: boolean
 }
 type BundleInfo = { path: string; component: string; version: string; created: string; notes: string; files: number; bytes: number }
@@ -45,8 +45,8 @@ const state = {
 // Android 包几个月才变一次, 不跟着每版重传, 单独记它放在哪个发布标签下 (androidTag)。
 // 自己的服务器 (boangs.com) 留作最后的后备: 旧版助手只认那里。
 type Source = 'cn' | 'github'
-type Release = { tag: string; spaceSha: string; cnBase: string; androidTag: string; androidSha: string }
-let release: Release = { tag: '', spaceSha: '', cnBase: '', androidTag: '', androidSha: '' }
+type Release = { tag: string; spaceSha: string; cnBase: string; androidTag: string; androidSha: string; androidVer: string }
+let release: Release = { tag: '', spaceSha: '', cnBase: '', androidTag: '', androidSha: '', androidVer: '' }
 const GITHUB = 'https://github.com/boangs/remarkable-space/releases/'
 const OWN_SERVER = 'https://boangs.com/space/'
 const BUNDLE_NAME: Record<Action, string> = { space: 'space-bundle.zip', android: 'android-rmppm-bundle.zip' }
@@ -164,15 +164,26 @@ function renderItem(i: Info, a: Action) {
   const ready = !!b && b.component === COMPONENT[a]
   const installed = isSpace ? i.spaceInstalled : i.androidInstalled
   const busy = state.busy ? 'disabled' : ''
-  const verb = installed ? '更新' : '安装'
+  // 设备上记的版本 vs 这一版助手配套的版本: 一样就是「已是最新」, 不再一律喊「更新」。
+  // 设备上没记版本 (老版助手装的 Android) 就判断不了, 只给「重新安装」, 不说有更新
+  const cur = isSpace ? (i.spaceVersion || '') : (i.androidVersion || '')
+  const latest = isSpace ? release.tag : release.androidVer
+  const upToDate = installed && cur !== '' && latest !== '' && cur === latest
+  const unknown = installed && (cur === '' || latest === '')
+  const outdated = installed && !upToDate && !unknown
   // 中文动词接英文词要留空格, 不然挤成"更新Android"
-  const title = isSpace ? verb + '空间' : verb + ' Android'
-  const cur = isSpace ? (i.spaceVersion || '') : ''
+  const name = isSpace ? '空间' : ' Android'
+  const title = (outdated ? '更新' : installed ? '重新安装' : '安装') + name
 
   let stateCell: string
-  if (installed && cur) stateCell = `<span class="on">已安装</span> ${mono(cur)}`
+  if (upToDate) stateCell = `<span class="on">已安装</span> ${mono(cur)}　已是最新`
+  else if (outdated) stateCell = `<span class="on">已安装</span> ${mono(cur)}　可更新到 ${mono(latest)}`
+  else if (installed && cur) stateCell = `<span class="on">已安装</span> ${mono(cur)}`
   else if (installed) stateCell = `<span class="on">已安装</span>`
   else stateCell = `<span class="dim">未安装，下载 ${APPROX[a]}</span>`
+  // 主按钮: 要装 / 要更新才是显眼的黑底; 已是最新 (或判断不了) 时「重新安装」只是个普通按钮, 用来修复
+  const runClass = (installed && !outdated) ? 'flat' : 'go'
+  const runText = ready || (installed && !outdated) ? title : '下载并' + (outdated ? '更新' : '安装')
 
   return `
     <section class="item ${state.busyOn === a ? 'working' : ''}">
@@ -183,7 +194,7 @@ function renderItem(i: Info, a: Action) {
         </div>
         <div class="stat">${stateCell}${ready ? `<span class="pending">安装包 ${mono(b!.version)}　${mb(b!.bytes)}</span>` : ''}</div>
         <div class="acts">
-          <button class="go act-run" data-a="${a}" ${busy}>${ready ? title : '下载并' + verb}</button>
+          <button class="${runClass} act-run" data-a="${a}" ${busy}>${runText}</button>
           ${installed
             ? `<button class="peril ${isSpace ? 'act-uninstall' : 'act-uninstall-android'}" data-a="${a}" ${busy}>卸载</button>`
             : `<button class="flat act-choose" data-a="${a}" ${busy}>从本地安装</button>`}

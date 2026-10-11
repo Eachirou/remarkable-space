@@ -29,6 +29,7 @@ var (
 	// Android 包几个月才变一次, 不跟着每版重传: 单独记它放在哪个发布标签下, 和它的 sha256
 	androidTag = ""
 	androidSHA = ""
+	androidVer = "" // Android 安装包 manifest 里的版本 (和设备上 .android_version 比, 判断要不要更新)
 )
 
 func main() {
