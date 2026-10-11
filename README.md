@@ -7,12 +7,12 @@ reMarkable 上的启动台：首页小组件 + 应用注册表 + 绿色安装 + 
 
 用「空间助手」装：电脑用 USB 线连上 reMarkable，助手会把空间连同它需要的底座一次装好。
 
-| 助手 | GitHub 下载 | 国内下载 |
-|---|---|---|
-| Mac | [space-assistant-mac.zip](https://github.com/boangs/remarkable-space/releases/latest/download/space-assistant-mac.zip) | [space-assistant-mac.zip](http://39.97.43.228/space/latest/space-assistant-mac.zip) |
-| Windows | [space-assistant-windows.exe](https://github.com/boangs/remarkable-space/releases/latest/download/space-assistant-windows.exe) | [space-assistant-windows.exe](http://39.97.43.228/space/latest/space-assistant-windows.exe) |
+| 助手 | 下载 |
+|---|---|
+| Mac | [space-assistant-mac.zip](https://github.com/boangs/remarkable-space/releases/latest/download/space-assistant-mac.zip) |
+| Windows | [space-assistant-windows.exe](https://github.com/boangs/remarkable-space/releases/latest/download/space-assistant-windows.exe) |
 
-两处是同一份文件，校验值见 [Release](https://github.com/boangs/remarkable-space/releases/latest) 里的 `SHA256SUMS`。
+校验值见 [Release](https://github.com/boangs/remarkable-space/releases/latest) 里的 `SHA256SUMS`。
 
 助手装空间时还要下载约 140 MB 的安装包，默认走国内下载，可以在助手的「设置 → 下载来源」里改成 GitHub。
 下不动会自动换另一处；下完按助手里写死的校验值核对，对不上不会装。

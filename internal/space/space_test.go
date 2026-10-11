@@ -236,7 +236,7 @@ func TestInstallFetchURLAndDigest(t *testing.T) {
 		wantErr        bool
 	}{
 		{"https 可以", "https://example.test/a.zip", good, false},
-		{"http 也可以 (国内 IP 节点签不了证书)", "http://39.97.43.228/t/a.zip", good, false},
+		{"http 也可以 (国内 IP 节点签不了证书)", "http://203.0.113.10/t/a.zip", good, false},
 		{"别的协议不行", "ftp://example.test/a.zip", good, true},
 		{"没有 sha256 不行", "http://example.test/a.zip", "", true},
 		{"sha256 格式不对不行", "http://example.test/a.zip", "abc", true},
