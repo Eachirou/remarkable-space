@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -112,7 +114,25 @@ func (a *App) Release() ReleaseInfo {
 func (a *App) LogDir() string { return a.logDir }
 
 // OpenLogDir 用系统文件管理器打开日志目录。
-func (a *App) OpenLogDir() { runtime.BrowserOpenURL(a.ctx, "file://"+a.logDir) }
+// 不能用 runtime.BrowserOpenURL: Wails 2.15 起它拒绝 file:// 且不报错, 按钮点了没反应。
+func (a *App) OpenLogDir() error {
+	var cmd *exec.Cmd
+	switch goruntime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", a.logDir)
+	case "windows":
+		cmd = exec.Command("explorer", a.logDir)
+	default:
+		cmd = exec.Command("xdg-open", a.logDir)
+	}
+	if err := cmd.Start(); err != nil {
+		a.log("打开日志目录失败: " + err.Error())
+		return fmt.Errorf("打不开日志目录, 请手动前往 %s", a.logDir)
+	}
+	// explorer 成功时退出码也是 1, 不等它、不看退出码, 回收掉进程即可
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
 
 const keyringService = "space-assistant"
 

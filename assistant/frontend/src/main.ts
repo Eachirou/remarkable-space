@@ -480,7 +480,7 @@ function bind() {
   })
 
   $('#btn-cancel')?.addEventListener('click', () => Cancel())
-  $('#btn-logdir')?.addEventListener('click', () => OpenLogDir())
+  $('#btn-logdir')?.addEventListener('click', () => { OpenLogDir().catch((e) => appendLog('✗ ' + String(e))) })
 }
 
 EventsOn('log', (line: string) => appendLog(line))
