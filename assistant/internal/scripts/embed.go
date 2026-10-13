@@ -27,3 +27,6 @@ var AndroidInstall string
 
 //go:embed android-uninstall.sh
 var AndroidUninstall string
+
+//go:embed rescue.sh
+var Rescue string

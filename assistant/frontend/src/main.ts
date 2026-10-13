@@ -2,7 +2,7 @@ import './style.css'
 import { deviceArt } from './device'
 import {
   Connect, Disconnect, Probe, ChooseBundle, DownloadBundle, PlanSpace, RunSpace, UninstallSpace,
-  PlanAndroid, RunAndroid, UninstallAndroid, BootAndroid, ReturnToStock, ResetAndroidData, ChooseAPKs, InstallAPKs, Cancel, OpenLogDir, LogDir, DetectProxy, Confirm, LoadPassword, ForgetPassword, DiagnoseAndroid, Version, RepairPanel, Release,
+  PlanAndroid, RunAndroid, UninstallAndroid, BootAndroid, ReturnToStock, ResetAndroidData, ChooseAPKs, InstallAPKs, Cancel, EmergencyRepair, OpenLogDir, LogDir, DetectProxy, Confirm, LoadPassword, ForgetPassword, DiagnoseAndroid, Version, RepairPanel, Release,
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
@@ -120,6 +120,13 @@ function renderConnect() {
             <label for="host">地址</label>
             <input id="host" value="10.11.99.1">
             <button id="btn-forget" class="flat" ${state.password ? '' : 'disabled'}>忘记已存的密码</button>
+          </div>
+        </details>
+        <details class="fallback">
+          <summary>设备起不来</summary>
+          <p class="note">卡在开机画面、反复重启时用。填好上面的 SSH 密码，点「紧急修复」，保持 USB 连着并让设备开机或重启；助手会一直尝试连接，一连上就停用中文、空间等全部增强，让设备以原厂状态启动。之后可以用助手重新安装。</p>
+          <div class="field">
+            <button id="btn-rescue" class="peril" ${state.busy ? 'disabled' : ''}>紧急修复</button>
           </div>
         </details>
       </div>
@@ -414,6 +421,16 @@ function bind() {
       state.info = (await Connect(host, pw, state.remember)) as Info
       keepLog(render)
     } catch (e) { appendLog('✗ ' + String(e)) }
+  })
+  $('#btn-rescue')?.addEventListener('click', async () => {
+    const host = ($('#host') as HTMLInputElement)?.value || '10.11.99.1'
+    const pw = ($('#password') as HTMLInputElement).value
+    state.password = pw
+    if (!pw) appendLog('没填 SSH 密码: 设备开机早期多半只能用密码登录，建议先填上')
+    if (!(await Confirm('紧急修复', '会停用中文、空间等全部增强，让设备以原厂状态启动（笔记不受影响）。之后可以用助手重新安装。继续？'))) return
+    setBusy(true)
+    try { await EmergencyRepair(host, pw) } catch (e) { appendLog('✗ ' + String(e)) }
+    setBusy(false)
   })
   $('#btn-disconnect')?.addEventListener('click', async () => { await Disconnect(); state.info = null; keepLog(render) })
   $('#btn-probe')?.addEventListener('click', async () => { try { state.info = (await Probe()) as Info; keepLog(render) } catch (e) { appendLog('✗ ' + String(e)) } })

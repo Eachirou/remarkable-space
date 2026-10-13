@@ -24,6 +24,7 @@ import (
 	"github.com/boangs/remarkable-space/assistant/internal/deploy"
 	"github.com/boangs/remarkable-space/assistant/internal/netx"
 	"github.com/boangs/remarkable-space/assistant/internal/probe"
+	"github.com/boangs/remarkable-space/assistant/internal/scripts"
 	"github.com/boangs/remarkable-space/assistant/internal/sshx"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"github.com/zalando/go-keyring"
@@ -489,6 +490,69 @@ func (a *App) RepairPanel() error {
 // UninstallSpace 卸载空间与底座, 设备恢复出厂启动配置。
 func (a *App) UninstallSpace() error {
 	return a.runTask("卸载空间", func(ctx context.Context) error { return deploy.Uninstall(ctx, a.client) })
+}
+
+// EmergencyRepair 紧急修复: 不停地连设备, 一连上就让它以原厂状态启动 (停用两个槽的
+// xochitl drop-in、拉熔断、搬走 xovi 扩展, 见 scripts/rescue.sh)。
+//
+// 给起不来的设备用: 开机途中 USB 网络和 SSH 比界面先起来 (Paper Pro Move 上试过), 抓住
+// 这个窗口就能在看门狗切槽之前把启动链清干净。所以不走 Connect 那套 (探测、装公钥都要
+// 时间), 连上直接跑脚本。不需要设备事先连过助手。
+func (a *App) EmergencyRepair(host, password string) error {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		host = "10.11.99.1"
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Minute)
+	defer cancel()
+	a.mu.Lock()
+	a.cancel = cancel // 「取消」按钮
+	a.mu.Unlock()
+
+	a.log("===== 紧急修复开始 =====")
+	a.log("正在等设备 " + host + " … 设备卡在开机或反复重启都没关系, 保持 USB 连着, 一连上就会自动修复")
+	var c *sshx.Client
+	authFails := 0
+	for n := 1; c == nil; n++ {
+		dctx, dcancel := context.WithTimeout(ctx, 4*time.Second)
+		cl, err := sshx.Dial(dctx, host, password, func(string) {})
+		dcancel()
+		if err == nil {
+			c = cl
+			break
+		}
+		// 密码错了就别一直转; 但没填密码时开机早期 /home 未挂、密钥登录会失败, 要接着等
+		if strings.Contains(err.Error(), "密码不对") && password != "" {
+			if authFails++; authFails >= 3 {
+				a.log("✗ 紧急修复: " + err.Error())
+				return err
+			}
+		}
+		if n%15 == 0 {
+			a.log(fmt.Sprintf("还在等设备 (已试 %d 次): %s", n, err.Error()))
+		}
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				err = errors.New("15 分钟内没连上设备。请确认 USB 线连着、设备在开机或重启中, 再试一次")
+			} else {
+				err = errors.New("已取消")
+			}
+			a.log("✗ 紧急修复: " + err.Error())
+			return err
+		case <-time.After(time.Second):
+		}
+	}
+	defer c.Close()
+	a.log("已连上设备, 开始修复")
+	rctx, rcancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer rcancel()
+	if err := c.RunScript(rctx, scripts.Rescue, nil); err != nil {
+		a.log("✗ 紧急修复失败: " + err.Error())
+		return err
+	}
+	a.log("✓ 紧急修复完成")
+	return nil
 }
 
 // PlanAndroid 生成单槽 Android 安装计划 (含预检阻断项)。
