@@ -30,3 +30,6 @@ var AndroidUninstall string
 
 //go:embed rescue.sh
 var Rescue string
+
+//go:embed diagnose.sh
+var Diagnose string

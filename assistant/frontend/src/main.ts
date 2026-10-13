@@ -2,7 +2,7 @@ import './style.css'
 import { deviceArt } from './device'
 import {
   Connect, Disconnect, Probe, ChooseBundle, DownloadBundle, PlanSpace, RunSpace, UninstallSpace,
-  PlanAndroid, RunAndroid, UninstallAndroid, BootAndroid, ReturnToStock, ResetAndroidData, ChooseAPKs, InstallAPKs, Cancel, EmergencyRepair, OpenLogDir, LogDir, DetectProxy, Confirm, LoadPassword, ForgetPassword, DiagnoseAndroid, Version, RepairPanel, Release,
+  PlanAndroid, RunAndroid, UninstallAndroid, BootAndroid, ReturnToStock, ResetAndroidData, ChooseAPKs, InstallAPKs, Cancel, EmergencyRepair, ExportDiagnostics, OpenLogDir, LogDir, DetectProxy, Confirm, LoadPassword, ForgetPassword, DiagnoseAndroid, Version, RepairPanel, Release,
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
@@ -153,6 +153,7 @@ function renderDevice(i: Info) {
         <div class="field">
           <button id="btn-probe" class="flat" ${state.busy ? 'disabled' : ''}>重新检测</button>
           <button id="btn-disconnect" class="flat" ${state.busy ? 'disabled' : ''}>断开</button>
+          <button id="btn-export-diag" class="flat" ${state.busy ? 'disabled' : ''} title="设备切槽、开不了机、空间突然没了时用：只读收集版本、启动配置和最近几次开机的系统日志，存成一个文件发给开发者。不收集笔记和账号信息。">导出诊断</button>
         </div>
       </div>
     </section>
@@ -430,6 +431,11 @@ function bind() {
     if (!(await Confirm('紧急修复', '会停用中文、空间等全部增强，让设备以原厂状态启动（笔记不受影响）。之后可以用助手重新安装。继续？'))) return
     setBusy(true)
     try { await EmergencyRepair(host, pw) } catch (e) { appendLog('✗ ' + String(e)) }
+    setBusy(false)
+  })
+  $('#btn-export-diag')?.addEventListener('click', async () => {
+    setBusy(true)
+    try { await ExportDiagnostics() } catch (e) { appendLog('✗ ' + String(e)) }
     setBusy(false)
   })
   $('#btn-disconnect')?.addEventListener('click', async () => { await Disconnect(); state.info = null; keepLog(render) })

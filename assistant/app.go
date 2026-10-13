@@ -555,6 +555,51 @@ func (a *App) EmergencyRepair(host, password string) error {
 	return nil
 }
 
+// ExportDiagnostics 导出诊断: 只读收集版本、两个槽的启动配置、底座/空间状态和最近几次开机的
+// 系统日志, 存成一个文件并打开所在文件夹, 让用户发给开发者。设备起不来、切槽、空间没了时用 ——
+// 助手自己的日志只记得它连着时做了什么, 设备在两次连接之间怎么重启的只有设备端日志知道。
+func (a *App) ExportDiagnostics() (string, error) {
+	a.mu.Lock()
+	if err := a.ensureAlive(); err != nil {
+		a.mu.Unlock()
+		return "", err
+	}
+	c := a.client
+	a.mu.Unlock()
+	a.log("正在收集诊断信息 (只读, 不改设备上的任何东西)...")
+	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Minute)
+	defer cancel()
+	res, err := c.Run(ctx, "bash -s <<'SPACE_DIAG_EOF'\n"+scripts.Diagnose+"\nSPACE_DIAG_EOF")
+	if err != nil && res.Stdout == "" {
+		a.log("✗ 收集诊断失败: " + err.Error())
+		return "", err
+	}
+	text := fmt.Sprintf("空间助手 %s 导出的诊断 (%s)\n", a.Version(), time.Now().Format("2006-01-02 15:04:05")) +
+		scrubDiag(res.Stdout)
+	if res.Stderr != "" {
+		text += "\n======== 设备端报错 ========\n" + scrubDiag(res.Stderr)
+	}
+	path := filepath.Join(a.logDir, "diagnose-"+time.Now().Format("20060102-150405")+".txt")
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return "", err
+	}
+	a.log("✓ 诊断已保存: " + path + " —— 请把这个文件发给开发者")
+	_ = a.OpenLogDir()
+	return path, nil
+}
+
+// 日志里万一带出凭证 (JWT / key=value 形式的 token、password), 发出去之前遮掉。
+var diagSecretRe = regexp.MustCompile(`(?i)(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+|((?:token|password|passwd|secret|authorization)\s*[=:]\s*)((?:bearer\s+)?"[^"]*"|(?:bearer\s+)?\S+))`)
+
+func scrubDiag(s string) string {
+	return diagSecretRe.ReplaceAllStringFunc(s, func(m string) string {
+		if sub := diagSecretRe.FindStringSubmatch(m); sub != nil && sub[2] != "" {
+			return sub[2] + "***"
+		}
+		return "***"
+	})
+}
+
 // PlanAndroid 生成单槽 Android 安装计划 (含预检阻断项)。
 func (a *App) PlanAndroid(replaceSystem bool) (*android.Plan, error) {
 	a.mu.Lock()
