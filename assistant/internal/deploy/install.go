@@ -518,7 +518,7 @@ func FWNumber(fw string) int64 {
 	return n
 }
 
-// RepairPanel 清除 rmkit-cn 的 crashloop 熔断与启动计数并重启一次 xochitl (高级面板凭空消失时用)。
+// RepairPanel 清除 rmkit-cn 的 crashloop 熔断与启动计数并重启一次 xochitl (侧栏入口或中文凭空消失时用)。
 // 熔断误判的典型场景: 进 Android 再回原厂 = 600 秒内两次启动, 再多一次就被当成崩溃循环。
 func RepairPanel(ctx context.Context, c *sshx.Client) error {
 	return c.RunLogged(ctx, `set -e
