@@ -283,6 +283,9 @@ Rectangle {
         var x = new XMLHttpRequest()
         x.onreadystatechange = function() {
             if (x.readyState !== 4) return
+            // 每次打开空间外壳都重建一次, 旧实例发出的请求回来时它已经销毁 (space 成了 null),
+            // 回调里再碰 space / 小组件的函数只会报 "of null" / "is not defined"。没人要这个结果了, 丢掉。
+            if (!space) return
             var r = null
             try { r = JSON.parse(x.responseText) } catch (e) { r = null }
             // file:// 读成功时 XHR 的 status 是 0 而不是 200 —— 本地文件没有 HTTP 状态行。
