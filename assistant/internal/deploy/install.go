@@ -44,6 +44,7 @@ type Plan struct {
 	Arch          string `json:"arch"`
 	ModelKey      string `json:"modelKey"`
 	FWVersion     string `json:"fwVersion"`
+	FWID          string `json:"fwId"`          // 构建时间-版本号, 写 .last_fw_version / 标记 hashtab 用 (见 probe.Info.FWID)
 	BundleVersion string `json:"bundleVersion"` // 这次装的安装包版本, 部署后写进设备
 	NeedXovi      bool   `json:"needXovi"`
 	DeployRime    bool   `json:"deployRime"`
@@ -95,7 +96,7 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Plan{Arch: info.Arch, ModelKey: info.ModelKey, FWVersion: info.FWVersion, BundleVersion: b.Manifest.Version, NeedXovi: !info.HaveXovi,
+	p := &Plan{Arch: info.Arch, ModelKey: info.ModelKey, FWVersion: info.FWVersion, FWID: info.FWID(), BundleVersion: b.Manifest.Version, NeedXovi: !info.HaveXovi,
 		Files: []FileEntry{}, Warnings: []string{}, // 保证 JSON 是 [] 而不是 null (前端直接 .map)
 		xoviArch: ar.xovi, uploadBin: ar.uploadBin, imeBin: ar.imeBin, spaceBin: ar.spaceBin}
 	if info.ModelKey == "unknown" {
@@ -201,10 +202,10 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	// install.sh 468-479: compiled-qmd/<fw> 缓存种子 (设备端阶段 3 会用设备 hashtab 重编覆盖)
 	for _, n := range b.Names() {
 		if strings.HasPrefix(n, "dist/") && strings.HasSuffix(n, ".qmd") {
-			add(base+"/compiled-qmd/"+info.FWVersion+"/"+path.Base(n), n, 0o644)
+			add(base+"/compiled-qmd/"+info.FWID()+"/"+path.Base(n), n, 0o644)
 		}
 	}
-	add(base+"/compiled-qmd/"+info.FWVersion+"/pinyin_interceptor.qmd", "qmd/pinyin_interceptor.qmd", 0o644)
+	add(base+"/compiled-qmd/"+info.FWID()+"/pinyin_interceptor.qmd", "qmd/pinyin_interceptor.qmd", 0o644)
 	// install.sh 481-487: static/
 	add(base+"/static/pinyin_interceptor.qmd", "qmd/pinyin_interceptor.qmd", 0o644)
 	add(base+"/static/zh_CN.rcc", "qmd/zh_CN.rcc", 0o644)
@@ -290,10 +291,10 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 	log(fmt.Sprintf("传输完成 (%.0fs)", time.Since(start).Seconds()))
 
 	// install.sh 568-573: 必须在 reenable 之前写 .last_fw_version (防 fw-upgrade.sh 误触发)
-	if err := c.WriteFile(ctx, "/home/root/rmkit-cn/.last_fw_version", strings.NewReader(p.FWVersion), "644"); err != nil {
+	if err := c.WriteFile(ctx, "/home/root/rmkit-cn/.last_fw_version", strings.NewReader(p.FWID), "644"); err != nil {
 		return err
 	}
-	log("✓ .last_fw_version 已写入 (" + p.FWVersion + ")")
+	log("✓ .last_fw_version 已写入 (" + p.FWID + ")")
 
 	// 记一笔装的是哪个安装包。助手下次连上就能告诉用户当前版本, 也才好判断要不要更新。
 	if p.BundleVersion != "" {
@@ -398,7 +399,7 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 	// install.sh 614-855: 设备端六阶段防砖部署
 	log("配置系统服务 + 编译 + 启动 (设备端六阶段)...")
 	env := map[string]string{
-		"FW_VERSION":          p.FWVersion,
+		"FW_VERSION":          p.FWID,
 		"ZZ_HEADER_FLAT":      strings.ReplaceAll(p.zzHeader, "\n", `\n`),
 		"QML_INJECT_DEPLOYED": boolStr(p.QMLInject),
 	}

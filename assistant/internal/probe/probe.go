@@ -14,6 +14,7 @@ import (
 type Info struct {
 	Arch       string `json:"arch"`       // aarch64 / armv7l
 	FWVersion  string `json:"fwVersion"`  // /etc/version, 如 20260806095513
+	IMGVersion string `json:"imgVersion"` // /etc/os-release 的 IMG_VERSION, 如 3.29.0.153
 	Resolution string `json:"resolution"` // fb0 virtual_size
 	Model      string `json:"model"`      // 人类可读
 	ModelKey   string `json:"modelKey"`   // rm2 / rmpp / rmppm / unknown
@@ -49,6 +50,7 @@ type Info struct {
 const probeScript = `
 echo arch=$(uname -m)
 echo fw=$(cat /etc/version 2>/dev/null | head -n 1 | tr -d '[:space:]')
+echo img=$(sed -n 's/^IMG_VERSION=//p' /etc/os-release 2>/dev/null | tr -d '"[:space:]')
 echo dtmodel=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)
 echo res=$(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null)
 echo slot=$(rootdev 2>/dev/null)
@@ -88,6 +90,7 @@ func Run(ctx context.Context, c *sshx.Client) (Info, error) {
 	info := Info{
 		Arch:             kv["arch"],
 		FWVersion:        kv["fw"],
+		IMGVersion:       kv["img"],
 		Resolution:       kv["res"],
 		ActiveSlot:       kv["slot"],
 		NextBoot:         kv["next"],
@@ -144,4 +147,15 @@ func classify(dtModel, res, arch string) (string, string) {
 func atoi(s string) int {
 	n, _ := strconv.Atoi(strings.TrimSpace(s))
 	return n
+}
+
+// FWID 是底座认的固件身份 "构建时间-版本号" (如 20261009073202-3.29.0.153),
+// 与设备上 precheck.sh / fw-upgrade.sh 的 fw_id 必须一致: .last_fw_version、
+// hashtab.fw_version、compiled-qmd/<身份>/ 都按它记。只用构建时间会漏掉
+// 3.29.0.152 → .153 这种构建时间不变的升级 (2026-10-15 实测因此熔断)。
+func (i Info) FWID() string {
+	if i.FWVersion == "" || i.IMGVersion == "" {
+		return i.FWVersion
+	}
+	return i.FWVersion + "-" + i.IMGVersion
 }

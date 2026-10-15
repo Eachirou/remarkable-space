@@ -1,4 +1,4 @@
-# 由 installer/install.sh 的 REMOTE_EOF 段 (六阶段防砖部署) 原样提取; 需要 env FW_VERSION ZZ_HEADER_FLAT QML_INJECT_DEPLOYED; 改动请两边同步
+# 由 installer/install.sh 的 REMOTE_EOF 段 (六阶段防砖部署) 原样提取; 需要 env FW_VERSION (=固件身份 构建时间-版本号) ZZ_HEADER_FLAT QML_INJECT_DEPLOYED; 改动请两边同步
 set -e
 
 HASHTAB=/home/root/xovi/exthome/qt-resource-rebuilder/hashtab

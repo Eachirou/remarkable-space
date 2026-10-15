@@ -8,7 +8,7 @@ import { EventsOn } from '../wailsjs/runtime/runtime'
 
 // 与 Go 端结构一一对应 (wailsjs/go/models.ts 里也有生成的类型, 这里只声明用到的字段)
 type Info = {
-  arch: string; fwVersion: string; resolution: string; model: string; modelKey: string
+  arch: string; fwVersion: string; imgVersion?: string; resolution: string; model: string; modelKey: string
   activeSlot: string; errcntA: number; errcntB: number; secboot: string; hasLSE: boolean
   rootFreeMB: number; homeFreeMB: number; haveXovi: boolean; rmkitInstalled: boolean; rmkitFW: string
   spaceInstalled: boolean; spaceActive: boolean; spaceVersion: string; androidVersion: string
@@ -138,7 +138,7 @@ function renderConnect() {
 
 function renderDevice(i: Info) {
   const specs: [string, string][] = [
-    ['固件', mono(i.fwVersion || '未知')],
+    ['固件', mono(i.imgVersion ? `${i.imgVersion} (${i.fwVersion})` : (i.fwVersion || '未知'))],
     ['架构', `${mono(i.arch)}${CODENAME[i.modelKey] ? `<span class="dim">（${CODENAME[i.modelKey]}）</span>` : ''}`],
     ['启动槽', i.activeSlot ? `${mono(i.activeSlot)}<span class="dim">　错误计数 ${mono(`a=${i.errcntA} b=${i.errcntB}`)}</span>` : '<span class="dim">该机型无 A/B 槽</span>'],
     ['剩余空间', `系统分区 <span class="qty">${num(i.rootFreeMB)}</span> MB<span class="dim">　/home <span class="qty">${num(i.homeFreeMB)}</span> MB</span>`],
