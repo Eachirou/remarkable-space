@@ -6,6 +6,11 @@
 //     外部进程够不着 (xochitl 没有 D-Bus 服务, 也不监听目录), 只能由跑在 xochitl 里的
 //     「空间」外壳来调。所以第二步是排进队列, 外壳打开时长连接取走、调完回报。
 //
+// 3.29 起 QML 拿到的文件库换成了只读的 LibraryFacade, 没有 requestLoadEntry 了。外壳发现
+// 这一点就报「导入器模式」, 文档改走系统自己的导入器 DocumentImporter.importFromUrls
+// (就是 USB 网页传文件用的那个): 本包把文件放进暂存目录, 用显示名当文件名, 外壳让导入器
+// 复制进文件库, 暂存文件过 StagingKeep 删掉。3.28 及以前照旧走第一种, 行为不变。
+//
 // 因此本包同时记录「空间开着没有」: 外壳在线才接受上传 (Active), 空间关了上传就该关。
 //
 // 为什么不用 librarian: 它在 3.28 上找不到改了名的 Library 单例, 无限重试漏堆,
@@ -32,14 +37,100 @@ var ErrBadType = errors.New("仅支持 .pdf / .epub")
 
 // Library 是对 xochitl 数据目录的一个写入口, 带着通知队列。
 type Library struct {
-	Dir   string
-	Queue *Queue
-	now   func() time.Time
+	Dir     string
+	Staging string // 导入器模式的暂存目录, 每个条目一个子目录 <id>/<显示名>.<ext>
+	Queue   *Queue
+	now     func() time.Time
 }
 
-// New 建一个写入口; pendingFile 是待通知队列落盘的位置 (空 = 只在内存里, 测试用)。
+// StagingKeep 导入器是异步复制的, 交出去之后暂存文件留这么久再删。
+var StagingKeep = 10 * time.Minute
+
+// New 建一个写入口; pendingFile 是待通知队列落盘的位置 (空 = 只在内存里, 测试用),
+// 暂存目录放在它旁边 (不放 /tmp: tmpfs 吃内存)。
 func New(dir, pendingFile string) *Library {
-	return &Library{Dir: dir, Queue: NewQueue(pendingFile), now: time.Now}
+	staging := filepath.Join(os.TempDir(), "xolib-import")
+	if pendingFile != "" {
+		staging = filepath.Join(filepath.Dir(pendingFile), "library-import")
+	}
+	l := &Library{Dir: dir, Staging: staging, Queue: NewQueue(pendingFile), now: time.Now}
+	l.sweepStaging()
+	return l
+}
+
+// SetImporter 记下外壳报的模式; 切到导入器模式时, 把还没加载成的文档改成导入。
+func (l *Library) SetImporter(on bool) {
+	l.Queue.SetImporter(on, l.loadToImport)
+}
+
+// loadToImport 把一条 load 改成 import: 文档本体挪到暂存目录 (用显示名命名), 删掉数据目录里
+// 这个 uuid 的其余文件 —— 文件库从没加载过它, 删了不留痕; 不删的话导入后再重启会出现两份。
+// 文件夹 / 笔记本没有导入器可用, 返回 false (留在盘上, xochitl 重启时自己读到)。
+func (l *Library) loadToImport(j *Job) bool {
+	var meta struct{ VisibleName, Parent string }
+	b, err := os.ReadFile(filepath.Join(l.Dir, j.ID+".metadata"))
+	if err != nil || json.Unmarshal(b, &meta) != nil {
+		return false
+	}
+	for _, ext := range []string{"pdf", "epub"} {
+		src := filepath.Join(l.Dir, j.ID+"."+ext)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		dst := l.stagingPath(j.ID, meta.VisibleName, ext)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return false
+		}
+		if err := os.Rename(src, dst); err != nil {
+			return false
+		}
+		l.removeAll(j.ID)
+		*j = Job{Op: OpImport, ID: j.ID, Path: dst, Parent: meta.Parent}
+		return true
+	}
+	return false
+}
+
+// stagingPath 暂存文件路径。导入器拿文件名当显示名, 所以文件名就是显示名; 去掉 / 和
+// 开头的点, 太长的按字节截断 (ext4 文件名上限 255 字节)。
+func (l *Library) stagingPath(id, visibleName, ext string) string {
+	name := strings.TrimLeft(strings.ReplaceAll(visibleName, "/", "／"), ".")
+	if strings.TrimSpace(name) == "" {
+		name = "未命名"
+	}
+	for len(name)+len(ext)+1 > 240 {
+		r := []rune(name)
+		name = string(r[:len(r)-1])
+	}
+	return filepath.Join(l.Staging, id, name+"."+ext)
+}
+
+// doneImport 导入交出去了: 过 StagingKeep 删暂存。
+func (l *Library) doneImport(j Job) {
+	dir := filepath.Dir(j.Path)
+	if filepath.Dir(dir) != l.Staging {
+		return
+	}
+	time.AfterFunc(StagingKeep, func() { os.RemoveAll(dir) })
+}
+
+// sweepStaging 启动时清掉上次没删的暂存 (队列里还等着导入的留下)。
+func (l *Library) sweepStaging() {
+	ents, err := os.ReadDir(l.Staging)
+	if err != nil {
+		return
+	}
+	keep := map[string]bool{}
+	l.Queue.mu.Lock()
+	for _, j := range l.Queue.pending {
+		keep[j.ID] = true
+	}
+	l.Queue.mu.Unlock()
+	for _, e := range ents {
+		if !keep[e.Name()] {
+			os.RemoveAll(filepath.Join(l.Staging, e.Name()))
+		}
+	}
 }
 
 // Entry 是导入后的条目。
@@ -63,6 +154,9 @@ func (l *Library) ImportDocument(r io.Reader, visibleName, ext, parent string) (
 	if strings.TrimSpace(visibleName) == "" {
 		visibleName = "未命名"
 	}
+	if l.Queue.Importer() {
+		return l.stageDocument(r, id, visibleName, ext, parent)
+	}
 	// 顺序: 本体 → .content → .metadata。xochitl 下次扫目录 (或重启) 只认带 .metadata 的条目,
 	// metadata 最后落地, 就不会出现「有条目没本体」的半成品。
 	if err := l.writeFile(id+"."+ext, r); err != nil {
@@ -84,6 +178,31 @@ func (l *Library) ImportDocument(r io.Reader, visibleName, ext, parent string) (
 		return Entry{}, err
 	}
 	l.Queue.Enqueue(Job{Op: OpLoad, ID: id})
+	return Entry{ID: id, VisibleName: visibleName, Type: ext}, nil
+}
+
+// stageDocument 导入器模式: 写进暂存目录, 排一条 import。
+func (l *Library) stageDocument(r io.Reader, id, visibleName, ext, parent string) (Entry, error) {
+	dst := l.stagingPath(id, visibleName, ext)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return Entry{}, err
+	}
+	tmp := dst + ".tmp"
+	f, err := os.Create(tmp)
+	if err == nil {
+		_, err = io.Copy(f, r)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}
+	if err == nil {
+		err = os.Rename(tmp, dst)
+	}
+	if err != nil {
+		os.RemoveAll(filepath.Dir(dst))
+		return Entry{}, err
+	}
+	l.Queue.Enqueue(Job{Op: OpImport, ID: id, Path: dst, Parent: parent})
 	return Entry{ID: id, VisibleName: visibleName, Type: ext}, nil
 }
 

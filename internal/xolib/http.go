@@ -58,6 +58,13 @@ func (l *Library) Mount(mux *http.ServeMux) {
 		if s, err := strconv.Atoi(r.URL.Query().Get("wait")); err == nil && s >= 0 && s <= 55 {
 			wait = time.Duration(s) * time.Second
 		}
+		// 外壳报模式: mode=import 表示这台固件没有 requestLoadEntry, 要走导入器
+		switch r.URL.Query().Get("mode") {
+		case "import":
+			l.SetImporter(true)
+		case "load":
+			l.SetImporter(false)
+		}
 		jobs := l.Queue.Next(r.Context(), wait)
 		if len(jobs) == 0 {
 			w.WriteHeader(http.StatusNoContent)
@@ -71,7 +78,13 @@ func (l *Library) Mount(mux *http.ServeMux) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "bad result"})
 			return
 		}
+		l.Queue.mu.Lock()
+		j, isImport := l.Queue.inflight[res.ID]
+		l.Queue.mu.Unlock()
 		l.Queue.Done(res)
+		if isImport && j.Op == OpImport && res.OK {
+			l.doneImport(j)
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("POST /space/library/bye", func(w http.ResponseWriter, r *http.Request) {

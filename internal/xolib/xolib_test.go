@@ -223,3 +223,67 @@ func TestHiddenNotebook(t *testing.T) {
 		t.Fatalf("%s", b)
 	}
 }
+
+// 3.29 起: 外壳报导入器模式后, 上传的文档进暂存目录 (显示名当文件名), 不碰数据目录。
+func TestImporterModeStagesDocument(t *testing.T) {
+	dir, staging := t.TempDir(), t.TempDir()
+	l := New(dir, "")
+	l.Staging = staging
+	l.SetImporter(true)
+	e, err := l.ImportDocument(strings.NewReader("%PDF"), "习题/答案", "pdf", "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 0 {
+		t.Fatal("导入器模式不该写数据目录", ents)
+	}
+	jobs := l.Queue.Next(context.Background(), 0)
+	if len(jobs) != 1 || jobs[0].Op != OpImport || jobs[0].Parent != "p1" {
+		t.Fatal("应排一条 import", jobs)
+	}
+	want := filepath.Join(staging, e.ID, "习题／答案.pdf")
+	if jobs[0].Path != want {
+		t.Fatal("暂存路径", jobs[0].Path, want)
+	}
+	if b, _ := os.ReadFile(want); string(b) != "%PDF" {
+		t.Fatal("暂存内容不对")
+	}
+	// 失败按原样 (带路径) 排回
+	l.Queue.Done(Result{Op: OpImport, ID: e.ID, OK: false})
+	l.Queue.now = func() time.Time { return time.Now().Add(RetryDelay + time.Second) }
+	if again := l.Queue.Next(context.Background(), 0); len(again) != 1 || again[0].Path != want {
+		t.Fatal("失败的 import 应带路径排回", again)
+	}
+}
+
+// 升级到 3.29 前上传、一直加载不了的文档: 切到导入器模式时改成导入, 数据目录里不留副本;
+// 文件夹没法导入, 丢掉 (留在盘上, 重启后可见)。
+func TestSwitchToImporterConvertsStuckLoads(t *testing.T) {
+	dir := t.TempDir()
+	l := New(dir, "")
+	l.Staging = t.TempDir()
+	doc, _ := l.ImportDocument(strings.NewReader("%PDF"), "旧文档", "pdf", "")
+	folder, _ := l.CreateFolder("文件夹", "")
+	l.SetImporter(true)
+	jobs := l.Queue.Next(context.Background(), 0)
+	if len(jobs) != 1 || jobs[0].Op != OpImport || jobs[0].ID != doc.ID {
+		t.Fatal("只应剩文档的 import", jobs)
+	}
+	if filepath.Base(jobs[0].Path) != "旧文档.pdf" {
+		t.Fatal("暂存文件名", jobs[0].Path)
+	}
+	if m, _ := filepath.Glob(filepath.Join(dir, doc.ID+".*")); len(m) != 0 {
+		t.Fatal("数据目录还留着文档", m)
+	}
+	if _, err := os.Stat(filepath.Join(dir, folder.ID+".metadata")); err != nil {
+		t.Fatal("文件夹应留在盘上")
+	}
+	// 导入器模式下失败的 load 不再排回
+	l.Queue.Enqueue(Job{Op: OpLoad, ID: "x"})
+	l.Queue.Next(context.Background(), 0)
+	l.Queue.Done(Result{Op: OpLoad, ID: "x", OK: false})
+	l.Queue.now = func() time.Time { return time.Now().Add(RetryDelay + time.Second) }
+	if j := l.Queue.Next(context.Background(), 0); j != nil {
+		t.Fatal("导入器模式下 load 失败不该重试", j)
+	}
+}

@@ -833,7 +833,13 @@ Rectangle {
     //
     // 不用 librarian: 它在 3.28 找不到改名的 Library 单例, 无限重试漏堆。Library 也不是
     // QML 单例 (527 个模块名都试过), 只能从界面树上拿 —— 文件库界面里 CalendarActions 的 .library。
+    //
+    // 3.29 起这里拿到的是只读的 LibraryFacade, 没有 requestLoadEntry。这时改用系统导入器
+    // (xofm.libs.library 的 DocumentImporter 单例, USB 网页传文件用的那个) 的 importFromUrls,
+    // 并在取活时报 mode=import, 服务端就把文档放进暂存目录交给导入器。3.28 及以前不碰导入器。
     property var xoLibrary: null
+    property var xoImporterHolder: null
+    property string libMode: ""
     property var libXhr: null
     property bool libOn: false
     property int libFails: 0
@@ -850,6 +856,28 @@ Rectangle {
             if (ch) for (var k = 0; k < ch.length; ++k) stack.push(ch[k])
         }
         return null
+    }
+    function xoImporter() {
+        if (!xoImporterHolder) {
+            try {
+                xoImporterHolder = Qt.createQmlObject('import QtQml; import xofm.libs.library; QtObject { property var v: DocumentImporter }', space, "xoImporter")
+            } catch (e) {
+                console.warn("[space] 文件库: 没有导入器 " + e)
+                return null
+            }
+        }
+        var v = xoImporterHolder.v
+        return (v && typeof v.importFromUrls === "function") ? v : null
+    }
+    // 文件库对象找到之后才定模式: 有 requestLoadEntry 就是 load (3.28 及以前), 否则有导入器就是 import
+    function detectLibMode() {
+        var lib = findXoLibrary()
+        if (!lib) return ""
+        if (typeof lib.requestLoadEntry === "function") return "load"
+        return xoImporter() ? "import" : "load"
+    }
+    function localFileUrl(path) {
+        return "file://" + path.split("/").map(encodeURIComponent).join("/")
     }
     function libStart() {
         if (libOn) return
@@ -890,15 +918,20 @@ Rectangle {
                 libRetry.start()
             }
         }
-        x.open("GET", baseUrl + "/space/library/next?wait=25")
+        if (!libMode) libMode = detectLibMode()
+        x.open("GET", baseUrl + "/space/library/next?wait=25" + (libMode ? "&mode=" + libMode : ""))
         x.send()
     }
     function libHandle(job) {
         var out = { op: job.op, id: job.id, ok: false }
-        var lib = findXoLibrary()
-        if (!lib) out.error = "找不到文件库对象 (CalendarActions.library)"
-        else if (job.op === "load") {
-            try { lib.requestLoadEntry(job.id); out.ok = true } catch (e) { out.error = String(e) }
+        if (job.op === "import") {
+            var imp = xoImporter()
+            if (!imp) out.error = "找不到导入器 (DocumentImporter)"
+            else try { imp.importFromUrls([localFileUrl(job.path)], job.parent || ""); out.ok = true } catch (e) { out.error = String(e) }
+        } else if (job.op === "load") {
+            var lib = findXoLibrary()
+            if (!lib) out.error = "找不到文件库对象 (CalendarActions.library)"
+            else try { lib.requestLoadEntry(job.id); out.ok = true } catch (e) { out.error = String(e) }
         } else out.error = "不认识的操作: " + job.op
         console.warn("[space] 文件库 " + job.op + " " + job.id + " → " + (out.ok ? "ok" : out.error))
         request("POST", baseUrl + "/space/library/done", out, null)

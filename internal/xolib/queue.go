@@ -9,13 +9,21 @@ import (
 	"time"
 )
 
-// 交给 xochitl 里的「空间」外壳去做的操作。现在只有 load, 以后的建文件夹 / 建笔记本 /
-// 按 ID 打开也走这里 —— 外壳认识的 op 才会做, 不认识的回报失败。
-const OpLoad = "load"
+// 交给 xochitl 里的「空间」外壳去做的操作 —— 外壳认识的 op 才会做, 不认识的回报失败。
+//
+//	load   文件已经写进数据目录, 让文件库加载这个 uuid (Library.requestLoadEntry, 3.28 及以前)
+//	import 文件放在暂存目录 Path, 让系统导入器复制进文件库 (DocumentImporter.importFromUrls,
+//	       3.29 起: 文件库对 QML 只剩只读的 LibraryFacade, requestLoadEntry 没了)
+const (
+	OpLoad   = "load"
+	OpImport = "import"
+)
 
 type Job struct {
-	Op string `json:"op"`
-	ID string `json:"id"`
+	Op     string `json:"op"`
+	ID     string `json:"id"`
+	Path   string `json:"path,omitempty"`   // import: 暂存文件, 文件名就是文件库里的显示名
+	Parent string `json:"parent,omitempty"` // import: 放进哪个文件夹, 空 = 根目录
 	// NotBefore: 做失败的活要等一阵再给外壳, 否则「取 → 失败 → 立刻排回 → 立刻再取」空转
 	NotBefore time.Time `json:"notBefore,omitzero"`
 }
@@ -43,13 +51,15 @@ type Queue struct {
 	wake     chan struct{}
 	waiters  map[string][]chan Result
 	lastSeen time.Time
-	polling  int  // 正挂着的长连接数
-	closed   bool // 外壳主动说了「我关了」
+	polling  int            // 正挂着的长连接数
+	closed   bool           // 外壳主动说了「我关了」
+	importer bool           // 外壳说这台固件要走导入器 (3.29 起)
+	inflight map[string]Job // 已交给外壳、还没回报的活 —— 失败时按原样排回
 	now      func() time.Time
 }
 
 func NewQueue(file string) *Queue {
-	q := &Queue{file: file, wake: make(chan struct{}), waiters: map[string][]chan Result{}, now: time.Now}
+	q := &Queue{file: file, wake: make(chan struct{}), waiters: map[string][]chan Result{}, inflight: map[string]Job{}, now: time.Now}
 	if file != "" {
 		if b, err := os.ReadFile(file); err == nil {
 			_ = json.Unmarshal(b, &q.pending)
@@ -99,10 +109,11 @@ func (q *Queue) Next(ctx context.Context, wait time.Duration) []Job {
 		if len(ready) > 0 {
 			q.pending = later
 			q.saveLocked()
-			q.mu.Unlock()
 			for i := range ready {
 				ready[i].NotBefore = time.Time{}
+				q.inflight[ready[i].ID] = ready[i]
 			}
+			q.mu.Unlock()
 			return ready
 		}
 		left := deadline.Sub(now)
@@ -128,11 +139,18 @@ func (q *Queue) Next(ctx context.Context, wait time.Duration) []Job {
 	}
 }
 
-// Done 收外壳的回报。失败的 load 重新排回去 (下次打开空间再试), 并通知等结果的人。
+// Done 收外壳的回报。失败的重新排回去 (过 RetryDelay 再试), 并通知等结果的人。
+// 导入器模式下失败的 load 不再排回: 这台固件做不了 load, 条目已在盘上, xochitl 重启时自己会读到。
 func (q *Queue) Done(r Result) {
 	q.mu.Lock()
-	if !r.OK && r.Op == OpLoad {
-		q.pending = append(q.pending, Job{Op: r.Op, ID: r.ID, NotBefore: q.now().Add(RetryDelay)})
+	j, ok := q.inflight[r.ID]
+	delete(q.inflight, r.ID)
+	if !ok {
+		j = Job{Op: r.Op, ID: r.ID}
+	}
+	if !r.OK && (j.Op == OpImport || (j.Op == OpLoad && !q.importer)) {
+		j.NotBefore = q.now().Add(RetryDelay)
+		q.pending = append(q.pending, j)
 		q.saveLocked()
 	}
 	ws := q.waiters[r.ID]
@@ -169,6 +187,35 @@ func (q *Queue) Wait(id string, timeout time.Duration) (Result, bool) {
 		q.mu.Unlock()
 		return Result{}, false
 	}
+}
+
+// SetImporter 记下外壳报的模式。从 load 切到 import 时, 用 convert 改写还没做成的 load
+// (比如升级到 3.29 之前上传、一直加载不了的文档); convert 返回 false 的 load 直接丢掉。
+func (q *Queue) SetImporter(on bool, convert func(*Job) bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if on == q.importer {
+		return
+	}
+	q.importer = on
+	if !on {
+		return
+	}
+	kept := q.pending[:0]
+	for _, j := range q.pending {
+		if j.Op != OpLoad || convert(&j) {
+			kept = append(kept, j)
+		}
+	}
+	q.pending = kept
+	q.saveLocked()
+}
+
+// Importer 外壳最近一次报的是不是导入器模式。
+func (q *Queue) Importer() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.importer
 }
 
 // Close 外壳关闭时调: 立刻算作「空间关了」, 不必等 ActiveWindow 过期。
