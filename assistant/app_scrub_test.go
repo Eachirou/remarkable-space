@@ -33,7 +33,7 @@ func TestScrubURL(t *testing.T) {
 // 日志行过滤了, 返回值没过滤, 等于白过滤。
 func TestDownloadBundleErrorHasNoURL(t *testing.T) {
 	a := &App{}
-	_, err := a.DownloadBundle([]string{"https://example.invalid/space/space-bundle.zip"}, "", "")
+	_, err := a.DownloadBundle([]string{"https://example.invalid/space/space-bundle.zip"}, "")
 	if err == nil {
 		t.Fatal("指向不存在的主机, 应当报错")
 	}

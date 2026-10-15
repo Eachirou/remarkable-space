@@ -12,21 +12,19 @@ ANDROID_DIR ?= ../../paper-move-android/android-bundle
 RMKIT_REPO ?= ../../rmkit-cn
 VERSION ?= $(shell git -C .. describe --tags --always 2>/dev/null || echo dev)
 BUILD_TIME := $(shell date +%Y-%m-%d\ %H:%M)
-# 发布: 先 make bundle 出安装包, 再 make build-mac / build-win —— 助手里会写死这个安装包的
-# sha256 和发布标签 (RELEASE_TAG, 默认 = VERSION), 下载后对不上就不装。
+# 助手只写死发布标签 (RELEASE_TAG, 默认 = VERSION), 按标签去下同版本的安装包; 不再写死整包
+# sha256 —— 同一版本里替换安装包, 已经发出去的助手照样能用。下坏的包由包内逐文件校验拦下。
 # 国内镜像地址放在不进仓库的 assistant/.cn-mirror (一行, 如 http://x.x.x.x/space/)
 RELEASE_TAG ?= $(VERSION)
-SPACE_SHA := $(shell [ -f dist/space-bundle.zip ] && shasum -a 256 dist/space-bundle.zip | cut -d' ' -f1)
 CN_MIRROR ?= $(strip $(shell cat .cn-mirror 2>/dev/null))
 # Android 包 (几百 MB, 几个月才变一次) 不跟着每版重传: ANDROID_TAG 是它放在哪个发布标签下
-# (GitHub Release 与国内镜像同名目录), ANDROID_SHA 是它的 sha256, ANDROID_VER 是包里 manifest
-# 的版本 (和设备上记的比, 判断「已是最新」)。换了 Android 包就把新包传到当次发布, 再改这三个值。
+# (GitHub Release 与国内镜像同名目录), ANDROID_VER 是包里 manifest
+# 的版本 (和设备上记的比, 判断「已是最新」)。换了 Android 包就把新包传到当次发布, 再改这两个值。
 ANDROID_TAG ?= v1.0.0
-ANDROID_SHA ?= e3e2ec81916f0984b490c1b135c919c20f5aa53af2f6b3d691f5fd3de21f0453
 ANDROID_VER ?= v1.2.1-23-g288baa3
 LDFLAGS := -X main.version=$(VERSION) -X "main.buildTime=$(BUILD_TIME)" \
-	-X main.releaseTag=$(RELEASE_TAG) -X main.spaceSHA=$(SPACE_SHA) -X main.cnMirror=$(CN_MIRROR) \
-	-X main.androidTag=$(ANDROID_TAG) -X main.androidSHA=$(ANDROID_SHA) -X main.androidVer=$(ANDROID_VER)
+	-X main.releaseTag=$(RELEASE_TAG) -X main.cnMirror=$(CN_MIRROR) \
+	-X main.androidTag=$(ANDROID_TAG) -X main.androidVer=$(ANDROID_VER)
 
 .PHONY: bundle bundle-android build-mac build-win cli dev vet
 

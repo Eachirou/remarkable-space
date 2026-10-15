@@ -40,13 +40,13 @@ const state = {
 }
 
 // 安装包两处都有: GitHub Release (仓库公开) 和国内镜像 (GitHub 在国内常下不动)。用户在设置里
-// 选先从哪下, 下不动自动换另一处。每版助手写死配套安装包的标签和 sha256 (构建时注入, 见
-// Makefile), 下完对不上就不装 —— 国内镜像走明文 http 也不怕被换包。
+// 选先从哪下, 下不动自动换另一处。每版助手只写死配套的发布标签 (构建时注入, 见 Makefile),
+// 不写死整包 sha256: 同版本替换安装包时, 已经发出去的助手照样能下能装。
 // Android 包几个月才变一次, 不跟着每版重传, 单独记它放在哪个发布标签下 (androidTag)。
 // 自己的服务器 (boangs.com) 留作最后的后备: 旧版助手只认那里。
 type Source = 'cn' | 'github'
-type Release = { tag: string; spaceSha: string; cnBase: string; androidTag: string; androidSha: string; androidVer: string }
-let release: Release = { tag: '', spaceSha: '', cnBase: '', androidTag: '', androidSha: '', androidVer: '' }
+type Release = { tag: string; cnBase: string; androidTag: string; androidVer: string }
+let release: Release = { tag: '', cnBase: '', androidTag: '', androidVer: '' }
 const GITHUB = 'https://github.com/boangs/remarkable-space/releases/'
 const OWN_SERVER = 'https://boangs.com/space/'
 const BUNDLE_NAME: Record<Action, string> = { space: 'space-bundle.zip', android: 'android-rmppm-bundle.zip' }
@@ -59,7 +59,6 @@ function bundleURLs(a: Action): string[] {
   if (a === 'android') order.push(OWN_SERVER + name)
   return order.filter((u) => u !== '')
 }
-const bundleSHA = (a: Action) => (a === 'space' ? release.spaceSha : release.androidSha)
 const COMPONENT: Record<Action, string> = { space: 'space', android: 'android-rmppm' }
 const APPROX: Record<Action, string> = { space: '约 135 MB', android: '约 600 MB' }
 const LABEL: Record<Action, string> = { space: '空间', android: 'Android' }
@@ -378,7 +377,7 @@ async function runAction(a: Action) {
   if (!have()) {
     await guarded(a, async () => {
       try {
-        state.bundles[a] = (await DownloadBundle(bundleURLs(a), bundleSHA(a), state.proxy)) as BundleInfo
+        state.bundles[a] = (await DownloadBundle(bundleURLs(a), state.proxy)) as BundleInfo
       } catch (e) {
         // 下不动的时候才提代理。探测到系统代理就告诉他可以去「设置」里填上再试。
         if (!state.proxy) {

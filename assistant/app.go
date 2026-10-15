@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -97,18 +95,16 @@ func (a *App) Version() string {
 
 // ReleaseInfo 这一版助手配套的空间安装包从哪下、怎么验。
 type ReleaseInfo struct {
-	Tag      string `json:"tag"`      // 发布标签; 空 = 开发版 (下 latest, 不验 sha)
-	SpaceSHA string `json:"spaceSha"` // 空间安装包整包 sha256
-	CNBase   string `json:"cnBase"`   // 国内镜像的根地址 (以 / 结尾); 空 = 没有国内镜像
-	// Android 包所在的发布标签 (GitHub Release / 国内镜像目录) 与整包 sha256
+	Tag    string `json:"tag"`    // 发布标签; 空 = 开发版 (下 latest)
+	CNBase string `json:"cnBase"` // 国内镜像的根地址 (以 / 结尾); 空 = 没有国内镜像
+	// Android 包所在的发布标签 (GitHub Release / 国内镜像目录)
 	AndroidTag string `json:"androidTag"`
-	AndroidSHA string `json:"androidSha"`
 	AndroidVer string `json:"androidVer"`
 }
 
 // Release 给前端拼下载地址用。
 func (a *App) Release() ReleaseInfo {
-	return ReleaseInfo{Tag: releaseTag, SpaceSHA: spaceSHA, CNBase: cnMirror, AndroidTag: androidTag, AndroidSHA: androidSHA, AndroidVer: androidVer}
+	return ReleaseInfo{Tag: releaseTag, CNBase: cnMirror, AndroidTag: androidTag, AndroidVer: androidVer}
 }
 
 // LogDir 返回审计日志目录。
@@ -328,16 +324,17 @@ func (a *App) OpenBundle(path string) (*BundleInfo, error) {
 func (a *App) DetectProxy() string { return netx.DetectProxy() }
 
 // DownloadBundle 从 URL 下载安装包到本机缓存目录 (进度走事件 "progress"), 然后打开校验。
-// proxy 为空则直连; 可选 sha256 与整个 zip 比对 (Release 页公布的值)。
+// proxy 为空则直连。不比对整包 sha256 (同版本会替换安装包); 下坏的包由 OpenBundle 的
+// 逐文件校验拦下。
 // 多个地址按顺序试, 前一个不行再换下一个。GitHub 在国内常连不上, 而自建服务器
 // 带宽有限 —— 两头都留着, 谁通用谁。
-func (a *App) DownloadBundle(urls []string, sha, proxy string) (*BundleInfo, error) {
+func (a *App) DownloadBundle(urls []string, proxy string) (*BundleInfo, error) {
 	if len(urls) == 0 {
 		return nil, errors.New("没有可用的下载地址")
 	}
 	var lastErr error
 	for i, u := range urls {
-		b, err := a.downloadOne(u, sha, proxy)
+		b, err := a.downloadOne(u, proxy)
 		if err == nil {
 			return b, nil
 		}
@@ -397,7 +394,7 @@ func scrubErr(err error, urls []string) string {
 
 var urlInErr = regexp.MustCompile(`https?://[^\s"]+`)
 
-func (a *App) downloadOne(url, sha, proxy string) (*BundleInfo, error) {
+func (a *App) downloadOne(url, proxy string) (*BundleInfo, error) {
 	dir, _ := os.UserCacheDir()
 	dir = filepath.Join(dir, "space-assistant")
 	_ = os.MkdirAll(dir, 0o755)
@@ -441,19 +438,14 @@ func (a *App) downloadOne(url, sha, proxy string) (*BundleInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := sha256.New()
 	pw := &progressWriter{total: resp.ContentLength, emit: func(done, total int64) {
 		runtime.EventsEmit(a.ctx, "progress", map[string]int64{"done": done, "total": total})
 	}}
-	_, err = io.Copy(io.MultiWriter(f, h, pw), resp.Body)
+	_, err = io.Copy(io.MultiWriter(f, pw), resp.Body)
 	_ = f.Close()
 	if err != nil {
 		_ = os.Remove(dst + ".part")
 		return nil, fmt.Errorf("下载中断: %w", err)
-	}
-	if sha != "" && !strings.EqualFold(hex.EncodeToString(h.Sum(nil)), strings.TrimSpace(sha)) {
-		_ = os.Remove(dst + ".part")
-		return nil, errors.New("下载文件 sha256 与给定值不符, 已丢弃")
 	}
 	if err := os.Rename(dst+".part", dst); err != nil {
 		return nil, err

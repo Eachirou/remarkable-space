@@ -21,14 +21,12 @@ var (
 	version   = "dev"
 	buildTime = ""
 	// 这一版助手配套的空间安装包: 发布标签 (GitHub Release 与国内镜像的目录都按它分),
-	// 安装包的 sha256 (下载后必须对上, 国内镜像走明文 http 也不怕被换包),
-	// 国内镜像地址 (放在不进仓库的 .cn-mirror 里, 源码公开也不写死)
+	// 国内镜像地址 (放在不进仓库的 .cn-mirror 里, 源码公开也不写死)。
+	// 不写死整包 sha256: 同版本替换安装包时, 已发出去的助手不能因此失效。
 	releaseTag = ""
-	spaceSHA   = ""
 	cnMirror   = ""
-	// Android 包几个月才变一次, 不跟着每版重传: 单独记它放在哪个发布标签下, 和它的 sha256
+	// Android 包几个月才变一次, 不跟着每版重传: 单独记它放在哪个发布标签下
 	androidTag = ""
-	androidSHA = ""
 	androidVer = "" // Android 安装包 manifest 里的版本 (和设备上 .android_version 比, 判断要不要更新)
 )
 
