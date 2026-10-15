@@ -138,6 +138,7 @@ type Entry struct {
 	ID          string `json:"uuid"`
 	VisibleName string `json:"name"`
 	Type        string `json:"type"` // pdf / epub
+	loaded      bool   // 已经由系统建好 (导入器模式), 不用再等 load 回报
 }
 
 // ImportDocument 把一份 PDF / EPUB 写进文件库并排队通知。parent 为空 = 「我的文件」根目录。

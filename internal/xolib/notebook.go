@@ -1,13 +1,63 @@
 package xolib
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
+	"time"
 )
+
+// ErrShellClosed 导入器模式下建文件夹 / 笔记本要外壳来做, 空间没开或没回报。
+var ErrShellClosed = errors.New("空间没有打开, 建不了")
+
+// createViaShell 导入器模式 (3.29 起): 让外壳调 LibraryController 建, 等它回报系统给的 uuid。
+func (l *Library) createViaShell(op, name, parent string) (string, error) {
+	key, err := newUUID()
+	if err != nil {
+		return "", err
+	}
+	l.Queue.Enqueue(Job{Op: op, ID: key, Name: name, Parent: parent})
+	res, ok := l.Queue.Wait(key, LoadWait)
+	if !ok {
+		l.Queue.Drop(key)
+		return "", ErrShellClosed
+	}
+	if !res.OK || res.NewID == "" {
+		return "", fmt.Errorf("系统没建成: %s", res.Error)
+	}
+	return res.NewID, nil
+}
+
+// firstPageID 读系统建好的笔记本的第一页 ID。.content 是系统异步写的, 等一会儿。
+func (l *Library) firstPageID(id string) (string, error) {
+	var c struct {
+		CPages struct {
+			Pages []struct{ ID string } `json:"pages"`
+		} `json:"cPages"`
+	}
+	for i := 0; i < 20; i++ {
+		if b, err := os.ReadFile(filepath.Join(l.Dir, id+".content")); err == nil &&
+			json.Unmarshal(b, &c) == nil && len(c.CPages.Pages) > 0 && c.CPages.Pages[0].ID != "" {
+			return c.CPages.Pages[0].ID, nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return "", fmt.Errorf("笔记本 %s 建好了但读不到页", id)
+}
 
 // CreateFolder 建一个文件夹 (文件库里的 CollectionType 条目), parent 为空 = 根目录。
 // 文件夹在磁盘上只是两份 JSON, 不是目录; 写完排队让文件库加载。
 func (l *Library) CreateFolder(name, parent string) (Entry, error) {
+	if l.Queue.Importer() {
+		id, err := l.createViaShell(OpFolder, name, parent)
+		if err != nil {
+			return Entry{}, err
+		}
+		return Entry{ID: id, VisibleName: name, Type: "folder", loaded: true}, nil
+	}
 	id, err := newUUID()
 	if err != nil {
 		return Entry{}, err
@@ -42,7 +92,23 @@ type Notebook struct {
 // hidden: 写 "deleted": true。注意 3.28 不认它 (照样显示, 3.5 起删除改用 .tombstone);
 // 想藏起来要 parent = "trash" —— 回收站里的笔记本照样能在后台打开写入 (手写载体就这么用,
 // 见应用仓库 lib/ink)。
+//
+// 导入器模式 (3.29 起) 由系统建: 模板用系统默认 (template 不生效), hidden 直接建进回收站。
 func (l *Library) CreateNotebook(name, parent, template string, hidden bool) (Notebook, error) {
+	if l.Queue.Importer() {
+		if hidden {
+			parent = "trash"
+		}
+		id, err := l.createViaShell(OpNotebook, name, parent)
+		if err != nil {
+			return Notebook{}, err
+		}
+		pid, err := l.firstPageID(id)
+		if err != nil {
+			return Notebook{}, err
+		}
+		return Notebook{Entry: Entry{ID: id, VisibleName: name, Type: "notebook", loaded: true}, PageID: pid}, nil
+	}
 	id, err := newUUID()
 	if err != nil {
 		return Notebook{}, err

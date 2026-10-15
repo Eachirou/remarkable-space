@@ -33,8 +33,12 @@ func (l *Library) Mount(mux *http.ServeMux) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
-		res, ok := l.Queue.Wait(e.ID, LoadWait)
-		writeJSON(w, http.StatusOK, map[string]any{"entry": e, "loaded": ok && res.OK})
+		loaded := e.loaded
+		if !loaded {
+			res, ok := l.Queue.Wait(e.ID, LoadWait)
+			loaded = ok && res.OK
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"entry": e, "loaded": loaded})
 	})
 	mux.HandleFunc("POST /space/library/notebook", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -50,8 +54,12 @@ func (l *Library) Mount(mux *http.ServeMux) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
-		res, ok := l.Queue.Wait(nb.ID, LoadWait)
-		writeJSON(w, http.StatusOK, map[string]any{"notebook": nb, "loaded": ok && res.OK})
+		loaded := nb.loaded
+		if !loaded {
+			res, ok := l.Queue.Wait(nb.ID, LoadWait)
+			loaded = ok && res.OK
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"notebook": nb, "loaded": loaded})
 	})
 	mux.HandleFunc("GET /space/library/next", func(w http.ResponseWriter, r *http.Request) {
 		wait := 25 * time.Second

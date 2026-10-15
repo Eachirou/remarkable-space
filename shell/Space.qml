@@ -839,6 +839,7 @@ Rectangle {
     // 并在取活时报 mode=import, 服务端就把文档放进暂存目录交给导入器。3.28 及以前不碰导入器。
     property var xoLibrary: null
     property var xoImporterHolder: null
+    property var xoCtrlHolder: null
     property string libMode: ""
     property var libXhr: null
     property bool libOn: false
@@ -868,6 +869,18 @@ Rectangle {
         }
         var v = xoImporterHolder.v
         return (v && typeof v.importFromUrls === "function") ? v : null
+    }
+    // 3.29 起建文件夹 / 笔记本也交给系统: LibraryController.createCollection(上级, 名字) /
+    // createDocument(上级, 名字), 返回新条目的 entry::Id (String() 即 uuid)
+    function xoController() {
+        if (!xoCtrlHolder) {
+            try {
+                xoCtrlHolder = Qt.createQmlObject('import QtQml; import xofm.libs.library; QtObject { property var v: LibraryController }', space, "xoCtrl")
+            } catch (e) {
+                return null
+            }
+        }
+        return xoCtrlHolder.v || null
     }
     // 文件库对象找到之后才定模式: 有 requestLoadEntry 就是 load (3.28 及以前), 否则有导入器就是 import
     function detectLibMode() {
@@ -928,6 +941,16 @@ Rectangle {
             var imp = xoImporter()
             if (!imp) out.error = "找不到导入器 (DocumentImporter)"
             else try { imp.importFromUrls([localFileUrl(job.path)], job.parent || ""); out.ok = true } catch (e) { out.error = String(e) }
+        } else if (job.op === "folder" || job.op === "notebook") {
+            var ctrl = xoController()
+            if (!ctrl) out.error = "找不到 LibraryController"
+            else try {
+                var nid = job.op === "folder" ? ctrl.createCollection(job.parent || "", job.name)
+                                              : ctrl.createDocument(job.parent || "", job.name)
+                out.newId = nid ? String(nid) : ""
+                out.ok = out.newId !== ""
+                if (!out.ok) out.error = "没有返回新条目"
+            } catch (e) { out.error = String(e) }
         } else if (job.op === "load") {
             var lib = findXoLibrary()
             if (!lib) out.error = "找不到文件库对象 (CalendarActions.library)"

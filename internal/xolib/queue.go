@@ -14,16 +14,21 @@ import (
 //	load   文件已经写进数据目录, 让文件库加载这个 uuid (Library.requestLoadEntry, 3.28 及以前)
 //	import 文件放在暂存目录 Path, 让系统导入器复制进文件库 (DocumentImporter.importFromUrls,
 //	       3.29 起: 文件库对 QML 只剩只读的 LibraryFacade, requestLoadEntry 没了)
+//	folder / notebook  3.29 起建文件夹 / 笔记本: 让 LibraryController.createCollection /
+//	       createDocument 建, 回报里的 newId 是系统给的 uuid (盘上写文件再 load 这条路走不通了)
 const (
-	OpLoad   = "load"
-	OpImport = "import"
+	OpLoad     = "load"
+	OpImport   = "import"
+	OpFolder   = "folder"
+	OpNotebook = "notebook"
 )
 
 type Job struct {
 	Op     string `json:"op"`
 	ID     string `json:"id"`
 	Path   string `json:"path,omitempty"`   // import: 暂存文件, 文件名就是文件库里的显示名
-	Parent string `json:"parent,omitempty"` // import: 放进哪个文件夹, 空 = 根目录
+	Parent string `json:"parent,omitempty"` // import / folder / notebook: 放进哪个文件夹, 空 = 根目录
+	Name   string `json:"name,omitempty"`   // folder / notebook: 显示名
 	// NotBefore: 做失败的活要等一阵再给外壳, 否则「取 → 失败 → 立刻排回 → 立刻再取」空转
 	NotBefore time.Time `json:"notBefore,omitzero"`
 }
@@ -36,6 +41,7 @@ type Result struct {
 	ID    string `json:"id"`
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+	NewID string `json:"newId,omitempty"` // folder / notebook: 系统建出来的 uuid
 }
 
 // ActiveWindow: 外壳最后一次来取活之后这么久内, 算「空间开着」。外壳的长连接 25 秒一轮,
@@ -204,6 +210,20 @@ func (q *Queue) SetImporter(on bool, convert func(*Job) bool) {
 	kept := q.pending[:0]
 	for _, j := range q.pending {
 		if j.Op != OpLoad || convert(&j) {
+			kept = append(kept, j)
+		}
+	}
+	q.pending = kept
+	q.saveLocked()
+}
+
+// Drop 撤掉一条还没交出去的活 (等不到外壳时用, 免得空间下次打开又建一遍)。
+func (q *Queue) Drop(id string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	kept := q.pending[:0]
+	for _, j := range q.pending {
+		if j.ID != id {
 			kept = append(kept, j)
 		}
 	}

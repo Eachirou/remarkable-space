@@ -287,3 +287,35 @@ func TestSwitchToImporterConvertsStuckLoads(t *testing.T) {
 		t.Fatal("导入器模式下 load 失败不该重试", j)
 	}
 }
+
+// 3.29: 建文件夹 / 笔记本交给外壳, 拿系统给的 uuid; 笔记本页 ID 从系统写的 .content 读。
+func TestImporterModeCreatesViaShell(t *testing.T) {
+	dir := t.TempDir()
+	l := New(dir, "")
+	l.SetImporter(true)
+	go func() {
+		for i := 0; i < 2; i++ {
+			jobs := l.Queue.Next(context.Background(), time.Second)
+			for _, j := range jobs {
+				switch j.Op {
+				case OpFolder:
+					l.Queue.Done(Result{Op: j.Op, ID: j.ID, OK: j.Name == "资料" && j.Parent == "p", NewID: "f-1"})
+				case OpNotebook:
+					os.WriteFile(filepath.Join(dir, "n-1.content"), []byte(`{"cPages":{"pages":[{"id":"pg-1"}]}}`), 0o644)
+					l.Queue.Done(Result{Op: j.Op, ID: j.ID, OK: j.Parent == "trash", NewID: "n-1"})
+				}
+			}
+		}
+	}()
+	f, err := l.CreateFolder("资料", "p")
+	if err != nil || f.ID != "f-1" || !f.loaded {
+		t.Fatal("文件夹", f, err)
+	}
+	nb, err := l.CreateNotebook("载体", "", "", true)
+	if err != nil || nb.ID != "n-1" || nb.PageID != "pg-1" {
+		t.Fatal("笔记本", nb, err)
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 1 {
+		t.Fatal("导入器模式不该自己写文件", ents)
+	}
+}
