@@ -18,6 +18,15 @@ Rectangle {
     visible: true
     z: 99999
 
+    // 触摸拦截层 (必须是第一个子项, 压在所有内容底下)。
+    // 外壳挂在 MainView 上, 底下就是 xochitl 自己那个全屏 MouseArea + MultiPointTouchArea
+    // (文件库、侧栏都在里面)。Rectangle 本身不收触摸, 点在空白处 (标题行、边距、应用自己
+    // 没铺 MouseArea 的地方) 的手指会穿过外壳落到文件库格子上, 悄悄打开一本书, 被外壳
+    // 盖着看不见, 退出空间才露出来 —— 用户看到的就是"退出后莫名打开一本不是上次看的书"。
+    // 两层都要: MouseArea 接合成鼠标 (第一指 / 笔), MultiPointTouchArea 接多指触摸。
+    MouseArea { anchors.fill: parent; onPressed: (mouse) => { mouse.accepted = true } }
+    MultiPointTouchArea { anchors.fill: parent; mouseEnabled: false }
+
     // 2: 文件库桥 (/space/library/*: 热导入、建文件夹/笔记本, 外壳调 requestLoadEntry)。
     //    用到它的应用 (如手写画布 lib/ink) 在 manifest 里写 min_shell: 2
     readonly property int shellVersion: 2
