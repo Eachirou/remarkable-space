@@ -1,5 +1,7 @@
 # reMarkable 空间 (SPACE)
 
+中文 · [English](README.en.md)
+
 「空间」是 reMarkable 上的应用桌面：首页卡片一眼看到今日计划、天气和正在播放的音乐，
 应用从商店一键安装、随时卸载，不改动系统文件。
 
