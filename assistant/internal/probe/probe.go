@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/boangs/remarkable-space/assistant/internal/i18n"
 	"github.com/boangs/remarkable-space/assistant/internal/sshx"
 )
 
@@ -139,9 +140,9 @@ func classify(dtModel, res, arch string) (string, string) {
 		return "rmppm", "reMarkable Paper Pro Move"
 	}
 	if arch == "armv7l" {
-		return "unknown", "未知型号 (armv7l, " + res + ")"
+		return "unknown", i18n.T("未知型号", "Unknown model") + " (armv7l, " + res + ")"
 	}
-	return "unknown", "未知型号 (" + res + ")"
+	return "unknown", i18n.T("未知型号", "Unknown model") + " (" + res + ")"
 }
 
 func atoi(s string) int {

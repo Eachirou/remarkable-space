@@ -2,9 +2,9 @@ import './style.css'
 import { deviceArt } from './device'
 import {
   Connect, Disconnect, Probe, ChooseBundle, DownloadBundle, PlanSpace, RunSpace, UninstallSpace,
-  PlanAndroid, RunAndroid, UninstallAndroid, BootAndroid, ReturnToStock, ResetAndroidData, ChooseAPKs, InstallAPKs, Cancel, EmergencyRepair, ExportDiagnostics, OpenLogDir, LogDir, DetectProxy, Confirm, LoadPassword, ForgetPassword, DiagnoseAndroid, Version, RepairPanel, Release,
+  PlanAndroid, RunAndroid, UninstallAndroid, BootAndroid, ReturnToStock, ResetAndroidData, ChooseAPKs, InstallAPKs, Cancel, EmergencyRepair, ExportDiagnostics, OpenLogDir, LogDir, DetectProxy, Confirm, LoadPassword, ForgetPassword, DiagnoseAndroid, Version, RepairPanel, Release, SetLanguage,
 } from '../wailsjs/go/main/App'
-import { EventsOn } from '../wailsjs/runtime/runtime'
+import { EventsOn, WindowSetTitle } from '../wailsjs/runtime/runtime'
 
 // 与 Go 端结构一一对应 (wailsjs/go/models.ts 里也有生成的类型, 这里只声明用到的字段)
 type Info = {
@@ -20,6 +20,157 @@ type SpacePlan = { arch: string; fwVersion: string; needXovi: boolean; deployRim
 type AndroidPlan = { fwVersion: string; slot: string; hasSystemPkg: boolean; replaceSystem: boolean; systemPresent: boolean; files: string[]; totalBytes: number; warnings: string[]; blockers: string[] }
 
 type Action = 'space' | 'android'
+
+// —— 文案: 中英各一份, 键名相同 ——————————————————————————
+// 界面语言按系统语言定 (中文系统用中文, 其余英文), 设置里可以改。Go 端的日志、错误和
+// 设备端脚本的输出也跟着这个开关走 (SetLanguage)。{0} {1} 是占位符。
+type Lang = 'zh' | 'en'
+const DICT = {
+  zh: {
+    title: '空间助手', settings: '设置',
+    connect_h2: '用 USB 线把设备连上', ssh_pw: 'SSH 密码', pw_ph: '在设备上查', connect: '连接',
+    pw_note: '密码在设备的 设置 → 帮助 → 版权与许可 最底部。',
+    pw_tip: '用 USB 线连上后设备默认地址就是 10.11.99.1。Windows 首次连接可能要先装 reMarkable 的 USB 网卡驱动。Android 模式下的密码和 reMarkable 系统的一样。',
+    remember: '记住密码', remember_ssh: '记住 SSH 密码',
+    remember_tip: '存进系统钥匙串（Mac 钥匙串 / Windows 凭据管理器），不写进任何文件。',
+    cant_connect: '连不上', host: '地址', forget_pw: '忘记已存的密码',
+    wont_boot: '设备起不来',
+    rescue_note: '卡在开机画面、反复重启时用。填好上面的 SSH 密码，点「紧急修复」，保持 USB 连着并让设备开机或重启；助手会一直尝试连接，一连上就停用中文、空间等全部增强，让设备以原厂状态启动。之后可以用助手重新安装。',
+    rescue: '紧急修复',
+    firmware: '固件', unknown: '未知', arch: '架构', slot: '启动槽', errcnt: '错误计数', no_slot: '该机型无 A/B 槽',
+    free: '剩余空间', sys_part: '系统分区',
+    connected: '已连接，', in_android: '当前在 Android', rm_running: 'reMarkable 系统运行中', rm_not_running: 'reMarkable 系统未运行',
+    direct_tip: 'USB 线直连，不经过服务器，不读取你的笔记。',
+    reprobe: '重新检测', disconnect: '断开', export_diag: '导出诊断',
+    export_tip: '设备切槽、开不了机、空间突然没了时用：只读收集版本、启动配置和最近几次开机的系统日志，存成一个文件发给开发者。不收集笔记和账号信息。',
+    space: '空间', update: '更新', reinstall: '重新安装', install: '安装',
+    installed: '已安装', up_to_date: '已是最新', can_update: '可更新到', not_installed: '未安装，下载 {0}',
+    approx_space: '约 135 MB', approx_android: '约 600 MB',
+    dl_update: '下载并更新', dl_install: '下载并安装',
+    space_desc: '中文界面、输入法、应用商店', android_desc: '双系统启动，开机时选进哪一个',
+    bundle: '安装包', uninstall: '卸载', from_local: '从本地安装',
+    replace_sys: '覆盖已有系统', replace_tip: '重新解包 Android 系统到 /home，应用数据目录不受影响。',
+    details: '详情',
+    safety_space: '写入前会按你的固件重新生成注入表，全部命中才动系统配置；启动后观察 10 秒，任一步不对自动退回出厂启动。',
+    safety_android: '出厂内核链接不动，Android 系统与数据都在 /home，重启不切槽。',
+    choose_bundle: '选择本地安装包', preview_plan: '预览将写入的内容', maintain: '维护',
+    repair_btn: '恢复侧栏入口', repair_tip: '侧栏入口或中文突然消失时用：清除防砖熔断并重启一次 xochitl',
+    switch_sys: '切换系统', boot_android: '重启进 Android', back_stock: '回 reMarkable 系统',
+    need_android: '需要设备在 Android 模式', install_apk: '安装 APK', boot_diag: '启动诊断',
+    reset_data: '重置数据', reset_tip: '清空 Android 的应用与设置，下次进 Android 重新首次开机',
+    remove_data: '连数据一起删', remove_tip: '卸载时连同 /home 里的 Android 系统与应用数据一起删除，不勾选则只移除启动组件。',
+    log: '日志', cancel: '取消', open_logdir: '打开日志目录',
+    dl_source: '下载来源', dl_source_tip: '先从这里下安装包，下不动会自动换另一个。两处是同一个包，下完都会校验。',
+    src_cn: '国内下载', src_gh: 'GitHub 下载',
+    proxy: '下载代理', proxy_tip: '一般不用填。两处都下不动时才需要，格式如 http://127.0.0.1:7890', proxy_ph: '一般不用填',
+    language: '语言', done: '完成',
+    f_need_xovi: '设备没有 xovi，会先自动部署', f_have_xovi: 'xovi 已在',
+    f_rime: '整句输入（librime，拼音加五笔86）', f_go_ime: '纯 Go 输入引擎（安装包无 librime）',
+    f_qml: '运行时 QML 注入', f_qmd: 'qmd 注入', f_librarian: '文件热导入 librarian', f_no_librarian: '不装 librarian（rm2）',
+    writes: '写入 <span class="qty">{0}</span> 个文件，共 {1}', writes_slot: '写入 <span class="qty">{0}</span> 个文件，共 {1}，本槽 {2}',
+    file_list: '文件清单',
+    has_sys_keep: '设备已有 Android 系统，本次不覆盖。', has_sys_extract: '包含 Android 系统包，解包到 /home。', no_sys: '安装包不含系统包，沿用设备上已有的。',
+    android_tip: '/boot 里新增 android 内核（出厂内核链接不动）、/lib/modules 新增一个模块目录、/usr/bin 四个宿主程序、/sbin/init 换成带回落的包装脚本（原链接备份为 /sbin/init.systemd-orig）',
+    proxy_detected: '检测到系统代理 {0}，若直连下不动，可在设置里填上再试',
+    confirm: '确认', what_space: '「空间」及其注入底座', what_android: '单槽 Android',
+    confirm_update: '确定要在这台设备上更新 {0} 吗？过程中请不要拔线。', confirm_install: '确定要在这台设备上安装 {0} 吗？过程中请不要拔线。',
+    read_pw: '已从钥匙串读到 {0} 的密码', forgot: '已忘记保存的密码', need_pw: '请先填 SSH 密码',
+    rescue_no_pw: '没填 SSH 密码: 设备开机早期多半只能用密码登录，建议先填上',
+    rescue_confirm: '会停用中文、空间等全部增强，让设备以原厂状态启动（笔记不受影响）。之后可以用助手重新安装。继续？',
+    wrong_bundle: '选的是「{0}」的安装包，不是{1}的',
+    uninstall_space_confirm: '确定卸载空间及其注入底座？设备会恢复出厂启动配置。',
+    uninstall_android_data: '确定卸载 Android 并删除 /home 里的系统与数据？', uninstall_android_keep: '确定卸载 Android（保留 /home 数据）？',
+    boot_android_confirm: '设备将重启进入 Android，约 1 到 3 分钟。回来时可在 Android 桌面点“原厂系统”。继续？',
+    diag_head: '—— Android 启动诊断 ——', diag_tail: '—— 诊断结束，已存进日志目录，请把该文件发给开发者 ——',
+    reset_confirm: '清空 Android 的全部应用与设置？下次进 Android 会重新首次开机（约 5 分钟）。',
+    read_saved_pw: '已从钥匙串读到保存的密码', logdir: '日志目录 {0}', version: '空间助手 {0}',
+  },
+  en: {
+    title: 'Space Assistant', settings: 'Settings',
+    connect_h2: 'Connect the device over USB', ssh_pw: 'SSH password', pw_ph: 'shown on the device', connect: 'Connect',
+    pw_note: 'The password is on the device under Settings → Help → Copyrights and licenses, at the very bottom.',
+    pw_tip: 'Over USB the device is always at 10.11.99.1. On Windows the first connection may need the reMarkable USB network driver. In Android mode the password is the same as on the reMarkable system.',
+    remember: 'Remember password', remember_ssh: 'Remember SSH password',
+    remember_tip: 'Stored in the system keychain (macOS Keychain / Windows Credential Manager), never written to a file.',
+    cant_connect: "Can't connect", host: 'Address', forget_pw: 'Forget saved password',
+    wont_boot: "Device won't boot",
+    rescue_note: 'For a device stuck on the boot screen or rebooting in a loop. Enter the SSH password above, click "Emergency repair", keep USB connected and let the device boot or reboot; the assistant keeps trying to connect and, as soon as it gets in, disables Space and every other add-on so the device boots stock. You can reinstall with the assistant afterwards.',
+    rescue: 'Emergency repair',
+    firmware: 'Firmware', unknown: 'unknown', arch: 'Architecture', slot: 'Boot slot', errcnt: 'error count', no_slot: 'no A/B slots on this model',
+    free: 'Free space', sys_part: 'system partition',
+    connected: 'Connected, ', in_android: 'now in Android', rm_running: 'reMarkable system running', rm_not_running: 'reMarkable system not running',
+    direct_tip: 'Direct USB connection, no server involved, your notes are never read.',
+    reprobe: 'Re-detect', disconnect: 'Disconnect', export_diag: 'Export diagnostics',
+    export_tip: 'For slot switches, boot failures or Space suddenly missing: collects versions, boot configuration and the last few boots\' system logs (read-only) into one file to send to the developer. No notes or account data.',
+    space: 'Space', update: 'Update', reinstall: 'Reinstall', install: 'Install',
+    installed: 'Installed', up_to_date: 'up to date', can_update: '→', not_installed: 'Not installed, downloads {0}',
+    approx_space: 'about 135 MB', approx_android: 'about 600 MB',
+    dl_update: 'Download and update', dl_install: 'Download and install',
+    space_desc: 'Home screen, app catalog, Chinese UI and input method', android_desc: 'Dual boot, pick a system at startup',
+    bundle: 'bundle', uninstall: 'Uninstall', from_local: 'Install from file',
+    replace_sys: 'Replace existing system', replace_tip: 'Re-extracts the Android system into /home; app data is untouched.',
+    details: 'Details',
+    safety_space: 'Before writing, the injection table is regenerated for your firmware and the system config is only touched if every entry matches; after start it watches for 10 s and rolls back to stock boot if anything is off.',
+    safety_android: 'The stock kernel link is untouched; the Android system and data live in /home; no slot switching.',
+    choose_bundle: 'Choose local bundle', preview_plan: 'Preview what will be written', maintain: 'Maintenance',
+    repair_btn: 'Restore sidebar entry', repair_tip: 'When the sidebar entry or Chinese UI vanishes: clears the safety fuse and restarts xochitl once',
+    switch_sys: 'Switch system', boot_android: 'Reboot into Android', back_stock: 'Back to reMarkable',
+    need_android: 'Requires the device to be in Android mode', install_apk: 'Install APK', boot_diag: 'Boot diagnostics',
+    reset_data: 'Reset data', reset_tip: 'Wipes Android apps and settings; the next Android boot is a fresh first boot',
+    remove_data: 'Also delete data', remove_tip: 'Also deletes the Android system and app data in /home on uninstall; unchecked removes only the boot components.',
+    log: 'Log', cancel: 'Cancel', open_logdir: 'Open log folder',
+    dl_source: 'Download source', dl_source_tip: 'Bundles are fetched from here first; the other source is tried automatically if it fails. Both serve the same file and it is verified after download.',
+    src_cn: 'China mirror', src_gh: 'GitHub',
+    proxy: 'Download proxy', proxy_tip: 'Usually not needed. Only if both sources fail, e.g. http://127.0.0.1:7890', proxy_ph: 'usually empty',
+    language: 'Language', done: 'Done',
+    f_need_xovi: 'No xovi on the device, it will be deployed first', f_have_xovi: 'xovi present',
+    f_rime: 'Sentence input (librime, Pinyin + Wubi86)', f_go_ime: 'Pure Go input engine (bundle has no librime)',
+    f_qml: 'Runtime QML injection', f_qmd: 'qmd injection', f_librarian: 'librarian hot import', f_no_librarian: 'librarian not installed (rm2)',
+    writes: 'Writes <span class="qty">{0}</span> files, {1} total', writes_slot: 'Writes <span class="qty">{0}</span> files, {1} total, slot {2}',
+    file_list: 'File list',
+    has_sys_keep: 'Android system already present, not replaced this time.', has_sys_extract: 'Includes the Android system package, extracted into /home.', no_sys: 'Bundle has no system package; the one on the device is kept.',
+    android_tip: 'Adds an android kernel in /boot (stock kernel link untouched), one module directory in /lib/modules, four host programs in /usr/bin, and replaces /sbin/init with a wrapper that falls back (original link backed up as /sbin/init.systemd-orig)',
+    proxy_detected: 'System proxy {0} detected; if the direct download fails, enter it in Settings and retry',
+    confirm: 'Confirm', what_space: 'Space and its injection base', what_android: 'single-slot Android',
+    confirm_update: 'Update {0} on this device? Do not unplug during the process.', confirm_install: 'Install {0} on this device? Do not unplug during the process.',
+    read_pw: 'Loaded the password for {0} from the keychain', forgot: 'Saved password forgotten', need_pw: 'Enter the SSH password first',
+    rescue_no_pw: 'No SSH password: early in boot only password login usually works, better fill it in',
+    rescue_confirm: 'This disables Space and all other add-ons so the device boots stock (notes are not affected). You can reinstall afterwards. Continue?',
+    wrong_bundle: 'That is a "{0}" bundle, not {1}',
+    uninstall_space_confirm: 'Uninstall Space and its injection base? The device returns to the stock boot configuration.',
+    uninstall_android_data: 'Uninstall Android and delete the system and data in /home?', uninstall_android_keep: 'Uninstall Android (keep /home data)?',
+    boot_android_confirm: 'The device will reboot into Android (1 to 3 minutes). To come back, tap "Stock system" on the Android home screen. Continue?',
+    diag_head: '—— Android boot diagnostics ——', diag_tail: '—— Done; saved to the log folder, please send that file to the developer ——',
+    reset_confirm: 'Wipe all Android apps and settings? The next Android boot is a fresh first boot (about 5 minutes).',
+    read_saved_pw: 'Loaded the saved password from the keychain', logdir: 'Log folder {0}', version: 'Space Assistant {0}',
+  },
+} as const
+type Key = keyof typeof DICT.zh
+
+function detectLang(): Lang {
+  try {
+    const saved = localStorage.getItem('ui.lang')
+    if (saved === 'zh' || saved === 'en') return saved
+  } catch { /* 忽略 */ }
+  return (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en'
+}
+let lang: Lang = detectLang()
+const t = (k: Key, ...args: (string | number)[]): string => {
+  let s: string = DICT[lang][k]
+  args.forEach((a, i) => { s = s.split(`{${i}}`).join(String(a)) })
+  return s
+}
+// 动词接名词: 中文不留空格 ("更新空间"), 但接英文词要留 ("更新 Android"); 英文永远留。
+const verbName = (verb: string, name: string) => lang === 'zh' ? verb + (/^[A-Za-z]/.test(name) ? ' ' : '') + name : verb + ' ' + name
+
+function applyLang(l: Lang) {
+  lang = l
+  try { localStorage.setItem('ui.lang', l) } catch { /* 忽略 */ }
+  document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en'
+  document.title = t('title')
+  try { WindowSetTitle(t('title')) } catch { /* 浏览器里预览时没有 runtime */ }
+  SetLanguage(l).catch(() => { /* 开发版 */ })
+}
 
 const state = {
   info: null as Info | null,
@@ -60,8 +211,8 @@ function bundleURLs(a: Action): string[] {
   return order.filter((u) => u !== '')
 }
 const COMPONENT: Record<Action, string> = { space: 'space', android: 'android-rmppm' }
-const APPROX: Record<Action, string> = { space: '约 135 MB', android: '约 600 MB' }
-const LABEL: Record<Action, string> = { space: '空间', android: 'Android' }
+const approx = (a: Action) => a === 'space' ? t('approx_space') : t('approx_android')
+const label = (a: Action) => a === 'space' ? t('space') : 'Android'
 
 const $ = (sel: string) => document.querySelector(sel) as HTMLElement
 const mb = (n: number) => (n / 1e6).toFixed(1) + ' MB'
@@ -87,8 +238,8 @@ function render() {
   const i = state.info
   $('#app').innerHTML = `
     <header class="masthead">
-      <h1>空间助手</h1>
-      ${i ? `<button id="btn-settings" class="icon" title="设置">${ICON.gear}</button>` : ''}
+      <h1>${t('title')}</h1>
+      ${i ? `<button id="btn-settings" class="icon" title="${t('settings')}">${ICON.gear}</button>` : ''}
     </header>
     ${i ? renderDevice(i) : renderConnect()}
     ${i ? renderItems(i) : ''}
@@ -105,29 +256,30 @@ function renderConnect() {
     <section class="stage">
       ${deviceArt({ connected: false, space: false, android: false, inAndroid: false })}
       <div class="stagebody">
-        <h2>用 USB 线把设备连上</h2>
+        <h2>${t('connect_h2')}</h2>
         <div class="field">
-          <label for="password">SSH 密码</label>
-          <input id="password" type="password" value="${esc(state.password)}" placeholder="在设备上查" autocomplete="off">
-          <button id="btn-connect" class="go">连接</button>
+          <label for="password">${t('ssh_pw')}</label>
+          <input id="password" type="password" value="${esc(state.password)}" placeholder="${t('pw_ph')}" autocomplete="off">
+          <button id="btn-connect" class="go">${t('connect')}</button>
         </div>
-        <p class="note">密码在设备的 设置 → 帮助 → 版权与许可 最底部。${tip('用 USB 线连上后设备默认地址就是 10.11.99.1。Windows 首次连接可能要先装 reMarkable 的 USB 网卡驱动。Android 模式下的密码和 reMarkable 系统的一样。')}</p>
-        <label class="opt"><input type="checkbox" id="chk-remember" ${state.remember ? 'checked' : ''}> 记住密码${tip('存进系统钥匙串（Mac 钥匙串 / Windows 凭据管理器），不写进任何文件。')}</label>
+        <p class="note">${t('pw_note')}${tip(t('pw_tip'))}</p>
+        <label class="opt"><input type="checkbox" id="chk-remember" ${state.remember ? 'checked' : ''}> ${t('remember')}${tip(t('remember_tip'))}</label>
         <details class="fallback">
-          <summary>连不上</summary>
+          <summary>${t('cant_connect')}</summary>
           <div class="field">
-            <label for="host">地址</label>
+            <label for="host">${t('host')}</label>
             <input id="host" value="10.11.99.1">
-            <button id="btn-forget" class="flat" ${state.password ? '' : 'disabled'}>忘记已存的密码</button>
+            <button id="btn-forget" class="flat" ${state.password ? '' : 'disabled'}>${t('forget_pw')}</button>
           </div>
         </details>
         <details class="fallback">
-          <summary>设备起不来</summary>
-          <p class="note">卡在开机画面、反复重启时用。填好上面的 SSH 密码，点「紧急修复」，保持 USB 连着并让设备开机或重启；助手会一直尝试连接，一连上就停用中文、空间等全部增强，让设备以原厂状态启动。之后可以用助手重新安装。</p>
+          <summary>${t('wont_boot')}</summary>
+          <p class="note">${t('rescue_note')}</p>
           <div class="field">
-            <button id="btn-rescue" class="peril" ${state.busy ? 'disabled' : ''}>紧急修复</button>
+            <button id="btn-rescue" class="peril" ${state.busy ? 'disabled' : ''}>${t('rescue')}</button>
           </div>
         </details>
+        <p class="note lang"><a href="#" id="lnk-lang">${lang === 'zh' ? 'English' : '中文'}</a></p>
       </div>
     </section>
   `
@@ -137,22 +289,23 @@ function renderConnect() {
 
 function renderDevice(i: Info) {
   const specs: [string, string][] = [
-    ['固件', mono(i.imgVersion ? `${i.imgVersion} (${i.fwVersion})` : (i.fwVersion || '未知'))],
-    ['架构', `${mono(i.arch)}${CODENAME[i.modelKey] ? `<span class="dim">（${CODENAME[i.modelKey]}）</span>` : ''}`],
-    ['启动槽', i.activeSlot ? `${mono(i.activeSlot)}<span class="dim">　错误计数 ${mono(`a=${i.errcntA} b=${i.errcntB}`)}</span>` : '<span class="dim">该机型无 A/B 槽</span>'],
-    ['剩余空间', `系统分区 <span class="qty">${num(i.rootFreeMB)}</span> MB<span class="dim">　/home <span class="qty">${num(i.homeFreeMB)}</span> MB</span>`],
+    [t('firmware'), mono(i.imgVersion ? `${i.imgVersion} (${i.fwVersion})` : (i.fwVersion || t('unknown')))],
+    [t('arch'), `${mono(i.arch)}${CODENAME[i.modelKey] ? `<span class="dim">（${CODENAME[i.modelKey]}）</span>` : ''}`],
+    [t('slot'), i.activeSlot ? `${mono(i.activeSlot)}<span class="dim">　${t('errcnt')} ${mono(`a=${i.errcntA} b=${i.errcntB}`)}</span>` : `<span class="dim">${t('no_slot')}</span>`],
+    [t('free'), `${t('sys_part')} <span class="qty">${num(i.rootFreeMB)}</span> MB<span class="dim">　/home <span class="qty">${num(i.homeFreeMB)}</span> MB</span>`],
   ]
+  const status = i.inAndroidMode ? t('in_android') : (i.xochitlActive ? t('rm_running') : t('rm_not_running'))
   return `
     <section class="stage">
       ${deviceArt({ connected: true, space: i.spaceInstalled, android: i.androidInstalled, inAndroid: i.inAndroidMode })}
       <div class="stagebody">
         <h2>${esc(i.model)}</h2>
-        <p class="live"><span class="dot"></span>已连接，${i.inAndroidMode ? '当前在 Android' : 'reMarkable 系统' + (i.xochitlActive ? '运行中' : '未运行')}${tip('USB 线直连，不经过服务器，不读取你的笔记。')}</p>
+        <p class="live"><span class="dot"></span>${t('connected')}${status}${tip(t('direct_tip'))}</p>
         <dl class="spec">${specs.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
         <div class="field">
-          <button id="btn-probe" class="flat" ${state.busy ? 'disabled' : ''}>重新检测</button>
-          <button id="btn-disconnect" class="flat" ${state.busy ? 'disabled' : ''}>断开</button>
-          <button id="btn-export-diag" class="flat" ${state.busy ? 'disabled' : ''} title="设备切槽、开不了机、空间突然没了时用：只读收集版本、启动配置和最近几次开机的系统日志，存成一个文件发给开发者。不收集笔记和账号信息。">导出诊断</button>
+          <button id="btn-probe" class="flat" ${state.busy ? 'disabled' : ''}>${t('reprobe')}</button>
+          <button id="btn-disconnect" class="flat" ${state.busy ? 'disabled' : ''}>${t('disconnect')}</button>
+          <button id="btn-export-diag" class="flat" ${state.busy ? 'disabled' : ''} title="${esc(t('export_tip'))}">${t('export_diag')}</button>
         </div>
       </div>
     </section>
@@ -178,38 +331,36 @@ function renderItem(i: Info, a: Action) {
   const upToDate = installed && cur !== '' && latest !== '' && cur === latest
   const unknown = installed && (cur === '' || latest === '')
   const outdated = installed && !upToDate && !unknown
-  // 中文动词接英文词要留空格, 不然挤成"更新Android"
-  const name = isSpace ? '空间' : ' Android'
-  const title = (outdated ? '更新' : installed ? '重新安装' : '安装') + name
+  const title = verbName(outdated ? t('update') : installed ? t('reinstall') : t('install'), label(a))
 
   let stateCell: string
-  if (upToDate) stateCell = `<span class="on">已安装</span> ${mono(cur)}　已是最新`
-  else if (outdated) stateCell = `<span class="on">已安装</span> ${mono(cur)}　可更新到 ${mono(latest)}`
-  else if (installed && cur) stateCell = `<span class="on">已安装</span> ${mono(cur)}`
-  else if (installed) stateCell = `<span class="on">已安装</span>`
-  else stateCell = `<span class="dim">未安装，下载 ${APPROX[a]}</span>`
+  if (upToDate) stateCell = `<span class="on">${t('installed')}</span> ${mono(cur)}　${t('up_to_date')}`
+  else if (outdated) stateCell = `<span class="on">${t('installed')}</span> ${mono(cur)}　${t('can_update')} ${mono(latest)}`
+  else if (installed && cur) stateCell = `<span class="on">${t('installed')}</span> ${mono(cur)}`
+  else if (installed) stateCell = `<span class="on">${t('installed')}</span>`
+  else stateCell = `<span class="dim">${t('not_installed', approx(a))}</span>`
   // 主按钮: 要装 / 要更新才是显眼的黑底; 已是最新 (或判断不了) 时「重新安装」只是个普通按钮, 用来修复
   const runClass = (installed && !outdated) ? 'flat' : 'go'
-  const runText = ready || (installed && !outdated) ? title : '下载并' + (outdated ? '更新' : '安装')
+  const runText = ready || (installed && !outdated) ? title : (outdated ? t('dl_update') : t('dl_install'))
 
   return `
     <section class="item ${state.busyOn === a ? 'working' : ''}">
       <div class="itemrow">
         <div class="what">
-          <h3>${LABEL[a]}</h3>
-          <p>${isSpace ? '中文界面、输入法、应用商店' : '双系统启动，开机时选进哪一个'}</p>
+          <h3>${label(a)}</h3>
+          <p>${isSpace ? t('space_desc') : t('android_desc')}</p>
         </div>
-        <div class="stat">${stateCell}${ready ? `<span class="pending">安装包 ${mono(b!.version)}　${mb(b!.bytes)}</span>` : ''}</div>
+        <div class="stat">${stateCell}${ready ? `<span class="pending">${t('bundle')} ${mono(b!.version)}　${mb(b!.bytes)}</span>` : ''}</div>
         <div class="acts">
           <button class="${runClass} act-run" data-a="${a}" ${busy}>${runText}</button>
           ${installed
-            ? `<button class="peril ${isSpace ? 'act-uninstall' : 'act-uninstall-android'}" data-a="${a}" ${busy}>卸载</button>`
-            : `<button class="flat act-choose" data-a="${a}" ${busy}>从本地安装</button>`}
+            ? `<button class="peril ${isSpace ? 'act-uninstall' : 'act-uninstall-android'}" data-a="${a}" ${busy}>${t('uninstall')}</button>`
+            : `<button class="flat act-choose" data-a="${a}" ${busy}>${t('from_local')}</button>`}
         </div>
       </div>
-      ${!isSpace && installed ? `<label class="opt"><input type="checkbox" class="chk-replace" ${state.replaceSystem ? 'checked' : ''} ${busy}> 覆盖已有系统${tip('重新解包 Android 系统到 /home，应用数据目录不受影响。')}</label>` : ''}
+      ${!isSpace && installed ? `<label class="opt"><input type="checkbox" class="chk-replace" ${state.replaceSystem ? 'checked' : ''} ${busy}> ${t('replace_sys')}${tip(t('replace_tip'))}</label>` : ''}
       <div class="progress ${state.busyOn === a ? '' : 'hidden'}" id="dl-${a}"><div></div></div>
-      <button class="disclose act-more" data-a="${a}" aria-expanded="${state.open[a]}">${ICON.chev}详情</button>
+      <button class="disclose act-more" data-a="${a}" aria-expanded="${state.open[a]}">${ICON.chev}${t('details')}</button>
       ${state.open[a] ? renderDetail(i, a) : ''}
     </section>
   `
@@ -218,40 +369,38 @@ function renderItem(i: Info, a: Action) {
 function renderDetail(i: Info, a: Action) {
   const busy = state.busy ? 'disabled' : ''
   const ready = !!state.bundles[a] && state.bundles[a]!.component === COMPONENT[a]
-  const safety = a === 'space'
-    ? '写入前会按你的固件重新生成注入表，全部命中才动系统配置；启动后观察 10 秒，任一步不对自动退回出厂启动。'
-    : '出厂内核链接不动，Android 系统与数据都在 /home，重启不切槽。'
+  const safety = a === 'space' ? t('safety_space') : t('safety_android')
   return `
     <div class="detail">
       <div class="grp">
-        <h4>安装${tip(safety)}</h4>
+        <h4>${t('install')}${tip(safety)}</h4>
         <div class="field">
-          <button class="flat act-choose" data-a="${a}" ${busy}>选择本地安装包</button>
-          <button class="flat act-plan" data-a="${a}" ${busy || !ready ? 'disabled' : ''}>预览将写入的内容</button>
+          <button class="flat act-choose" data-a="${a}" ${busy}>${t('choose_bundle')}</button>
+          <button class="flat act-plan" data-a="${a}" ${busy || !ready ? 'disabled' : ''}>${t('preview_plan')}</button>
         </div>
       </div>
       ${a === 'space' ? `
         <div class="grp">
-          <h4>维护</h4>
+          <h4>${t('maintain')}</h4>
           <div class="field">
-            <button id="btn-repair" class="flat" ${busy || !i.rmkitInstalled || i.inAndroidMode ? 'disabled' : ''} title="侧栏入口或中文突然消失时用：清除防砖熔断并重启一次 xochitl">恢复侧栏入口</button>
+            <button id="btn-repair" class="flat" ${busy || !i.rmkitInstalled || i.inAndroidMode ? 'disabled' : ''} title="${esc(t('repair_tip'))}">${t('repair_btn')}</button>
           </div>
         </div>` : `
         <div class="grp">
-          <h4>切换系统</h4>
+          <h4>${t('switch_sys')}</h4>
           <div class="field">
-            <button id="btn-boot-android" class="flat" ${busy || !i.androidInstalled || i.inAndroidMode ? 'disabled' : ''}>重启进 Android</button>
-            <button id="btn-stock" class="flat" ${busy || !i.inAndroidMode ? 'disabled' : ''}>回 reMarkable 系统</button>
+            <button id="btn-boot-android" class="flat" ${busy || !i.androidInstalled || i.inAndroidMode ? 'disabled' : ''}>${t('boot_android')}</button>
+            <button id="btn-stock" class="flat" ${busy || !i.inAndroidMode ? 'disabled' : ''}>${t('back_stock')}</button>
           </div>
         </div>
         <div class="grp">
-          <h4>维护</h4>
+          <h4>${t('maintain')}</h4>
           <div class="field">
-            <button id="btn-apks" class="flat" ${busy || !i.inAndroidMode ? 'disabled' : ''} title="需要设备在 Android 模式">安装 APK</button>
-            <button id="btn-diag" class="flat" ${busy}>启动诊断</button>
-            <button id="btn-reset-data" class="peril" ${busy || !i.androidInstalled || i.inAndroidMode ? 'disabled' : ''} title="清空 Android 的应用与设置，下次进 Android 重新首次开机">重置数据</button>
+            <button id="btn-apks" class="flat" ${busy || !i.inAndroidMode ? 'disabled' : ''} title="${t('need_android')}">${t('install_apk')}</button>
+            <button id="btn-diag" class="flat" ${busy}>${t('boot_diag')}</button>
+            <button id="btn-reset-data" class="peril" ${busy || !i.androidInstalled || i.inAndroidMode ? 'disabled' : ''} title="${esc(t('reset_tip'))}">${t('reset_data')}</button>
           </div>
-          <label class="opt"><input type="checkbox" id="chk-removedata" ${state.removeData ? 'checked' : ''} ${busy}> 连数据一起删${tip('卸载时连同 /home 里的 Android 系统与应用数据一起删除，不勾选则只移除启动组件。')}</label>
+          <label class="opt"><input type="checkbox" id="chk-removedata" ${state.removeData ? 'checked' : ''} ${busy}> ${t('remove_data')}${tip(t('remove_tip'))}</label>
         </div>`}
       <div class="plan" id="plan-${a}"></div>
     </div>
@@ -264,9 +413,9 @@ function renderLog() {
   return `
     <section class="journal">
       <div class="jhead">
-        <h4>日志</h4>
-        ${state.busy ? '<button id="btn-cancel" class="peril">取消</button>' : ''}
-        <button id="btn-logdir" class="flat">打开日志目录</button>
+        <h4>${t('log')}</h4>
+        ${state.busy ? `<button id="btn-cancel" class="peril">${t('cancel')}</button>` : ''}
+        <button id="btn-logdir" class="flat">${t('open_logdir')}</button>
       </div>
       <pre id="log"></pre>
     </section>
@@ -278,24 +427,31 @@ function renderLog() {
 function renderSettings() {
   return `
     <div class="scrim" id="scrim">
-      <div class="panel" role="dialog" aria-label="设置">
-        <h2>设置</h2>
+      <div class="panel" role="dialog" aria-label="${t('settings')}">
+        <h2>${t('settings')}</h2>
         <div class="field stack">
-          <label>下载来源${tip('先从这里下安装包，下不动会自动换另一个。两处是同一个包，下完都会校验。')}</label>
+          <label>${t('language')}</label>
           <div class="seg" role="radiogroup">
-            <label class="opt"><input type="radio" name="src" value="cn" ${state.source === 'cn' ? 'checked' : ''}> 国内下载</label>
-            <label class="opt"><input type="radio" name="src" value="github" ${state.source === 'github' ? 'checked' : ''}> GitHub 下载</label>
+            <label class="opt"><input type="radio" name="lang" value="zh" ${lang === 'zh' ? 'checked' : ''}> 中文</label>
+            <label class="opt"><input type="radio" name="lang" value="en" ${lang === 'en' ? 'checked' : ''}> English</label>
           </div>
         </div>
         <div class="field stack">
-          <label for="proxy">下载代理${tip('一般不用填。两处都下不动时才需要，格式如 http://127.0.0.1:7890')}</label>
-          <input id="proxy" value="${esc(state.proxy)}" placeholder="一般不用填">
+          <label>${t('dl_source')}${tip(t('dl_source_tip'))}</label>
+          <div class="seg" role="radiogroup">
+            <label class="opt"><input type="radio" name="src" value="cn" ${state.source === 'cn' ? 'checked' : ''}> ${t('src_cn')}</label>
+            <label class="opt"><input type="radio" name="src" value="github" ${state.source === 'github' ? 'checked' : ''}> ${t('src_gh')}</label>
+          </div>
         </div>
-        <label class="opt"><input type="checkbox" id="chk-remember2" ${state.remember ? 'checked' : ''}> 记住 SSH 密码${tip('存进系统钥匙串（Mac 钥匙串 / Windows 凭据管理器），不写进任何文件。')}</label>
-        <div class="field"><button id="btn-forget2" class="flat">忘记已存的密码</button></div>
+        <div class="field stack">
+          <label for="proxy">${t('proxy')}${tip(t('proxy_tip'))}</label>
+          <input id="proxy" value="${esc(state.proxy)}" placeholder="${t('proxy_ph')}">
+        </div>
+        <label class="opt"><input type="checkbox" id="chk-remember2" ${state.remember ? 'checked' : ''}> ${t('remember_ssh')}${tip(t('remember_tip'))}</label>
+        <div class="field"><button id="btn-forget2" class="flat">${t('forget_pw')}</button></div>
         <div class="field right">
           <span class="ver">${esc(state.version)}</span>
-          <button id="btn-close-settings" class="go">完成</button>
+          <button id="btn-close-settings" class="go">${t('done')}</button>
         </div>
       </div>
     </div>
@@ -306,26 +462,27 @@ function renderSettings() {
 
 function renderSpacePlan(p: SpacePlan) {
   const flags = [
-    p.needXovi ? '设备没有 xovi，会先自动部署' : 'xovi 已在',
-    p.deployRime ? '整句输入（librime，拼音加五笔86）' : '纯 Go 输入引擎（安装包无 librime）',
-    p.qmlInject ? '运行时 QML 注入' : 'qmd 注入',
-    p.librarian ? '文件热导入 librarian' : '不装 librarian（rm2）',
+    p.needXovi ? t('f_need_xovi') : t('f_have_xovi'),
+    p.deployRime ? t('f_rime') : t('f_go_ime'),
+    p.qmlInject ? t('f_qml') : t('f_qmd'),
+    p.librarian ? t('f_librarian') : t('f_no_librarian'),
   ]
   return `
-    <p class="sum">写入 <span class="qty">${(p.files ?? []).length}</span> 个文件，共 ${mb(p.totalBytes)}</p>
+    <p class="sum">${t('writes', (p.files ?? []).length, mb(p.totalBytes))}</p>
     <ul class="flags">${flags.map((f) => `<li>${f}</li>`).join('')}</ul>
     ${(p.warnings ?? []).map((w) => `<p class="warn">${esc(w)}</p>`).join('')}
-    <details><summary>文件清单</summary><pre class="files">${(p.files ?? []).map((f) => `${esc(f.device)}  ←  ${esc(f.source)}  (${(f.size / 1024).toFixed(0)} KB)`).join('\n')}</pre></details>
+    <details><summary>${t('file_list')}</summary><pre class="files">${(p.files ?? []).map((f) => `${esc(f.device)}  ←  ${esc(f.source)}  (${(f.size / 1024).toFixed(0)} KB)`).join('\n')}</pre></details>
   `
 }
 
 function renderAndroidPlan(p: AndroidPlan) {
+  const sys = p.hasSystemPkg ? (p.systemPresent && !p.replaceSystem ? t('has_sys_keep') : t('has_sys_extract')) : t('no_sys')
   return `
     ${(p.blockers ?? []).map((b) => `<p class="stop">${esc(b)}</p>`).join('')}
     ${(p.warnings ?? []).map((w) => `<p class="warn">${esc(w)}</p>`).join('')}
-    <p class="sum">写入 <span class="qty">${(p.files ?? []).length}</span> 个文件，共 ${mb(p.totalBytes)}，本槽 ${mono(p.slot)}</p>
-    <p class="note">${p.hasSystemPkg ? (p.systemPresent && !p.replaceSystem ? '设备已有 Android 系统，本次不覆盖。' : '包含 Android 系统包，解包到 /home。') : '安装包不含系统包，沿用设备上已有的。'}${tip('/boot 里新增 android 内核（出厂内核链接不动）、/lib/modules 新增一个模块目录、/usr/bin 四个宿主程序、/sbin/init 换成带回落的包装脚本（原链接备份为 /sbin/init.systemd-orig）')}</p>
-    <details><summary>文件清单</summary><pre class="files">${(p.files ?? []).map((f) => esc(f)).join('\n')}</pre></details>
+    <p class="sum">${t('writes_slot', (p.files ?? []).length, mb(p.totalBytes), mono(p.slot))}</p>
+    <p class="note">${sys}${tip(t('android_tip'))}</p>
+    <details><summary>${t('file_list')}</summary><pre class="files">${(p.files ?? []).map((f) => esc(f)).join('\n')}</pre></details>
   `
 }
 
@@ -382,7 +539,7 @@ async function runAction(a: Action) {
         // 下不动的时候才提代理。探测到系统代理就告诉他可以去「设置」里填上再试。
         if (!state.proxy) {
           const sys = await DetectProxy().catch(() => '')
-          if (sys) appendLog('检测到系统代理 ' + sys + '，若直连下不动，可在设置里填上再试')
+          if (sys) appendLog(t('proxy_detected', sys))
         }
         throw e
       }
@@ -395,28 +552,40 @@ async function runAction(a: Action) {
     if ((p.blockers ?? []).length) { state.open.android = true; keepLog(render); $('#plan-android').innerHTML = renderAndroidPlan(p); return }
   }
   const installed = a === 'space' ? i.spaceInstalled : i.androidInstalled
-  const what = a === 'space' ? '「空间」及其注入底座' : '单槽 Android'
-  if (!(await Confirm('确认', `确定要在这台设备上${installed ? '更新' : '安装'} ${what} 吗？过程中请不要拔线。`))) return
+  const what = a === 'space' ? t('what_space') : t('what_android')
+  if (!(await Confirm(t('confirm'), installed ? t('confirm_update', what) : t('confirm_install', what)))) return
   guarded(a, async () => { if (a === 'space') await RunSpace(); else await RunAndroid(state.replaceSystem) })
 }
 
+function switchLang(l: Lang) {
+  if (l === lang) return
+  applyLang(l)
+  keepLog(render)
+}
+
 function bind() {
+  // 语言
+  $('#lnk-lang')?.addEventListener('click', (e) => { e.preventDefault(); switchLang(lang === 'zh' ? 'en' : 'zh') })
+  document.querySelectorAll('input[name="lang"]').forEach((el) => el.addEventListener('change', (e) => {
+    switchLang((e.target as HTMLInputElement).value === 'en' ? 'en' : 'zh')
+  }))
+
   // 连接
   $('#host')?.addEventListener('change', async (e) => {
     const host = (e.target as HTMLInputElement).value.trim()
     const saved = await LoadPassword(host)
-    if (saved) { state.password = saved; ($('#password') as HTMLInputElement).value = saved; appendLog('已从钥匙串读到 ' + host + ' 的密码') }
+    if (saved) { state.password = saved; ($('#password') as HTMLInputElement).value = saved; appendLog(t('read_pw', host)) }
   })
   $('#chk-remember')?.addEventListener('change', (e) => { state.remember = (e.target as HTMLInputElement).checked })
   $('#chk-remember2')?.addEventListener('change', (e) => { state.remember = (e.target as HTMLInputElement).checked })
   $('#btn-forget')?.addEventListener('click', async () => { await ForgetPassword(($('#host') as HTMLInputElement)?.value || '10.11.99.1'); state.password = ''; keepLog(render) })
-  $('#btn-forget2')?.addEventListener('click', async () => { await ForgetPassword('10.11.99.1'); state.password = ''; appendLog('已忘记保存的密码') })
+  $('#btn-forget2')?.addEventListener('click', async () => { await ForgetPassword('10.11.99.1'); state.password = ''; appendLog(t('forgot')) })
   $('#password')?.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') $('#btn-connect')?.click() })
   $('#btn-connect')?.addEventListener('click', async () => {
     const host = ($('#host') as HTMLInputElement)?.value || '10.11.99.1'
     const pw = ($('#password') as HTMLInputElement).value
     state.password = pw
-    if (!pw) { appendLog('请先填 SSH 密码'); return }
+    if (!pw) { appendLog(t('need_pw')); return }
     try {
       state.info = (await Connect(host, pw, state.remember)) as Info
       keepLog(render)
@@ -426,8 +595,8 @@ function bind() {
     const host = ($('#host') as HTMLInputElement)?.value || '10.11.99.1'
     const pw = ($('#password') as HTMLInputElement).value
     state.password = pw
-    if (!pw) appendLog('没填 SSH 密码: 设备开机早期多半只能用密码登录，建议先填上')
-    if (!(await Confirm('紧急修复', '会停用中文、空间等全部增强，让设备以原厂状态启动（笔记不受影响）。之后可以用助手重新安装。继续？'))) return
+    if (!pw) appendLog(t('rescue_no_pw'))
+    if (!(await Confirm(t('rescue'), t('rescue_confirm')))) return
     setBusy(true)
     try { await EmergencyRepair(host, pw) } catch (e) { appendLog('✗ ' + String(e)) }
     setBusy(false)
@@ -441,46 +610,46 @@ function bind() {
   $('#btn-probe')?.addEventListener('click', async () => { try { state.info = (await Probe()) as Info; keepLog(render) } catch (e) { appendLog('✗ ' + String(e)) } })
 
   // 条目
-  document.querySelectorAll<HTMLButtonElement>('.act-more').forEach((t) => t.addEventListener('click', () => {
-    const a = t.dataset.a as Action
+  document.querySelectorAll<HTMLButtonElement>('.act-more').forEach((b) => b.addEventListener('click', () => {
+    const a = b.dataset.a as Action
     state.open[a] = !state.open[a]
     keepLog(render)
   }))
-  document.querySelectorAll<HTMLButtonElement>('.act-run').forEach((t) => t.addEventListener('click', () => runAction(t.dataset.a as Action)))
-  document.querySelectorAll<HTMLButtonElement>('.act-choose').forEach((t) => t.addEventListener('click', async () => {
-    const a = t.dataset.a as Action
+  document.querySelectorAll<HTMLButtonElement>('.act-run').forEach((b) => b.addEventListener('click', () => runAction(b.dataset.a as Action)))
+  document.querySelectorAll<HTMLButtonElement>('.act-choose').forEach((btn) => btn.addEventListener('click', async () => {
+    const a = btn.dataset.a as Action
     try {
       const b = (await ChooseBundle()) as BundleInfo | null
       if (!b) return
-      if (b.component !== COMPONENT[a]) { appendLog(`选的是「${b.component}」的安装包，不是${LABEL[a]}的`); return }
+      if (b.component !== COMPONENT[a]) { appendLog(t('wrong_bundle', b.component, label(a))); return }
       state.bundles[a] = b
       keepLog(render)
     } catch (e) { appendLog('✗ ' + String(e)) }
   }))
-  document.querySelectorAll<HTMLButtonElement>('.act-plan').forEach((t) => t.addEventListener('click', async () => {
-    const a = t.dataset.a as Action
+  document.querySelectorAll<HTMLButtonElement>('.act-plan').forEach((b) => b.addEventListener('click', async () => {
+    const a = b.dataset.a as Action
     const box = $(`#plan-${a}`)
     try {
       box.innerHTML = a === 'space' ? renderSpacePlan((await PlanSpace()) as SpacePlan) : renderAndroidPlan((await PlanAndroid(state.replaceSystem)) as AndroidPlan)
     } catch (e) { box.innerHTML = `<p class="stop">${esc(String(e))}</p>` }
   }))
-  document.querySelectorAll<HTMLButtonElement>('.act-uninstall').forEach((t) => t.addEventListener('click', async () => {
-    if (await Confirm('确认', '确定卸载空间及其注入底座？设备会恢复出厂启动配置。')) guarded('space', () => UninstallSpace())
+  document.querySelectorAll<HTMLButtonElement>('.act-uninstall').forEach((b) => b.addEventListener('click', async () => {
+    if (await Confirm(t('confirm'), t('uninstall_space_confirm'))) guarded('space', () => UninstallSpace())
   }))
-  document.querySelectorAll<HTMLButtonElement>('.act-uninstall-android').forEach((t) => t.addEventListener('click', async () => {
-    if (await Confirm('确认', state.removeData ? '确定卸载 Android 并删除 /home 里的系统与数据？' : '确定卸载 Android（保留 /home 数据）？')) guarded('android', () => UninstallAndroid(state.removeData))
+  document.querySelectorAll<HTMLButtonElement>('.act-uninstall-android').forEach((b) => b.addEventListener('click', async () => {
+    if (await Confirm(t('confirm'), state.removeData ? t('uninstall_android_data') : t('uninstall_android_keep'))) guarded('android', () => UninstallAndroid(state.removeData))
   }))
-  document.querySelectorAll<HTMLInputElement>('.chk-replace').forEach((t) => t.addEventListener('change', (e) => { state.replaceSystem = (e.target as HTMLInputElement).checked }))
+  document.querySelectorAll<HTMLInputElement>('.chk-replace').forEach((b) => b.addEventListener('change', (e) => { state.replaceSystem = (e.target as HTMLInputElement).checked }))
   $('#chk-removedata')?.addEventListener('change', (e) => { state.removeData = (e.target as HTMLInputElement).checked })
 
   // 详情里的那些
   $('#btn-repair')?.addEventListener('click', () => guarded('space', () => RepairPanel()))
-  $('#btn-boot-android')?.addEventListener('click', async () => { if (await Confirm('确认', '设备将重启进入 Android，约 1 到 3 分钟。回来时可在 Android 桌面点“原厂系统”。继续？')) guarded('android', () => BootAndroid()) })
+  $('#btn-boot-android')?.addEventListener('click', async () => { if (await Confirm(t('confirm'), t('boot_android_confirm'))) guarded('android', () => BootAndroid()) })
   $('#btn-stock')?.addEventListener('click', () => guarded('android', () => ReturnToStock()))
   $('#btn-diag')?.addEventListener('click', async () => {
-    try { const t = await DiagnoseAndroid(); appendLog('—— Android 启动诊断 ——\n' + t + '—— 诊断结束，已存进日志目录，请把该文件发给开发者 ——') } catch (e) { appendLog('✗ ' + String(e)) }
+    try { const text = await DiagnoseAndroid(); appendLog(t('diag_head') + '\n' + text + t('diag_tail')) } catch (e) { appendLog('✗ ' + String(e)) }
   })
-  $('#btn-reset-data')?.addEventListener('click', async () => { if (await Confirm('确认', '清空 Android 的全部应用与设置？下次进 Android 会重新首次开机（约 5 分钟）。')) guarded('android', () => ResetAndroidData()) })
+  $('#btn-reset-data')?.addEventListener('click', async () => { if (await Confirm(t('confirm'), t('reset_confirm'))) guarded('android', () => ResetAndroidData()) })
   $('#btn-apks')?.addEventListener('click', async () => {
     let paths: string[] = []
     try { paths = (await ChooseAPKs()) || [] } catch (e) { appendLog('✗ ' + String(e)); return }
@@ -516,9 +685,14 @@ EventsOn('progress', (p: { done: number; total: number }) => {
 // 填错了反而连不上, 不懂的人也不知道那一栏该删。现在只有用户自己填过才记住。
 // (key 换过名: 老版本自动探测写进 'proxy' 的值就此失效)
 try { state.proxy = localStorage.getItem('proxy.manual') || '' } catch { /* 忽略 */ }
-try { state.source = localStorage.getItem('download.source') === 'github' ? 'github' : 'cn' } catch { /* 忽略 */ }
+// 下载来源没选过时跟着语言走: 中文默认国内镜像, 英文默认 GitHub
+try {
+  const src = localStorage.getItem('download.source')
+  state.source = src === 'github' || (src === null && lang === 'en') ? 'github' : 'cn'
+} catch { /* 忽略 */ }
+applyLang(lang)
 Release().then((r) => { release = r as Release }).catch(() => { /* 开发版: 用默认 */ })
 render()
-LoadPassword('10.11.99.1').then((pw) => { if (pw) { state.password = pw; keepLog(render); appendLog('已从钥匙串读到保存的密码') } })
-LogDir().then((d) => appendLog('日志目录 ' + d))
-Version().then((v) => { state.version = v; appendLog('空间助手 ' + v) })
+LoadPassword('10.11.99.1').then((pw) => { if (pw) { state.password = pw; keepLog(render); appendLog(t('read_saved_pw')) } })
+LogDir().then((d) => appendLog(t('logdir', d)))
+Version().then((v) => { state.version = v; appendLog(t('version', v)) })

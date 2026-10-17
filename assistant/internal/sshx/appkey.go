@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/boangs/remarkable-space/assistant/internal/i18n"
 	"path/filepath"
 	"strings"
 
@@ -51,7 +53,7 @@ func LoadOrCreateAppKey(dir string) (*AppKey, error) {
 	}
 	signer, err := ssh.ParsePrivateKey(pemBytes)
 	if err != nil {
-		return nil, fmt.Errorf("助手密钥损坏 (%s): %w", path, err)
+		return nil, fmt.Errorf(i18n.T("助手密钥损坏 (%s): %w", "assistant key is corrupt (%s): %w"), path, err)
 	}
 	pubLine := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))) + " space-assistant"
 	return &AppKey{Signer: signer, Public: pubLine}, nil
@@ -61,7 +63,7 @@ func LoadOrCreateAppKey(dir string) (*AppKey, error) {
 // 只在 reMarkable 模式下做 (Android 模式的 /home 也是同一份, 但保持简单)。
 func (c *Client) InstallAuthorizedKey(ctx context.Context, pubLine string) error {
 	if pubLine == "" {
-		return errors.New("空公钥")
+		return errors.New(i18n.T("空公钥", "empty public key"))
 	}
 	script := fmt.Sprintf(`set -e
 mkdir -p /home/root/.ssh
@@ -80,10 +82,11 @@ chmod 600 /home/root/.ssh/authorized_keys`, shellQuote(strings.Fields(pubLine)[1
 		return err
 	}
 	if res.ExitCode != 0 {
-		return fmt.Errorf("写 authorized_keys 失败: %s", strings.TrimSpace(res.Stderr))
+		return fmt.Errorf(i18n.T("写 authorized_keys 失败: %s", "failed to write authorized_keys: %s"), strings.TrimSpace(res.Stderr))
 	}
 	if strings.Contains(res.Stdout, "installed") {
-		c.log("已把助手的 SSH 公钥装进设备 (/home/root/.ssh/authorized_keys), Android 模式下也能免密连接")
+		c.log(i18n.T("已把助手的 SSH 公钥装进设备 (/home/root/.ssh/authorized_keys), Android 模式下也能免密连接",
+			"Installed the assistant's SSH public key on the device (/home/root/.ssh/authorized_keys); Android mode can now connect without a password"))
 	}
 	return nil
 }

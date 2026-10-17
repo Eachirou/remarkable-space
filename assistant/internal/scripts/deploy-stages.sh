@@ -1,6 +1,10 @@
 # 由 installer/install.sh 的 REMOTE_EOF 段 (六阶段防砖部署) 原样提取; 需要 env FW_VERSION (=固件身份 构建时间-版本号) ZZ_HEADER_FLAT QML_INJECT_DEPLOYED; 改动请两边同步
 set -e
 
+# 双语输出: 助手按界面语言传 UI_LANG=zh|en; m 选一条文案, say 直接打印
+m() { if [ "$UI_LANG" = en ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
+say() { echo "$(m "$1" "$2")"; }
+
 HASHTAB=/home/root/xovi/exthome/qt-resource-rebuilder/hashtab
 HASHTAB_FW=/home/root/xovi/exthome/qt-resource-rebuilder/hashtab.fw_version
 DEPLOY=/home/root/xovi/exthome/qt-resource-rebuilder
@@ -13,7 +17,7 @@ DROPIN=/etc/systemd/system/xochitl.service.d/zz-rmkit-cn.conf
 abort_safe() {
   local reason="$1"
   echo "  ✗ $reason"
-  echo "  → 回退: 删除 drop-in (如有), 让 xochitl 走出厂默认"
+  say "  → 回退: 删除 drop-in (如有), 让 xochitl 走出厂默认" "  → Rolling back: removing the drop-in (if any) so xochitl boots stock"
   rm -f $DROPIN
   mkdir -p /tmp/lc && mount --bind / /tmp/lc 2>/dev/null || true
   mount -o remount,rw /tmp/lc 2>/dev/null || true
@@ -25,7 +29,7 @@ abort_safe() {
 }
 
 # ───── 阶段 1: 装 systemd .service unit (双写 + wants symlink 双写) ─────
-echo "  → 阶段 1/6: 装 systemd service units..."
+say "  → 阶段 1/6: 装 systemd service units..." "  → Stage 1/6: installing systemd service units..."
 mkdir -p /tmp/lc && mount --bind / /tmp/lc 2>/dev/null || true
 mount -o remount,rw /tmp/lc 2>/dev/null || true
 mkdir -p /etc/systemd/system /tmp/lc/etc/systemd/system
@@ -63,11 +67,11 @@ systemctl stop rmkit-cn-upload.service 2>/dev/null || true
 systemctl daemon-reload
 
 # ───── 阶段 2: 清旧 .qmd + 生成 hashtab (版本必须匹配 /etc/version) ─────
-echo "  → 阶段 2/6: hashtab (固件 $FW_VERSION)..."
+say "  → 阶段 2/6: hashtab (固件 $FW_VERSION)..." "  → Stage 2/6: hashtab (firmware $FW_VERSION)..."
 
 # 强制清空 $DEPLOY 旧 .qmd! 否则临时 xochitl 加载它们时,
 # 旧 .qmd hash 跟新 hashtab 不匹配 → qmldiff Rust panic → 临时 xochitl 死 → hashtab 没写出
-echo "    清空旧 .qmd (避免临时 xochitl 加载旧 hash 时 panic)..."
+say "    清空旧 .qmd (避免临时 xochitl 加载旧 hash 时 panic)..." "    Clearing old .qmd files (so the temporary xochitl does not panic on stale hashes)..."
 mkdir -p $DEPLOY
 rm -f $DEPLOY/*.qmd $DEPLOY/*.rcc
 
@@ -75,17 +79,17 @@ rm -f $DEPLOY/*.qmd $DEPLOY/*.rcc
 NEEDS_REGEN=0
 REGEN_REASON=""
 if [ ! -f "$HASHTAB" ]; then
-  NEEDS_REGEN=1; REGEN_REASON="hashtab 不存在"
+  NEEDS_REGEN=1; REGEN_REASON="$(m "hashtab 不存在" "no hashtab")"
 elif [ "$(wc -c < $HASHTAB)" -lt 100000 ]; then
-  NEEDS_REGEN=1; REGEN_REASON="hashtab 损坏 (<100KB)"
+  NEEDS_REGEN=1; REGEN_REASON="$(m "hashtab 损坏 (<100KB)" "hashtab corrupt (<100KB)")"
 elif [ ! -f "$HASHTAB_FW" ]; then
-  NEEDS_REGEN=1; REGEN_REASON="hashtab 缺版本标记 (老版本残留)"
+  NEEDS_REGEN=1; REGEN_REASON="$(m "hashtab 缺版本标记 (老版本残留)" "hashtab has no version marker (left by an old version)")"
 elif [ "$(cat $HASHTAB_FW 2>/dev/null)" != "$FW_VERSION" ]; then
-  NEEDS_REGEN=1; REGEN_REASON="hashtab 版本 $(cat $HASHTAB_FW 2>/dev/null) ≠ 固件 $FW_VERSION (OTA 升级了)"
+  NEEDS_REGEN=1; REGEN_REASON="$(m "hashtab 版本 $(cat $HASHTAB_FW 2>/dev/null) ≠ 固件 $FW_VERSION (OTA 升级了)" "hashtab version $(cat $HASHTAB_FW 2>/dev/null) ≠ firmware $FW_VERSION (OTA update)")"
 fi
 
 if [ $NEEDS_REGEN -eq 1 ]; then
-  echo "    → 重生 hashtab (原因: $REGEN_REASON)"
+  say "    → 重生 hashtab (原因: $REGEN_REASON)" "    → Regenerating hashtab ($REGEN_REASON)"
   systemctl stop xochitl.service 2>/dev/null || true
   sleep 1
   pidof xochitl >/dev/null 2>&1 && kill -15 $(pidof xochitl) 2>/dev/null || true
@@ -104,17 +108,17 @@ if [ $NEEDS_REGEN -eq 1 ]; then
   done
   kill -15 $XPID 2>/dev/null || true; sleep 3; kill -9 $XPID 2>/dev/null || true
   if [ ! -f "$HASHTAB" ] || [ "$(wc -c < $HASHTAB)" -lt 100000 ]; then
-    abort_safe "hashtab 生成失败! 看 /tmp/hashtab_gen.log"
+    abort_safe "$(m "hashtab 生成失败! 看 /tmp/hashtab_gen.log" "hashtab generation failed! See /tmp/hashtab_gen.log")"
   fi
   # 写版本标记 — 关键! 这是下次跑 install.sh 判断 hashtab 是否过期的依据
   echo "$FW_VERSION" > $HASHTAB_FW
-  echo "    ✓ hashtab ($(wc -c < $HASHTAB) bytes, 标记固件版本 $FW_VERSION)"
+  say "    ✓ hashtab ($(wc -c < $HASHTAB) bytes, 标记固件版本 $FW_VERSION)" "    ✓ hashtab ($(wc -c < $HASHTAB) bytes, marked firmware $FW_VERSION)"
 else
-  echo "    → hashtab 已存在且版本匹配 ($(wc -c < $HASHTAB) bytes, 固件 $FW_VERSION)"
+  say "    → hashtab 已存在且版本匹配 ($(wc -c < $HASHTAB) bytes, 固件 $FW_VERSION)" "    → hashtab present and matches ($(wc -c < $HASHTAB) bytes, firmware $FW_VERSION)"
 fi
 
 # ───── 阶段 3: 用新 hashtab 编译 .qmd → inject 目录 + cache ─────
-echo "  → 阶段 3/6: 编译 .qmd..."
+say "  → 阶段 3/6: 编译 .qmd..." "  → Stage 3/6: compiling .qmd..."
 CACHE=$RMKIT_DIR/compiled-qmd/$FW_VERSION
 mkdir -p $CACHE
 COMPILE_FAILED=0
@@ -129,7 +133,7 @@ for src in $QMD_SRC/*.qmd; do
   else
     rm -f $DEPLOY/$base
     COMPILE_FAILED=$((COMPILE_FAILED+1))
-    echo "    ✗ $base 编译失败:"
+    say "    ✗ $base 编译失败:" "    ✗ $base failed to compile:"
     head -n 3 /tmp/qmd-$base.err 2>/dev/null | sed 's/^/        /'
   fi
 done
@@ -138,17 +142,17 @@ done
 [ -f $RMKIT_DIR/static/zh_CN.rcc ] && cp $RMKIT_DIR/static/zh_CN.rcc $DEPLOY/
 
 # ───── 阶段 4: 验证 — 编译失败计数为 0 才能继续 ─────
-echo "  → 阶段 4/6: 验证 .qmd hash 命中..."
+say "  → 阶段 4/6: 验证 .qmd hash 命中..." "  → Stage 4/6: verifying .qmd hash hits..."
 if [ $COMPILE_FAILED -gt 0 ]; then
-  abort_safe "$COMPILE_FAILED 个 .qmd 编译失败 (hash 不命中), 拒绝写 drop-in"
+  abort_safe "$(m "$COMPILE_FAILED 个 .qmd 编译失败 (hash 不命中), 拒绝写 drop-in" "$COMPILE_FAILED .qmd failed to compile (hash miss); refusing to write the drop-in")"
 fi
 if [ $COMPILED -eq 0 ]; then
-  abort_safe "没有任何 .qmd 编译成功 ($QMD_SRC 是空的?)"
+  abort_safe "$(m "没有任何 .qmd 编译成功 ($QMD_SRC 是空的?)" "No .qmd compiled at all (is $QMD_SRC empty?)")"
 fi
-echo "    ✓ $COMPILED 个 .qmd 全部 hash 命中"
+say "    ✓ $COMPILED 个 .qmd 全部 hash 命中" "    ✓ all $COMPILED .qmd hashes hit"
 
 # ───── 阶段 5: 写最终 drop-in (验证通过后才写, 含 ime_hook + zh_CN.rcc) ─────
-echo "  → 阶段 5/6: 写最终 drop-in..."
+say "  → 阶段 5/6: 写最终 drop-in..." "  → Stage 5/6: writing the final drop-in..."
 mkdir -p /etc/systemd/system/xochitl.service.d
 mkdir -p /tmp/lc && mount --bind / /tmp/lc
 mount -o remount,rw /tmp/lc
@@ -188,17 +192,17 @@ chmod 644 $DROPIN /tmp/lc$DROPIN
 sync; umount -l /tmp/lc 2>/dev/null || true; rmdir /tmp/lc 2>/dev/null || true
 rm -f /tmp/zz-rmkit-cn-final.conf
 systemctl daemon-reload
-echo "    ✓ drop-in 写入 (tmpfs + ext4 lower 双写持久化)"
+say "    ✓ drop-in 写入 (tmpfs + ext4 lower 双写持久化)" "    ✓ drop-in written (tmpfs + ext4 lower, persisted twice)"
 
 # ───── 阶段 6: 启动 services + xochitl ─────
-echo "  → 阶段 6/6: 启动服务..."
+say "  → 阶段 6/6: 启动服务..." "  → Stage 6/6: starting services..."
 systemctl start remarkable-space.service rmkit-cn-ime-http.service 2>/dev/null || true
 systemctl start rmkit-cn-ota.timer 2>/dev/null || true
 [ -f /etc/systemd/system/rmkit-cn-version.path ] && systemctl start rmkit-cn-version.path 2>/dev/null || true
 
 # 阶段 2 stop 了 xochitl, 现在 start (drop-in 首次生效)
 # 如果阶段 2 没 stop (hashtab 跳过), xochitl 在跑出厂版本, 这里 restart 让 drop-in 生效
-echo "    → start xochitl (drop-in 首次生效)..."
+say "    → start xochitl (drop-in 首次生效)..." "    → starting xochitl (drop-in takes effect)..."
 if pidof xochitl >/dev/null 2>&1; then
   systemctl restart xochitl.service
 else
@@ -209,20 +213,20 @@ sleep 5
 # (start-limit 锁死之前抓住 → 避免冷启动 ConditionPathExists 死锁)
 XPID=$(pidof xochitl 2>/dev/null)
 if [ -z "$XPID" ]; then
-  echo "    ✗ xochitl 没启动起来! 立即回退..."
-  echo "    journal 倒数 20 行:"
+  say "    ✗ xochitl 没启动起来! 立即回退..." "    ✗ xochitl did not start! Rolling back..."
+  say "    journal 倒数 20 行:" "    last 20 journal lines:"
   journalctl -u xochitl.service --no-pager -n 20 2>&1 | sed 's/^/      /' || true
-  abort_safe "xochitl 启动失败 (.qmd 验证通过但运行时 panic? 看 journal)"
+  abort_safe "$(m "xochitl 启动失败 (.qmd 验证通过但运行时 panic? 看 journal)" "xochitl failed to start (.qmd verified but panicked at runtime? see journal)")"
 fi
 # 再等 5 秒确认稳定 (避免起来又 crash)
 sleep 5
 XPID2=$(pidof xochitl 2>/dev/null)
 if [ -z "$XPID2" ] || [ "$XPID" != "$XPID2" ]; then
-  echo "    ✗ xochitl 起来但很快 crash/重启 (PID $XPID → $XPID2)!"
+  say "    ✗ xochitl 起来但很快 crash/重启 (PID $XPID → $XPID2)!" "    ✗ xochitl started but crashed/restarted right away (PID $XPID → $XPID2)!"
   journalctl -u xochitl.service --no-pager -n 30 2>&1 | sed 's/^/      /' || true
   abort_safe "xochitl crash loop"
 fi
-echo "    ✓ xochitl (PID $XPID, 稳定 10 秒) — xovi: $(grep -c xovi /proc/$XPID/maps 2>/dev/null), ime_hook: $(grep -c ime_hook /proc/$XPID/maps 2>/dev/null)"
+echo "    ✓ xochitl (PID $XPID, $(m "稳定 10 秒" "stable for 10 s")) — xovi: $(grep -c xovi /proc/$XPID/maps 2>/dev/null), ime_hook: $(grep -c ime_hook /proc/$XPID/maps 2>/dev/null)"
 
 rm -rf /tmp/rmkit-cn-systemd-staging
-echo "  ✓ 部署完成"
+say "  ✓ 部署完成" "  ✓ Deployment complete"

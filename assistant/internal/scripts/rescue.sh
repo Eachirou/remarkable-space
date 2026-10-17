@@ -7,13 +7,14 @@
 # 来回转。所以 /home 里的熔断不够 (它管不到启动顺序), 必须把两个槽 rootfs 下层的
 # drop-in 都摘掉。
 TS=$(date +%Y%m%d-%H%M%S)
-say() { echo "[紧急修复] $*"; }
+m() { if [ "$UI_LANG" = en ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
+say() { echo "[$(m 紧急修复 rescue)] $(m "$1" "$2")"; }
 
 if [ ! -f /etc/version ]; then
-    say "这不是 reMarkable 系统 (可能在 Android 模式), 不处理"
+    say "这不是 reMarkable 系统 (可能在 Android 模式), 不处理" "Not the reMarkable system (Android mode?), nothing to do"
     exit 0
 fi
-say "固件 $(cat /etc/version 2>/dev/null), 开始"
+say "固件 $(cat /etc/version 2>/dev/null), 开始" "firmware $(cat /etc/version 2>/dev/null), starting"
 
 # ── 1. 两个槽的 rootfs: 停用 xochitl 的 drop-in (最关键, 先做) ─────────────
 # 改名而不是删除: 不以 .conf 结尾 systemd 就不读, 想恢复改回来即可。
@@ -22,7 +23,7 @@ disable_dropins() { # $1 = 某个 rootfs 的 etc 目录
     [ -d "$D" ] || return 0
     for f in "$D"/zz-rmkit-cn.conf "$D"/zz-space.conf; do
         [ -f "$f" ] || continue
-        mv -f "$f" "$f.rescue-$TS" && say "已停用 $f"
+        mv -f "$f" "$f.rescue-$TS" && say "已停用 $f" "disabled $f"
     done
 }
 
@@ -37,7 +38,7 @@ if mount --bind / "$MNT" 2>/dev/null; then
     sync
     umount -l "$MNT" 2>/dev/null
 else
-    say "当前槽下层挂不上, 跳过 (本次开机的 /etc 已处理)"
+    say "当前槽下层挂不上, 跳过 (本次开机的 /etc 已处理)" "cannot mount the current slot's lower layer, skipping (this boot's /etc is done)"
 fi
 
 # 另一个槽 (只有 Paper Pro 系列有 rootdev)
@@ -50,7 +51,7 @@ if command -v rootdev >/dev/null 2>&1; then
         [ "$(readlink "$fd" 2>/dev/null)" = "$INACTIVE" ] && { BUSY=1; break; }
     done
     if [ -n "$BUSY" ]; then
-        say "另一个槽正在被写入 (系统更新中), 不去碰它"
+        say "另一个槽正在被写入 (系统更新中), 不去碰它" "the other slot is being written (system update), leaving it alone"
     elif [ -n "$INACTIVE" ] && [ -b "$INACTIVE" ]; then
         M2=/tmp/space-rescue-inactive
         mkdir -p "$M2"
@@ -58,9 +59,9 @@ if command -v rootdev >/dev/null 2>&1; then
             disable_dropins "$M2/etc"
             sync
             umount "$M2" 2>/dev/null
-            say "另一个槽 ($INACTIVE) 已处理"
+            say "另一个槽 ($INACTIVE) 已处理" "other slot ($INACTIVE) done"
         else
-            say "另一个槽 ($INACTIVE) 挂不上, 跳过"
+            say "另一个槽 ($INACTIVE) 挂不上, 跳过" "cannot mount the other slot ($INACTIVE), skipping"
         fi
         rmdir "$M2" 2>/dev/null
     fi
@@ -81,28 +82,28 @@ if [ -d /home/root ]; then
         # 熔断: 底座预检看到它就一直原生启动, 直到用助手重新安装
         echo "rescue@$TS" > "$RMKIT/.fuse_tripped"
         rm -f "$RMKIT"/active/*.so 2>/dev/null
-        say "已拉熔断并摘下注入"
+        say "已拉熔断并摘下注入" "fuse tripped and injection removed"
     fi
     rm -f /home/root/xovi/exthome/qt-resource-rebuilder/*.qmd 2>/dev/null
     EXT=/home/root/xovi/extensions.d
     if [ -d "$EXT" ] && [ -n "$(ls -A "$EXT" 2>/dev/null)" ]; then
         mkdir -p "$BK/extensions.d"
-        mv -f "$EXT"/* "$BK/extensions.d/" 2>/dev/null && say "xovi 扩展已搬到 $BK/extensions.d"
+        mv -f "$EXT"/* "$BK/extensions.d/" 2>/dev/null && say "xovi 扩展已搬到 $BK/extensions.d" "xovi extensions moved to $BK/extensions.d"
     fi
     sync
 else
-    say "/home 还没挂好, 跳过这一步"
+    say "/home 还没挂好, 跳过这一步" "/home is not mounted yet, skipping this step"
 fi
 
 # ── 3. 让改动对这次开机生效 ───────────────────────────────────────────────
 systemctl daemon-reload 2>/dev/null
 STATE=$(systemctl is-active xochitl 2>/dev/null)
 if [ "$STATE" = "active" ]; then
-    say "界面正在运行, 改动下次开机生效"
+    say "界面正在运行, 改动下次开机生效" "the UI is running; changes take effect on next boot"
 else
     # 起不来 / 在崩溃重启中: 清掉失败计数, 按原厂配置再起一次
     systemctl reset-failed xochitl 2>/dev/null
     systemctl start --no-block xochitl 2>/dev/null
-    say "界面状态 $STATE, 已按原厂配置重新启动"
+    say "界面状态 $STATE, 已按原厂配置重新启动" "UI state $STATE, restarted with stock configuration"
 fi
-say "完成。设备现在以原厂状态启动; 要恢复中文和空间, 等设备正常开机后用助手重新安装"
+say "完成。设备现在以原厂状态启动; 要恢复中文和空间, 等设备正常开机后用助手重新安装" "Done. The device now boots stock; to get Space back, reinstall with the assistant once it boots normally"

@@ -12,6 +12,8 @@
 package deploy
 
 import (
+	"github.com/boangs/remarkable-space/assistant/internal/i18n"
+
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
@@ -81,16 +83,16 @@ func archFor(a string) (arch, error) {
 			"qml_inject-armv7.so", "qml_inject_impl-armv7.so", "ime-server-rime-armv7",
 			"space-server-armv7"}, nil
 	}
-	return arch{}, fmt.Errorf("不支持的架构: %s (仅支持 aarch64 / armv7l)", a)
+	return arch{}, fmt.Errorf(i18n.T("不支持的架构: %s (仅支持 aarch64 / armv7l)", "unsupported architecture: %s (only aarch64 / armv7l)"), a)
 }
 
 // NewPlan 根据探测结果与安装包内容生成计划 (纯计算, 不碰设备)。
 func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	if b.Manifest.Component != bundle.ComponentSpace {
-		return nil, fmt.Errorf("安装包组件是 %s, 不是 space", b.Manifest.Component)
+		return nil, fmt.Errorf(i18n.T("安装包组件是 %s, 不是 space", "bundle component is %s, not space"), b.Manifest.Component)
 	}
 	if info.InAndroidMode {
-		return nil, errors.New("设备当前在 Android 模式, 请先回到 reMarkable 系统")
+		return nil, errors.New(i18n.T("设备当前在 Android 模式, 请先回到 reMarkable 系统", "the device is in Android mode; return to the reMarkable system first"))
 	}
 	ar, err := archFor(info.Arch)
 	if err != nil {
@@ -100,7 +102,8 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 		Files: []FileEntry{}, Warnings: []string{}, // 保证 JSON 是 [] 而不是 null (前端直接 .map)
 		xoviArch: ar.xovi, uploadBin: ar.uploadBin, imeBin: ar.imeBin, spaceBin: ar.spaceBin}
 	if info.ModelKey == "unknown" {
-		p.Warnings = append(p.Warnings, "未识别的机型 (分辨率 "+info.Resolution+"), 按架构 "+info.Arch+" 部署; 未适配固件会由 fail-open 预检自动降级为不注入")
+		p.Warnings = append(p.Warnings, i18n.T("未识别的机型 (分辨率 "+info.Resolution+"), 按架构 "+info.Arch+" 部署; 未适配固件会由 fail-open 预检自动降级为不注入",
+			"Unrecognized model (resolution "+info.Resolution+"); deploying by architecture "+info.Arch+". On unsupported firmware the fail-open precheck falls back to no injection"))
 	}
 
 	// install.sh 165-184: librime 三条硬门槛 (② 的 /rime/schema 检查由 mkbundle 打包时完成)
@@ -116,7 +119,7 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	for _, f := range []string{"space-dist/" + ar.spaceBin, "dist/" + p.imeBin, "dist/" + ar.imeHook, "dist/" + ar.qmdTool,
 		"vendor/extensions/xovi-message-broker-" + ar.ext + ".so", "dist/reMarkable_zh_CN.qm", "qmd/zh_CN.rcc"} {
 		if !b.Has(f) {
-			return nil, fmt.Errorf("安装包缺必备产物 %s", f)
+			return nil, fmt.Errorf(i18n.T("安装包缺必备产物 %s", "bundle is missing required file %s"), f)
 		}
 	}
 	p.DeployAudio = b.Has("vendor/audio/rmkit-audio-" + ar.ext + ".tar.gz")
@@ -128,7 +131,7 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	if p.NeedXovi {
 		p.xoviTar = "vendor/xovi/xovi-" + ar.xovi + ".tar.gz"
 		if !b.Has(p.xoviTar) || !b.Has("vendor/xovi/xochitl-xovi") {
-			return nil, errors.New("设备没有 xovi 且安装包不含 vendor/xovi, 无法自动部署")
+			return nil, errors.New(i18n.T("设备没有 xovi 且安装包不含 vendor/xovi, 无法自动部署", "the device has no xovi and the bundle has no vendor/xovi; cannot deploy automatically"))
 		}
 	}
 	// install.sh 223-241: 按架构的 drop-in [Unit] 头
@@ -146,7 +149,7 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	}
 	must := func(device, source string, mode int64) error {
 		if !b.Has(source) {
-			return fmt.Errorf("安装包缺 %s", source)
+			return fmt.Errorf(i18n.T("安装包缺 %s", "bundle is missing %s"), source)
 		}
 		add(device, source, mode)
 		return nil
@@ -255,7 +258,7 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 // Run 执行计划。log 收到的每一行都同时进本地审计日志。
 func Run(ctx context.Context, c *sshx.Client, b *bundle.Bundle, p *Plan, log sshx.Logger) error {
 	if p.NeedXovi { // install.sh 186-213
-		log("设备无 xovi, 自动部署...")
+		log(i18n.T("设备无 xovi, 自动部署...", "No xovi on the device, deploying it..."))
 		for _, s := range []string{p.xoviTar, "vendor/xovi/xochitl-xovi"} {
 			rc, err := b.Open(s)
 			if err != nil {
@@ -274,27 +277,27 @@ cp /tmp/xochitl-xovi /home/root/xovi/xochitl-xovi
 chmod +x /home/root/xovi/xochitl-xovi
 chown -R root:root /home/root/xovi
 rm /tmp/%[1]s /tmp/xochitl-xovi
-echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
-			return fmt.Errorf("部署 xovi 失败: %w", err)
+echo '  ✓ xovi '`+i18n.T("部署完成", "deployed"), path.Base(p.xoviTar)), nil); err != nil {
+			return fmt.Errorf(i18n.T("部署 xovi 失败: %w", "failed to deploy xovi: %w"), err)
 		}
 	}
 
 	// install.sh 543-566: 单次 tar 流式传输
-	log(fmt.Sprintf("传输文件 (%d 个文件, %.1f MB, 单次 SSH 流式)...", len(p.Files), float64(p.TotalBytes)/1e6))
+	log(fmt.Sprintf(i18n.T("传输文件 (%d 个文件, %.1f MB, 单次 SSH 流式)...", "Transferring files (%d files, %.1f MB, single SSH stream)..."), len(p.Files), float64(p.TotalBytes)/1e6))
 	start := time.Now()
 	pr, pw := io.Pipe()
 	go func() { pw.CloseWithError(writeTar(pw, b, p.Files)) }()
 	if err := c.StreamTar(ctx, pr, scripts.ReceivePayload); err != nil {
 		_ = pr.Close()
-		return fmt.Errorf("传输失败: %w", err)
+		return fmt.Errorf(i18n.T("传输失败: %w", "transfer failed: %w"), err)
 	}
-	log(fmt.Sprintf("传输完成 (%.0fs)", time.Since(start).Seconds()))
+	log(fmt.Sprintf(i18n.T("传输完成 (%.0fs)", "Transfer done (%.0fs)"), time.Since(start).Seconds()))
 
 	// install.sh 568-573: 必须在 reenable 之前写 .last_fw_version (防 fw-upgrade.sh 误触发)
 	if err := c.WriteFile(ctx, "/home/root/rmkit-cn/.last_fw_version", strings.NewReader(p.FWID), "644"); err != nil {
 		return err
 	}
-	log("✓ .last_fw_version 已写入 (" + p.FWID + ")")
+	log(i18n.T("✓ .last_fw_version 已写入 (", "✓ .last_fw_version written (") + p.FWID + ")")
 
 	// 记一笔装的是哪个安装包。助手下次连上就能告诉用户当前版本, 也才好判断要不要更新。
 	if p.BundleVersion != "" {
@@ -309,21 +312,21 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 	// 这里失败就直接退出, 设备还是原样。
 	res, err := c.Run(ctx, "/home/root/remarkable-space/space-server -h >/dev/null 2>&1; echo $?")
 	if err != nil {
-		return fmt.Errorf("后端自检执行失败: %w", err)
+		return fmt.Errorf(i18n.T("后端自检执行失败: %w", "backend self-check could not run: %w"), err)
 	}
 	switch strings.TrimSpace(res.Stdout) {
 	case "126", "127":
-		return fmt.Errorf("后端二进制在设备上跑不起来 (架构不符?), 已停止安装, 设备未改动; "+
-			"安装包里给的是 %s 版", p.spaceBin)
+		return fmt.Errorf(i18n.T("后端二进制在设备上跑不起来 (架构不符?), 已停止安装, 设备未改动; 安装包里给的是 %s 版",
+			"the backend binary does not run on this device (wrong architecture?); install stopped, device untouched; the bundle provides the %s build"), p.spaceBin)
 	}
-	log("✓ 后端二进制自检通过")
+	log(i18n.T("✓ 后端二进制自检通过", "✓ Backend binary self-check passed"))
 
 	// 侧栏入口切成「空间」的开关 —— 注入库同时检查这个标记和 Space.qml 是否存在
 	// (qml_inject_impl.cpp: useSpace)。少了它侧栏显示的还是"高级", 根本进不去空间。
 	if err := c.WriteFile(ctx, "/home/root/rmkit-cn/space/.primary", strings.NewReader(""), "644"); err != nil {
 		return err
 	}
-	log("✓ 侧栏入口已切到「空间」")
+	log(i18n.T("✓ 侧栏入口已切到「空间」", "✓ Sidebar entry switched to Space"))
 
 	// 空间自己的 xochitl drop-in。单独一个文件, 不动底座那份 zz-rmkit-cn.conf ——
 	// systemd 会把 xochitl.service.d/ 下所有 .conf 合并, 所以空间加能力不必让用户
@@ -338,9 +341,9 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 			return err
 		}
 		if err := c.RunScript(ctx, spaceDropinScript, nil); err != nil {
-			return fmt.Errorf("装空间的 xochitl drop-in 失败: %w", err)
+			return fmt.Errorf(i18n.T("装空间的 xochitl drop-in 失败: %w", "failed to install the Space xochitl drop-in: %w"), err)
 		}
-		log("✓ 空间 drop-in 已装 (编译应用的模块搜索路径)")
+		log(i18n.T("✓ 空间 drop-in 已装 (编译应用的模块搜索路径)", "✓ Space drop-in installed (module search path for compiled apps)"))
 	}
 
 	// 后端的 drop-in: 应用商店的握手接口。静态索引入口已经关掉了, 不配这个的设备
@@ -354,9 +357,9 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 			return err
 		}
 		if err := c.RunScript(ctx, storeAPIDropinScript, nil); err != nil {
-			return fmt.Errorf("装应用商店 drop-in 失败: %w", err)
+			return fmt.Errorf(i18n.T("装应用商店 drop-in 失败: %w", "failed to install the app catalog drop-in: %w"), err)
 		}
-		log("✓ 应用商店握手已配置")
+		log(i18n.T("✓ 应用商店握手已配置", "✓ App catalog handshake configured"))
 	}
 
 	// rm-appload: KOReader 这类要 framebuffer 的程序靠它拿画布。装的是官方发布包,
@@ -377,41 +380,42 @@ echo '  ✓ xovi 部署完成'`, path.Base(p.xoviTar)), nil); err != nil {
 			}
 		}
 		if err := c.RunScript(ctx, apploadScript, nil); err != nil {
-			return fmt.Errorf("装 AppLoad 失败: %w", err)
+			return fmt.Errorf(i18n.T("装 AppLoad 失败: %w", "failed to install AppLoad: %w"), err)
 		}
-		log("✓ AppLoad 已装 (KOReader 等外部应用要用)")
+		log(i18n.T("✓ AppLoad 已装 (KOReader 等外部应用要用)", "✓ AppLoad installed (needed by KOReader and other external apps)"))
 	}
 
 	if p.DeployRime { // install.sh 575-612
-		log("部署 rime 词库 (整句输入)...")
-		if err := c.RunScript(ctx, scripts.RimeSetup, nil); err != nil {
-			return fmt.Errorf("rime 词库部署失败: %w", err)
+		log(i18n.T("部署 rime 词库 (整句输入)...", "Deploying the rime dictionary (sentence input)..."))
+		if err := c.RunScript(ctx, scripts.RimeSetup, map[string]string{"UI_LANG": i18n.Lang()}); err != nil {
+			return fmt.Errorf(i18n.T("rime 词库部署失败: %w", "failed to deploy the rime dictionary: %w"), err)
 		}
 	}
 
 	if p.DeployAudio { // install.sh AUDIO_EOF 段
-		log("部署蓝牙音频组件 (bluealsa + mpg123)...")
-		if err := c.RunScript(ctx, scripts.AudioSetup, nil); err != nil {
-			return fmt.Errorf("蓝牙音频组件部署失败: %w", err)
+		log(i18n.T("部署蓝牙音频组件 (bluealsa + mpg123)...", "Deploying Bluetooth audio components (bluealsa + mpg123)..."))
+		if err := c.RunScript(ctx, scripts.AudioSetup, map[string]string{"UI_LANG": i18n.Lang()}); err != nil {
+			return fmt.Errorf(i18n.T("蓝牙音频组件部署失败: %w", "failed to deploy Bluetooth audio components: %w"), err)
 		}
 	}
 
 	// install.sh 614-855: 设备端六阶段防砖部署
-	log("配置系统服务 + 编译 + 启动 (设备端六阶段)...")
+	log(i18n.T("配置系统服务 + 编译 + 启动 (设备端六阶段)...", "Configuring services + compiling + starting (six stages on the device)..."))
 	env := map[string]string{
 		"FW_VERSION":          p.FWID,
 		"ZZ_HEADER_FLAT":      strings.ReplaceAll(p.zzHeader, "\n", `\n`),
 		"QML_INJECT_DEPLOYED": boolStr(p.QMLInject),
+		"UI_LANG":             i18n.Lang(),
 	}
 	if err := c.RunScript(ctx, scripts.DeployStages, env); err != nil {
-		return fmt.Errorf("设备端部署失败 (已按 abort_safe 回退到出厂启动): %w", err)
+		return fmt.Errorf(i18n.T("设备端部署失败 (已按 abort_safe 回退到出厂启动): %w", "deployment on the device failed (rolled back to stock boot via abort_safe): %w"), err)
 	}
 	return nil
 }
 
 // Uninstall 执行 install.sh --uninstall 的设备端脚本。
 func Uninstall(ctx context.Context, c *sshx.Client) error {
-	return c.RunScript(ctx, scripts.Uninstall, nil)
+	return c.RunScript(ctx, scripts.Uninstall, map[string]string{"UI_LANG": i18n.Lang()})
 }
 
 // spaceDropinSrc 是安装包里空间那份 xochitl drop-in 的路径。
@@ -494,10 +498,10 @@ func writeTar(w io.Writer, b *bundle.Bundle, files []FileEntry) error {
 		n, err := io.Copy(tw, rc)
 		_ = rc.Close()
 		if err != nil {
-			return fmt.Errorf("打包 %s: %w", f.Source, err)
+			return fmt.Errorf(i18n.T("打包 %s: %w", "packing %s: %w"), f.Source, err)
 		}
 		if n != f.Size {
-			return fmt.Errorf("打包 %s: 大小 %d 与清单 %d 不符", f.Source, n, f.Size)
+			return fmt.Errorf(i18n.T("打包 %s: 大小 %d 与清单 %d 不符", "packing %s: size %d does not match manifest %d"), f.Source, n, f.Size)
 		}
 	}
 	if err := tw.Close(); err != nil {
@@ -522,7 +526,7 @@ func FWNumber(fw string) int64 {
 // RepairPanel 清除 rmkit-cn 的 crashloop 熔断与启动计数并重启一次 xochitl (侧栏入口或中文凭空消失时用)。
 // 熔断误判的典型场景: 进 Android 再回原厂 = 600 秒内两次启动, 再多一次就被当成崩溃循环。
 func RepairPanel(ctx context.Context, c *sshx.Client) error {
-	return c.RunLogged(ctx, `set -e
+	script := i18n.T(`set -e
 R=/home/root/rmkit-cn
 [ "$(cat /proc/1/comm)" = systemd ] || { echo '请先回到 reMarkable 系统'; exit 1; }
 echo "熔断标记: $(cat $R/.fuse_tripped 2>/dev/null || echo 无)  600s 内启动次数: $(awk -v n=$(date +%s) 'n-$1<600' $R/.starts 2>/dev/null | wc -l)"
@@ -530,5 +534,15 @@ rm -f $R/.fuse_tripped; : > $R/.starts
 date +%s > $R/.intentional_restart
 systemctl restart xochitl.service
 sleep 10
-if pidof xochitl >/dev/null; then echo "  ✓ xochitl 已重启 (PID $(pidof xochitl)), 注入: xovi=$(grep -c xovi /proc/$(pidof xochitl)/maps) ime_hook=$(grep -c ime_hook /proc/$(pidof xochitl)/maps)"; else echo '  ✗ xochitl 没起来, 看 journalctl -u xochitl'; exit 1; fi`, nil)
+if pidof xochitl >/dev/null; then echo "  ✓ xochitl 已重启 (PID $(pidof xochitl)), 注入: xovi=$(grep -c xovi /proc/$(pidof xochitl)/maps) ime_hook=$(grep -c ime_hook /proc/$(pidof xochitl)/maps)"; else echo '  ✗ xochitl 没起来, 看 journalctl -u xochitl'; exit 1; fi`,
+		`set -e
+R=/home/root/rmkit-cn
+[ "$(cat /proc/1/comm)" = systemd ] || { echo 'Return to the reMarkable system first'; exit 1; }
+echo "fuse marker: $(cat $R/.fuse_tripped 2>/dev/null || echo none)  starts within 600s: $(awk -v n=$(date +%s) 'n-$1<600' $R/.starts 2>/dev/null | wc -l)"
+rm -f $R/.fuse_tripped; : > $R/.starts
+date +%s > $R/.intentional_restart
+systemctl restart xochitl.service
+sleep 10
+if pidof xochitl >/dev/null; then echo "  ✓ xochitl restarted (PID $(pidof xochitl)), injected: xovi=$(grep -c xovi /proc/$(pidof xochitl)/maps) ime_hook=$(grep -c ime_hook /proc/$(pidof xochitl)/maps)"; else echo '  ✗ xochitl did not come up, see journalctl -u xochitl'; exit 1; fi`)
+	return c.RunLogged(ctx, script, nil)
 }

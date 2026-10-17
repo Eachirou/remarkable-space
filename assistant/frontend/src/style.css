@@ -188,3 +188,7 @@ pre.files { max-height: 230px; overflow: auto; }
 }
 .seg { display: flex; gap: 24px; }
 .seg .opt { margin: 4px 0 0; }
+
+/* 连接页底部的语言切换: 一个不起眼的链接, 设置里还有正式的开关 */
+.note.lang { margin-top: 18px; }
+.note.lang a { color: var(--dim, #777); text-decoration: underline; text-underline-offset: 3px; }

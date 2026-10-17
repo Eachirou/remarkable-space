@@ -47,4 +47,4 @@ REMOTE_BASE=/home/root/rmkit-cn
     rm -f /usr/share/remarkable/xochitl/translations/reMarkable_zh_CN.qm
     systemctl daemon-reload
     udevadm control --reload-rules 2>/dev/null || true
-    echo '卸载完成'
+    if [ "$UI_LANG" = en ]; then echo 'Uninstall complete'; else echo '卸载完成'; fi

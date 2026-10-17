@@ -10,6 +10,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/boangs/remarkable-space/assistant/internal/i18n"
 	"io"
 	"net"
 	"os"
@@ -19,6 +21,14 @@ import (
 
 	"golang.org/x/crypto/ssh"
 )
+
+// BadPassword 是 SSH 认证被拒的错误; 文案按界面语言生成, 调用方用 errors.As 判断。
+type BadPassword struct{}
+
+func (BadPassword) Error() string {
+	return i18n.T("SSH 密码不对 (设备上 设置 → 帮助 → 版权与许可 最底部)",
+		"Wrong SSH password (on the device: Settings → Help → Copyrights and licenses, at the bottom)")
+}
 
 // ExtraSigners 是应用层注入的密钥 (助手自己的密钥), Dial 时优先尝试。
 var ExtraSigners []ssh.Signer
@@ -55,7 +65,8 @@ func Dial(ctx context.Context, host, password string, log Logger) (*Client, erro
 		auth = append(auth, ssh.Password(password))
 	}
 	if len(auth) == 0 {
-		return nil, errors.New("请填写 SSH 密码 (设备上 设置 → 帮助 → 版权与许可 最底部)")
+		return nil, errors.New(i18n.T("请填写 SSH 密码 (设备上 设置 → 帮助 → 版权与许可 最底部)",
+			"Enter the SSH password (on the device: Settings → Help → Copyrights and licenses, at the bottom)"))
 	}
 	cfg := &ssh.ClientConfig{
 		User:            "root",
@@ -66,17 +77,17 @@ func Dial(ctx context.Context, host, password string, log Logger) (*Client, erro
 	d := net.Dialer{Timeout: cfg.Timeout}
 	raw, err := d.DialContext(ctx, "tcp", host)
 	if err != nil {
-		return nil, fmt.Errorf("连不上 %s: %w", host, err)
+		return nil, fmt.Errorf(i18n.T("连不上 %s: %w", "Cannot reach %s: %w"), host, err)
 	}
 	c, chans, reqs, err := ssh.NewClientConn(raw, host, cfg)
 	if err != nil {
 		_ = raw.Close()
 		if strings.Contains(err.Error(), "unable to authenticate") {
-			return nil, errors.New("SSH 密码不对 (设备上 设置 → 帮助 → 版权与许可 最底部)")
+			return nil, BadPassword{}
 		}
-		return nil, fmt.Errorf("SSH 握手失败: %w", err)
+		return nil, fmt.Errorf(i18n.T("SSH 握手失败: %w", "SSH handshake failed: %w"), err)
 	}
-	log("已连接 " + host)
+	log(i18n.T("已连接 ", "Connected to ") + host)
 	return &Client{conn: ssh.NewClient(c, chans, reqs), host: host, log: log}, nil
 }
 
@@ -110,7 +121,7 @@ func (c *Client) RunLogged(ctx context.Context, cmd string, stdin io.Reader) err
 		return err
 	}
 	if code != 0 {
-		return fmt.Errorf("远端命令退出码 %d", code)
+		return fmt.Errorf(i18n.T("远端命令退出码 %d", "remote command exited with code %d"), code)
 	}
 	return nil
 }
@@ -135,13 +146,13 @@ func (c *Client) StreamTar(ctx context.Context, tarGz io.Reader, remoteScript st
 func (c *Client) WriteFile(ctx context.Context, path string, content io.Reader, mode string) error {
 	dir := path[:strings.LastIndex(path, "/")]
 	cmd := fmt.Sprintf("mkdir -p %s && cat > %s && chmod %s %s", shellQuote(dir), shellQuote(path), mode, shellQuote(path))
-	c.log("写入 " + path)
+	c.log(i18n.T("写入 ", "Writing ") + path)
 	res, err := c.exec(ctx, cmd, content, io.Discard, io.Discard)
 	if err != nil {
 		return err
 	}
 	if res != 0 {
-		return fmt.Errorf("写 %s 失败 (退出码 %d)", path, res)
+		return fmt.Errorf(i18n.T("写 %s 失败 (退出码 %d)", "failed to write %s (exit code %d)"), path, res)
 	}
 	return nil
 }
@@ -149,14 +160,14 @@ func (c *Client) WriteFile(ctx context.Context, path string, content io.Reader, 
 func (c *Client) exec(ctx context.Context, cmd string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	sess, err := c.conn.NewSession()
 	if err != nil {
-		return -1, fmt.Errorf("开 SSH 会话失败: %w", err)
+		return -1, fmt.Errorf(i18n.T("开 SSH 会话失败: %w", "failed to open SSH session: %w"), err)
 	}
 	defer sess.Close()
 	sess.Stdin = stdin
 	sess.Stdout = stdout
 	sess.Stderr = stderr
 	if err := sess.Start(cmd); err != nil {
-		return -1, fmt.Errorf("启动远端命令失败: %w", err)
+		return -1, fmt.Errorf(i18n.T("启动远端命令失败: %w", "failed to start remote command: %w"), err)
 	}
 	done := make(chan error, 1)
 	go func() { done <- sess.Wait() }()
@@ -170,7 +181,7 @@ func (c *Client) exec(ctx context.Context, cmd string, stdin io.Reader, stdout, 
 			return exitErr.ExitStatus(), nil
 		}
 		if err != nil {
-			return -1, fmt.Errorf("远端命令异常: %w", err)
+			return -1, fmt.Errorf(i18n.T("远端命令异常: %w", "remote command failed: %w"), err)
 		}
 		return 0, nil
 	}

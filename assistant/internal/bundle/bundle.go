@@ -6,6 +6,8 @@
 package bundle
 
 import (
+	"github.com/boangs/remarkable-space/assistant/internal/i18n"
+
 	"archive/zip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -55,7 +57,7 @@ type Bundle struct {
 func Open(path string, verify bool) (*Bundle, error) {
 	zr, err := zip.OpenReader(path)
 	if err != nil {
-		return nil, fmt.Errorf("打不开安装包 %s: %w", path, err)
+		return nil, fmt.Errorf(i18n.T("打不开安装包 %s: %w", "cannot open bundle %s: %w"), path, err)
 	}
 	b := &Bundle{Path: path, zr: zr, index: map[string]*zip.File{}}
 	for _, f := range zr.File {
@@ -64,7 +66,7 @@ func Open(path string, verify bool) (*Bundle, error) {
 	mf, ok := b.index[ManifestName]
 	if !ok {
 		_ = zr.Close()
-		return nil, errors.New("安装包缺 manifest.json, 不是空间助手的包")
+		return nil, errors.New(i18n.T("安装包缺 manifest.json, 不是空间助手的包", "bundle has no manifest.json; not a Space Assistant bundle"))
 	}
 	rc, err := mf.Open()
 	if err != nil {
@@ -75,12 +77,12 @@ func Open(path string, verify bool) (*Bundle, error) {
 	_ = rc.Close()
 	if err != nil {
 		_ = zr.Close()
-		return nil, fmt.Errorf("manifest.json 解析失败: %w", err)
+		return nil, fmt.Errorf(i18n.T("manifest.json 解析失败: %w", "cannot parse manifest.json: %w"), err)
 	}
 	for name := range b.Manifest.Files {
 		if _, ok := b.index[name]; !ok {
 			_ = zr.Close()
-			return nil, fmt.Errorf("安装包缺文件 %s (清单有, 包里没有)", name)
+			return nil, fmt.Errorf(i18n.T("安装包缺文件 %s (清单有, 包里没有)", "bundle is missing %s (listed in manifest, not in zip)"), name)
 		}
 	}
 	if verify {
@@ -115,7 +117,7 @@ func (b *Bundle) Names() []string {
 func (b *Bundle) Open(name string) (io.ReadCloser, error) {
 	f, ok := b.index[name]
 	if !ok {
-		return nil, fmt.Errorf("安装包没有 %s", name)
+		return nil, fmt.Errorf(i18n.T("安装包没有 %s", "bundle has no %s"), name)
 	}
 	return f.Open()
 }
@@ -144,13 +146,13 @@ func (b *Bundle) Verify() error {
 		n, err := io.Copy(h, rc)
 		_ = rc.Close()
 		if err != nil {
-			return fmt.Errorf("读 %s 失败: %w", name, err)
+			return fmt.Errorf(i18n.T("读 %s 失败: %w", "failed to read %s: %w"), name, err)
 		}
 		if n != e.Size {
-			return fmt.Errorf("%s 大小不符 (清单 %d, 实际 %d)", name, e.Size, n)
+			return fmt.Errorf(i18n.T("%s 大小不符 (清单 %d, 实际 %d)", "%s size mismatch (manifest %d, actual %d)"), name, e.Size, n)
 		}
 		if got := hex.EncodeToString(h.Sum(nil)); got != e.SHA256 {
-			return fmt.Errorf("%s 校验失败 (sha256 不符), 安装包已损坏或被改动", name)
+			return fmt.Errorf(i18n.T("%s 校验失败 (sha256 不符), 安装包已损坏或被改动", "%s failed verification (sha256 mismatch); the bundle is corrupt or was modified"), name)
 		}
 	}
 	return nil
