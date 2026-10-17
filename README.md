@@ -5,9 +5,9 @@
 
 ## 截图
 
-| 空间首页 | 天气 | 计划 |
-|---|---|---|
-| ![空间首页](docs/screenshots/space.png) | ![天气](docs/screenshots/weather.png) | ![计划](docs/screenshots/plan.png) |
+| 空间首页 | 天气 | 计划 | 电台 |
+|---|---|---|---|
+| ![空间首页](docs/screenshots/space.png) | ![天气](docs/screenshots/weather.png) | ![计划](docs/screenshots/plan.png) | ![电台](docs/screenshots/radio.png) |
 
 ## 下载安装
 
