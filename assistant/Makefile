@@ -21,7 +21,7 @@ CN_MIRROR ?= $(strip $(shell cat .cn-mirror 2>/dev/null))
 # (GitHub Release 与国内镜像同名目录), ANDROID_VER 是包里 manifest
 # 的版本 (和设备上记的比, 判断「已是最新」)。换了 Android 包就把新包传到当次发布, 再改这两个值。
 ANDROID_TAG ?= v1.0.0
-ANDROID_VER ?= v1.2.1-23-g288baa3
+ANDROID_VER ?= v1.3.0
 LDFLAGS := -X main.version=$(VERSION) -X "main.buildTime=$(BUILD_TIME)" \
 	-X main.releaseTag=$(RELEASE_TAG) -X main.cnMirror=$(CN_MIRROR) \
 	-X main.androidTag=$(ANDROID_TAG) -X main.androidVer=$(ANDROID_VER)
