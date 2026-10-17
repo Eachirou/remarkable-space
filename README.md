@@ -3,6 +3,12 @@
 「空间」是 reMarkable 上的应用桌面：首页卡片一眼看到今日计划、天气和正在播放的音乐，
 应用从商店一键安装、随时卸载，不改动系统文件。
 
+## 截图
+
+| 空间首页 | 天气 | 计划 |
+|---|---|---|
+| ![空间首页](docs/screenshots/space.png) | ![天气](docs/screenshots/weather.png) | ![计划](docs/screenshots/plan.png) |
+
 ## 下载安装
 
 用「空间助手」装：电脑用 USB 线连上 reMarkable，助手会把空间连同它需要的底座一次装好。
