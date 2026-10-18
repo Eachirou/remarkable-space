@@ -2,6 +2,9 @@
 REMOTE_BASE=/home/root/rmkit-cn
     systemctl stop    rmkit-cn-upload.service rmkit-cn-version.path rmkit-cn-ime-http.service 2>/dev/null || true
     systemctl disable rmkit-cn-upload.service rmkit-cn-version.path rmkit-cn-ime-http.service 2>/dev/null || true
+    # rm2 老安装还有 OTA 定时器与冷启动重启服务, 以前漏清 (2026-10-18)
+    systemctl stop    rmkit-cn-ota.timer 2>/dev/null || true
+    systemctl disable rmkit-cn-ota.timer rmkit-cn-rm2-reenable.service 2>/dev/null || true
     # 历史 Python IME unit (现已归档到 legacy/ime-py/), 老设备上可能残留, 一并清
     systemctl stop    rmkit-cn-ime.service rmkit-cn-ime-udev.service 2>/dev/null || true
     systemctl disable rmkit-cn-ime.service rmkit-cn-ime-udev.service 2>/dev/null || true
@@ -19,7 +22,8 @@ REMOTE_BASE=/home/root/rmkit-cn
     MNT=/tmp/rmkit-cn-uninst-rootfs
     mkdir -p $MNT && mount --bind / $MNT 2>/dev/null || true
     for D in /etc $MNT/etc; do
-      rm -f $D/systemd/system/rmkit-cn-*.service $D/systemd/system/rmkit-cn-*.path
+      rm -f $D/systemd/system/rmkit-cn-*.service $D/systemd/system/rmkit-cn-*.path $D/systemd/system/rmkit-cn-*.timer
+      rm -f $D/systemd/system/*.wants/rmkit-cn-*
       rm -f $D/systemd/system/xochitl.service.d/zz-rmkit-cn.conf \
             $D/systemd/system/xochitl.service.d/zz-rmkit-cn.conf.bak* \
             $D/systemd/system/xochitl.service.d/zz-rmkit-cn.conf.old
