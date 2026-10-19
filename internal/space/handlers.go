@@ -192,7 +192,43 @@ func (h *Handler) store(w http.ResponseWriter, r *http.Request) {
 		h.storeBody, h.storeAt = body, time.Now()
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_, _ = w.Write(h.storeBody)
+	_, _ = w.Write(localizeIndex(h.storeBody, h.CurrentLang()))
+}
+
+// localizeIndex 按界面语言给商店索引里的应用名和简介定稿 (和 list 对已装应用的做法一致):
+// 英文界面下有 name_en / description_en 的条目换成英文, 没填的保持原文。缓存里存的是原始
+// 索引, 每次响应时再换 —— 用户切语言不用等缓存过期。解析不了就原样返回, 不能因为本地化
+// 把商店弄没了。
+func localizeIndex(body []byte, lang string) []byte {
+	if lang == "zh-CN" {
+		return body
+	}
+	var idx map[string]any
+	if err := json.Unmarshal(body, &idx); err != nil {
+		return body
+	}
+	apps, _ := idx["apps"].([]any)
+	changed := false
+	for _, it := range apps {
+		a, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, k := range []string{"name", "description"} {
+			if v, _ := a[k+"_en"].(string); v != "" {
+				a[k] = v
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return body
+	}
+	out, err := json.Marshal(idx)
+	if err != nil {
+		return body
+	}
+	return out
 }
 
 func (h *Handler) fetchIndex() ([]byte, error) {
