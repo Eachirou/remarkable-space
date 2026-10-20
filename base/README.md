@@ -20,6 +20,10 @@
 | `scripts/` | 发版体检 (`check-dist.sh`、`lse_scan.py`)、翻译合并工具 |
 | `docs/` | 架构、开发、设备矩阵、升级 SOP |
 
+`installer/install.sh` 是旧的命令行安装器，现在只当参照：助手 (`assistant/internal/deploy`)
+是它的 Go 移植，注释里的行号指向它。它还会去装已退役的 upload-server (`upload-server-go/` 没迁过来)，
+不能再直接跑。
+
 产物在 `dist/` (不进仓库)，助手打包时取它：`cd assistant && make bundle`。
 librime 源码树 `third_party/` (约 430MB) 也只放本机。
 

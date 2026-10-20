@@ -162,7 +162,7 @@ const XochitlConf = "/home/root/.config/remarkable/xochitl.conf"
 // LangPref 只读用户在空间里显式选的那个, 没选过就是空串。
 // 外壳要靠它分清"用户选的"和"后端猜的"——猜的不能压过 xochitl 的实时值。
 func (h *Handler) LangPref() string {
-	if b, err := os.ReadFile(filepath.Join(h.Reg.DataDir, "shell", "config.json")); err == nil {
+	if b, err := os.ReadFile(h.shellCfgPath()); err == nil {
 		var cfg struct {
 			Lang string `json:"lang"`
 		}
@@ -173,12 +173,20 @@ func (h *Handler) LangPref() string {
 	return ""
 }
 
+// shellCfgPath 是外壳配置文件; 没有注册表 (单测里只配了商店的 Handler) 时给空串, 读取自然失败。
+func (h *Handler) shellCfgPath() string {
+	if h.Reg == nil {
+		return ""
+	}
+	return filepath.Join(h.Reg.DataDir, "shell", "config.json")
+}
+
 func (h *Handler) CurrentLang() string {
 	if l := SystemLang(); l != "" {
 		return l
 	}
 	var pref string
-	if b, err := os.ReadFile(filepath.Join(h.Reg.DataDir, "shell", "config.json")); err == nil {
+	if b, err := os.ReadFile(h.shellCfgPath()); err == nil {
 		var cfg struct {
 			Lang string `json:"lang"`
 		}
