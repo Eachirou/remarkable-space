@@ -477,7 +477,7 @@ Rectangle {
             setLang(r.lang || "en")
             // bootLang 阶段已经同步读过一次了; 只有最终定的语言和开机猜的不一样才重读
             if (lang !== bootLang) loadShellDict()
-            console.warn("SPACE-LANG: system=" + JSON.stringify(langSystem) + " pref=" + JSON.stringify(langPref) + " ⇒ " + lang)
+            console.warn("SPACE-LANG: boot=" + JSON.stringify(bootLang) + " system=" + JSON.stringify(langSystem) + " pref=" + JSON.stringify(langPref) + " ⇒ " + lang)
             apps = r.apps || []
         })
         loadRecent()
