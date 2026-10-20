@@ -1,6 +1,7 @@
 package space
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -13,8 +14,13 @@ import (
 // 外壳跑在 xochitl 进程里, 能直接读 languageSettings.languageCode —— 那是实时值,
 // 最准。这里是它读不到时的后备, 以及给没有 QML 上下文的场合 (商店、后台服务) 用。
 //
-// 顺序: 空间自己的设置 (用户显式选过) → xochitl 的 Language 键 → Keyboard 键 →
-// 系统 LANG → en。
+// 顺序: xochitl 正在用的翻译文件 → 空间自己的设置 (用户显式选过) → xochitl 的
+// Language 键 → Keyboard 键 → 系统 LANG → en。
+//
+// 实测 languageSettings 在外壳的上下文里拿不到 (live 恒为空), xochitl.conf 也不记
+// 界面语言。最可靠的是看 xochitl 进程映射了哪个 reMarkable_xx.qm: Qt 加载翻译时
+// mmap 整个文件, 系统设置里一切语言, 旧的解除映射、新的映上, 不用重启 (2026-10-20
+// rmppm 实测 en → zh_CN)。读得到它, 空间就跟着系统走, 自己的语言设置不再起作用。
 //
 // 注意 xochitl.conf 里的 Language 键只有用户在系统设置里切换过才会写入; 从没切过的
 // 设备上它不存在, 所以不能把"读不到"当成"用户要英文"——还得往下猜。
@@ -80,6 +86,52 @@ func readXochitlKey(path, key string) string {
 	return ""
 }
 
+// qmRe 从 maps 的路径里抠语言码: .../translations/reMarkable_zh_CN.qm → zh_CN
+var qmRe = regexp.MustCompile(`/translations/reMarkable_([A-Za-z_-]+)\.qm$`)
+
+// SystemLang 返回 xochitl 当前加载的界面语言, 找不到 (没在跑、固件换了文件名) 返回空串。
+func SystemLang() string {
+	pid := xochitlPID()
+	if pid == "" {
+		return ""
+	}
+	return langFromMaps("/proc/" + pid + "/maps")
+}
+
+func langFromMaps(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		if m := qmRe.FindStringSubmatch(strings.TrimSpace(sc.Text())); m != nil {
+			return NormalizeLang(m[1])
+		}
+	}
+	return ""
+}
+
+// xochitlPID 按 /proc/*/comm 找 xochitl (BusyBox pidof 不在 Go 里用)。
+func xochitlPID() string {
+	ents, err := os.ReadDir("/proc")
+	if err != nil {
+		return ""
+	}
+	for _, e := range ents {
+		n := e.Name()
+		if n[0] < '0' || n[0] > '9' {
+			continue
+		}
+		if b, err := os.ReadFile("/proc/" + n + "/comm"); err == nil && strings.TrimSpace(string(b)) == "xochitl" {
+			return n
+		}
+	}
+	return ""
+}
+
 // ResolveLang 按优先级定当前语言。pref 是空间自己的设置 (用户在空间里显式选过),
 // 为空表示"跟随系统"。
 func ResolveLang(pref, xochitlConf string) string {
@@ -123,6 +175,9 @@ func (h *Handler) LangPref() string {
 }
 
 func (h *Handler) CurrentLang() string {
+	if l := SystemLang(); l != "" {
+		return l
+	}
 	var pref string
 	if b, err := os.ReadFile(filepath.Join(h.Reg.DataDir, "shell", "config.json")); err == nil {
 		var cfg struct {

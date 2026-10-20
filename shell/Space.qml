@@ -316,6 +316,7 @@ Rectangle {
     // 后端按 xochitl.conf → 键盘语言 → 环境变量往下猜。
     property string lang: "en"
     property string langPref: ""   // 用户在设置里显式选的; 空 = 跟着后端推断走
+    property string langSystem: "" // xochitl 正在用的界面语言 (看它映射的 .qm); 非空就跟它走, 不给选
     property var dict: ({})        // 当前应用的词典
     property var dictEn: ({})      // 应用的 en 词典, 缺词时回落用
     readonly property string shellDir: "file:///home/root/rmkit-cn/space/shell"
@@ -333,12 +334,26 @@ Rectangle {
         }
     }
 
-    // 开机语言: 同步读用户存的偏好。后端那套推断是异步的, 来不及赶上首帧,
-    // 所以这里只认用户显式选过的; 没选过就按中文 —— 现有用户都是中文,
-    // 真要英文的人设置里选一次就记住了, 下次开就不闪。
+    // 开机语言: 后端那套推断是异步的, 来不及赶上首帧, 这里同步猜一次。
+    // 外壳就在 xochitl 进程里, /proc/self/maps 里映射着哪个 reMarkable_xx.qm 就是
+    // 系统当前的界面语言 (和后端 SystemLang 同一个办法); 读不到再认用户存的偏好,
+    // 都没有按中文。
+    function sysLangSync() {
+        var x = new XMLHttpRequest()
+        try {
+            x.open("GET", "file:///proc/self/maps", false)
+            x.send(null)
+            var m = (x.responseText || "").match(/\/translations\/reMarkable_([A-Za-z_-]+)\.qm/)
+            return m ? normLang(m[1]) : ""
+        } catch (e) {
+            return ""
+        }
+    }
     readonly property string bootLang: {
+        var l = sysLangSync()
+        if (l) return l
         var cfg = readJsonSync("file:///home/root/.local/share/rmkit-cn/space/data/shell/config.json")
-        var l = normLang(cfg && cfg.lang ? cfg.lang : "")
+        l = normLang(cfg && cfg.lang ? cfg.lang : "")
         return l || "zh-CN"
     }
     property var shellDict: readJsonSync(shellDir + "/i18n/" + bootLang + ".json") || ({})
@@ -466,16 +481,17 @@ Rectangle {
             if (r.tzOffset !== undefined) tzOffset = r.tzOffset
             if (r.timezone) tzName = r.timezone
             devMode = !!r.dev
-            // 优先级: 用户在空间里显式选的 > xochitl 的实时值 > 后端猜的。
+            // 优先级: 系统正在用的语言 > 用户在空间里显式选的 > xochitl 的实时值 > 后端猜的。
             // 后端猜的 (按键盘语言) 不能压过 xochitl 实时值, 否则改了系统语言不生效。
             langPref = r.langPref || ""
+            langSystem = normLang(r.langSystem || "")
             var pref = normLang(r.langPref || "")
             var raw  = detectLang()
             var live = normLang(raw)
-            setLang(pref || live || r.lang || "en")
+            setLang(langSystem || pref || live || r.lang || "en")
             // bootLang 阶段已经同步读过一次了; 只有最终定的语言和开机猜的不一样才重读
             if (lang !== bootLang) loadShellDict()
-            console.warn("SPACE-LANG: pref=" + JSON.stringify(r.langPref || "")
+            console.warn("SPACE-LANG: system=" + JSON.stringify(langSystem) + " pref=" + JSON.stringify(r.langPref || "")
                 + " live=" + JSON.stringify(raw) + "→" + JSON.stringify(live)
                 + " backend=" + JSON.stringify(r.lang || "") + " ⇒ " + lang)
             apps = r.apps || []
@@ -1501,6 +1517,8 @@ Rectangle {
                     }
                 }
                 Kit.SRow {
+                    // 能读到系统语言时空间直接跟系统走, 这一项就没意义了
+                    visible: space.langSystem === ""
                     Layout.fillWidth: true
                     ui: space.fs
                     iconSource: space.kitDir + "/icons/translate.svg"

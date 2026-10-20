@@ -330,15 +330,16 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	tzName, tzOffset := h.localTimezone()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"shell":    ShellVersion,
-		"arch":     h.Reg.Arch,
-		"userDir":  h.Reg.UserDir,
-		"apps":     apps,
-		"timezone": tzName,
-		"tzOffset": tzOffset, // 分钟, 东八区 = 480; 设备系统时区是 UTC, 外壳用它显示本地时间
-		"dev":      devMode(h.Reg.UserDir),
-		"lang":     h.CurrentLang(), // 外壳读不到 languageSettings 时用它兜底
-		"langPref": h.LangPref(),    // 用户显式选的; 空 = 跟随系统
+		"shell":      ShellVersion,
+		"arch":       h.Reg.Arch,
+		"userDir":    h.Reg.UserDir,
+		"apps":       apps,
+		"timezone":   tzName,
+		"tzOffset":   tzOffset, // 分钟, 东八区 = 480; 设备系统时区是 UTC, 外壳用它显示本地时间
+		"dev":        devMode(h.Reg.UserDir),
+		"lang":       h.CurrentLang(), // 外壳读不到 languageSettings 时用它兜底
+		"langPref":   h.LangPref(),    // 用户显式选的; 空 = 跟随系统
+		"langSystem": SystemLang(),    // xochitl 正在用的界面语言; 非空时外壳跟它走, 隐藏语言设置
 	})
 }
 
