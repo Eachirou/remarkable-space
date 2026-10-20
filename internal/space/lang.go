@@ -87,7 +87,7 @@ func readXochitlKey(path, key string) string {
 }
 
 // qmRe 从 maps 的路径里抠语言码: .../translations/reMarkable_zh_CN.qm → zh_CN
-var qmRe = regexp.MustCompile(`/translations/reMarkable_([A-Za-z_-]+)\.qm$`)
+var qmRe = regexp.MustCompile(`/translations/reMarkable_([A-Za-z_-]+)\.qm(?: \(deleted\))?$`) // 文件被替换后映射行带 " (deleted)" 后缀, 语言不能因此读空
 
 // SystemLang 返回 xochitl 当前加载的界面语言, 找不到 (没在跑、固件换了文件名) 返回空串。
 func SystemLang() string {

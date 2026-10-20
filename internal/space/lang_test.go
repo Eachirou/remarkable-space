@@ -78,9 +78,10 @@ func TestResolveLangStopsAtNextSection(t *testing.T) {
 func TestLangFromMaps(t *testing.T) {
 	dir := t.TempDir()
 	cases := map[string]string{
-		"ffff96406000-ffff96420000 r--p 00000000 b3:03 9679   /usr/share/remarkable/xochitl/translations/reMarkable_zh_CN.qm\n": "zh-CN",
-		"ffff9c592000-ffff9c5a1000 r--p 00000000 b3:03 7430   /usr/share/remarkable/xochitl/translations/reMarkable_en.qm\n":    "en",
-		"ffffa588b000-ffffa588c000 r--p 00000000 fe:02 803903 /home/root/xovi/exthome/qt-resource-rebuilder/zh_CN.rcc\n":        "",
+		"ffff96406000-ffff96420000 r--p 00000000 b3:03 9679   /usr/share/remarkable/xochitl/translations/reMarkable_zh_CN.qm\n":           "zh-CN",
+		"ffff9c592000-ffff9c5a1000 r--p 00000000 b3:03 7430   /usr/share/remarkable/xochitl/translations/reMarkable_en.qm\n":              "en",
+		"ffffa588b000-ffffa588c000 r--p 00000000 fe:02 803903 /home/root/xovi/exthome/qt-resource-rebuilder/zh_CN.rcc\n":                  "",
+		"ffff96406000-ffff96420000 r--p 00000000 b3:03 9679   /usr/share/remarkable/xochitl/translations/reMarkable_zh_CN.qm (deleted)\n": "zh-CN", // 文件被换过, 旧映射还在
 	}
 	for maps, want := range cases {
 		p := filepath.Join(dir, "maps")
