@@ -1960,7 +1960,7 @@
         <source>Lithuanian</source>
         <translation>立陶宛语</translation>
     </message>
-</context>
+<message><source>Language &amp; keyboard</source><translation>语言与键盘</translation></message><message><source>Language</source><translation>语言</translation></message></context>
 <context>
     <name>PagesActions</name>
     <message>
@@ -3042,7 +3042,7 @@ After the reset you need to setup your device and pair it to your account to syn
         <source>Flight mode</source>
         <translation>飞行模式</translation>
     </message>
-</context>
+<message><source>General</source><translation>通用</translation></message></context>
 <context>
     <name>ConfirmDeleteTagsWindow</name>
     <message numerus="yes">
@@ -3380,7 +3380,7 @@ After the reset you need to setup your device and pair it to your account to syn
         <source>Handedness</source>
         <translation>惯用手</translation>
     </message>
-</context>
+<message><source>Accessibility</source><translation>辅助功能</translation></message></context>
 <context>
     <name>SetupPageBase</name>
     <message>
@@ -3840,7 +3840,7 @@ Please check for updates</source>
         <source>Cloud connection</source>
         <translation>云端连接</translation>
     </message>
-</context>
+<message><source>Cloud</source><translation>云端</translation></message></context>
 <context>
     <name>WifiList</name>
     <message>
@@ -4952,7 +4952,7 @@ automatic repair and restart</source>
         <source>Security settings</source>
         <translation>安全设置</translation>
     </message>
-</context>
+<message><source>Security</source><translation>安全</translation></message></context>
 <context>
     <name>RecentMenu</name>
     <message>
@@ -5249,7 +5249,7 @@ automatic repair and restart</source>
         <source>Display settings</source>
         <translation>显示设置</translation>
     </message>
-</context>
+<message><source>Display</source><translation>显示</translation></message></context>
 <context>
     <name>SettingsHelpClockWidget</name>
     <message>
