@@ -1,0 +1,122 @@
+# qml-inject — 运行时 QML 注入构建 (瘦 hook + 胖库, 即历史文档里的"方案 A")
+#
+# 在远程 Linux 编译机上跑, 不是 Mac (macOS 上没有 chiappa SDK):
+#   scp -r intercept/qml-inject boangs@192.168.64.4:/tmp/
+#   ssh   boangs@192.168.64.4 'cd /tmp/qml-inject && make'
+#   scp   'boangs@192.168.64.4:/tmp/qml-inject/qml_inject*-aarch64.so' dist/
+#
+# 产物名直接就是 dist/ 里的名字, 拷过去不用改名 —— installer/install.sh 按
+# $QML_INJECT_NAME / $QML_INJECT_IMPL_NAME 找这两个文件, 改名会让它静默跳过部署。
+#
+# chiappa = Paper Pro Move (rmppm) 官方最新 SDK 3.27.0.97 (codex 5.7.119), Qt 6.8.2, cortexa55
+# (设备固件 3.28 是 Qt 6.10.3, 但 6.8.2 向前兼容, ime_hook 与本注入均已实测能跑)
+SDK_ENV := /opt/codex/chiappa/3.27.0.97/environment-setup-cortexa55-remarkable-linux
+
+# ARM64 基线必须压回 ARMv8.0 —— 不加这个只能在 Paper Pro Move 上跑。
+#
+# chiappa SDK 的 $CXX 自带 -mcpu=cortex-a55, 那是 ARMv8.2, 编出来的 Qt 原子引用计数
+# (QString/QByteArray 的 refcount) 会直接内联 LSE 原子指令 (ldaddal/casal), 没有运行时
+# 回退分支。Paper Pro (ferrari, i.MX8MM) 是 Cortex-A53 = ARMv8.0, 不认这些指令, 一执行
+# 就 SIGILL —— 表现为 xochitl 刚打完 "[impl] 输入事件过滤器已安装" 就 code=dumped
+# status=4/ILL, 然后 crash loop。2026-10-04 在 ferrari 3.28 上实测复现并定位。
+# (对照: intercept/Makefile 的 ime_hook 用的是 ferrari 的 A53 SDK, 所以一直两台通用。)
+#
+# 必须覆盖 -mcpu 而不是加 -march: 两者同时给出时 GCC 优先用 -mcpu 并只报一句
+# "conflicts with" 警告, -march 根本不生效 (实测胖库照样编出内联 LSE)。
+#
+# 改对之后产物里仍会出现 ldaddal, 但位置变了 —— 从函数体内 (如 findAncestorByClass)
+# 挪进了 __aarch64_ldadd4_acq_rel。那是 GCC 的 outline atomics 辅助函数, 入口按
+# __aarch64_have_lse_atomics 分支, A53 上走 LL/SC。所以自检只认"函数体内直接内联"的,
+# 放过 __aarch64_* 里的 (Go 二进制能在 A53 上跑也是同一个机制)。
+# crypto 保留 —— ferrari 的 cpuinfo 有 aes/pmull/sha1/sha2, 不是瓶颈也不影响兼容。
+# A53 编的在 A55 上能跑, 所以一份产物两台通用, 不必按机型分发。
+ARCH_BASELINE := -mcpu=cortex-a53+crypto
+# rm2 (armv7hf): 用最老的 3.26.0.68 SDK 编, 向前兼容 3.26+ 全部 rm2 固件
+SDK_ENV_A7 := /opt/codex/rm2/3.26.0.68/environment-setup-cortexa7hf-neon-remarkable-linux-gnueabi
+
+# Qt6 模块: Qml/Quick(QML引擎+场景) Gui(QGuiApplication/QWindow) Core(QTimer/QUrl)
+QT_MODULES := Qt6Quick Qt6Qml Qt6Gui Qt6Core
+
+THIN := qml_inject-aarch64.so
+IMPL := qml_inject_impl-aarch64.so
+THIN7 := qml_inject-armv7.so
+IMPL7 := qml_inject_impl-armv7.so
+
+.PHONY: all aarch64 armv7 clean probe
+
+all: aarch64 armv7
+aarch64: $(THIN) $(IMPL)
+armv7: $(THIN7) $(IMPL7)
+
+# ── 瘦 hook: 进 LD_PRELOAD, 绝不链接 Qt ──────────────────────────
+# 为什么必须不链 Qt: 链 Qt 的 .so 一旦进 LD_PRELOAD, Qt 库会在 xochitl 自己的
+# 静态初始化之前被加载, 破坏初始化顺序 → 启动即崩 (实测: 链 Qt 的崩, 不链的存活;
+# ime_hook 能工作正是因为它手读 QString 布局、不链 Qt)。所以这里只插桩
+# QQmlEngine::rootContext() 抓 engine 指针, 纯 dlsym RTLD_NEXT 转发, 再延迟
+# dlopen 胖库 —— 那时 Qt 已就绪, 等价于 Qt 插件的加载时机, 安全。
+#
+# -fvisibility=hidden 与 version script 的坑: hidden 会压过 version script 的
+# global:, 符号进不了动态表 → LD_PRELOAD 抢不到。hook 函数必须在源码里显式带
+# __attribute__((visibility("default"))), 见 thin_hook.cpp。
+$(THIN): thin_hook.cpp exports.version
+	@test -f $(SDK_ENV) || { echo "缺 chiappa SDK: $(SDK_ENV) (要在编译机上 make)"; exit 1; }
+	bash -c 'source $(SDK_ENV) && $$CXX -shared -fPIC -O2 $(ARCH_BASELINE) -fvisibility=hidden \
+	  -Wl,--version-script=exports.version -o $@ thin_hook.cpp -lpthread -ldl'
+	@bash -c 'source $(SDK_ENV) && $$NM -D --defined-only $@ | grep rootContext' \
+	  || { echo "✗ rootContext 没进动态符号表, LD_PRELOAD 会抢不到"; exit 1; }
+	@bash -c 'source $(SDK_ENV) && "$${OBJDUMP:-$${CROSS_COMPILE}objdump}" -d $@ \
+	  | awk "/^[0-9a-f]+ </ { skip = (\$$2 ~ /<__aarch64_/) } \
+	         !skip && \$$1 ~ /:$$/ && NF>=3 { print \$$3 }" \
+	  | grep -qiE "^(cas|casa|casal|casl|casp|swp|swpa|swpal|swpl|ldadd|ldadda|ldaddal|ldaddl|ldclr|ldclral|ldeor|ldeoral|ldset|ldsetal|ldsmax|ldumax)$$"' \
+	  && { echo "✗ $@ 把 LSE 原子指令直接内联进了函数体 (ARMv8.1+) — ferrari 的 Cortex-A53 会 SIGILL, 检查 ARCH_BASELINE"; exit 1; } \
+	  || echo "  ✓ 无内联 LSE, A53/A55 通用"
+	@echo "✓ 瘦 hook: $@"
+
+# ── 胖库: 由瘦 hook dlopen, 链接 Qt6 ────────────────────────────
+# 导出 pw_inject(engine)。内部必须 QMetaObject::invokeMethod 到 GUI 主线程再碰
+# QML —— 在 worker 线程直接操作场景树会崩。
+$(IMPL): qml_inject_impl.cpp exports-impl.version
+	@test -f $(SDK_ENV) || { echo "缺 chiappa SDK: $(SDK_ENV) (要在编译机上 make)"; exit 1; }
+	bash -c 'source $(SDK_ENV) && $$CXX -shared -fPIC -O2 -std=c++17 $(ARCH_BASELINE) -fvisibility=hidden \
+	  -Wl,--version-script=exports-impl.version \
+	  $$(pkg-config --cflags $(QT_MODULES)) \
+	  -o $@ qml_inject_impl.cpp \
+	  $$(pkg-config --libs $(QT_MODULES))'
+	@bash -c 'source $(SDK_ENV) && $$NM -D --defined-only $@ | grep pw_inject' \
+	  || { echo "✗ pw_inject 没导出"; exit 1; }
+	@bash -c 'source $(SDK_ENV) && "$${OBJDUMP:-$${CROSS_COMPILE}objdump}" -d $@ \
+	  | awk "/^[0-9a-f]+ </ { skip = (\$$2 ~ /<__aarch64_/) } \
+	         !skip && \$$1 ~ /:$$/ && NF>=3 { print \$$3 }" \
+	  | grep -qiE "^(cas|casa|casal|casl|casp|swp|swpa|swpal|swpl|ldadd|ldadda|ldaddal|ldaddl|ldclr|ldclral|ldeor|ldeoral|ldset|ldsetal|ldsmax|ldumax)$$"' \
+	  && { echo "✗ $@ 把 LSE 原子指令直接内联进了函数体 (ARMv8.1+) — ferrari 的 Cortex-A53 会 SIGILL, 检查 ARCH_BASELINE"; exit 1; } \
+	  || echo "  ✓ 无内联 LSE, A53/A55 通用"
+	@echo "✓ 胖库: $@"
+
+# ── armv7 (rm2) 版: 同源码, 换 SDK ─────────────────────────────
+$(THIN7): thin_hook.cpp exports.version
+	@test -f $(SDK_ENV_A7) || { echo "缺 rm2 SDK: $(SDK_ENV_A7) (要在编译机上 make)"; exit 1; }
+	bash -c 'source $(SDK_ENV_A7) && $$CXX -shared -fPIC -O2 -fvisibility=hidden \
+	  -Wl,--version-script=exports.version -o $@ thin_hook.cpp -lpthread -ldl'
+	@bash -c 'source $(SDK_ENV_A7) && $$NM -D --defined-only $@ | grep rootContext' \
+	  || { echo "✗ rootContext 没进动态符号表, LD_PRELOAD 会抢不到"; exit 1; }
+	@echo "✓ 瘦 hook: $@"
+
+$(IMPL7): qml_inject_impl.cpp exports-impl.version
+	@test -f $(SDK_ENV_A7) || { echo "缺 rm2 SDK: $(SDK_ENV_A7) (要在编译机上 make)"; exit 1; }
+	bash -c 'source $(SDK_ENV_A7) && $$CXX -shared -fPIC -O2 -std=c++17 -fvisibility=hidden \
+	  -Wl,--version-script=exports-impl.version \
+	  $$(pkg-config --cflags $(QT_MODULES)) \
+	  -o $@ qml_inject_impl.cpp \
+	  $$(pkg-config --libs $(QT_MODULES))'
+	@bash -c 'source $(SDK_ENV_A7) && $$NM -D --defined-only $@ | grep pw_inject' \
+	  || { echo "✗ pw_inject 没导出"; exit 1; }
+	@echo "✓ 胖库: $@"
+
+# 历史探针 (noqt_probe.cpp): 验证"不链 Qt 也能插桩到 Qt 符号"的最小实验,
+# 已被瘦 hook 取代, 保留供排查插桩本身是否生效。
+probe: noqt_probe.cpp exports-noqt.version
+	bash -c 'source $(SDK_ENV) && $$CXX -shared -fPIC -O2 \
+	  -Wl,--version-script=exports-noqt.version -o noqt_probe.so noqt_probe.cpp -ldl'
+
+clean:
+	rm -f $(THIN) $(IMPL) $(THIN7) $(IMPL7) noqt_probe.so

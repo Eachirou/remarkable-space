@@ -1,0 +1,88 @@
+# ──────────────────────────────────────────────────────────
+# rmkit-cn .gitignore
+# 原则: 只入库源代码 / 资产 / vendor; 构建产物全部排除
+# ──────────────────────────────────────────────────────────
+
+# ─── 构建产物 (由 build 流程从源代码重新生成) ───
+# dist/ 由 installer/install.sh 在部署前现场构建:
+#   tools/hash-qmd.py qmd-src/*.qmd → dist/*.qmd
+#   ime-go build → dist/ime-server{,-armv7}
+#   upload-server-go build → dist/upload-server-{aarch64,armv7}
+#   intercept build → dist/ime_hook{,-armv7}.so
+#   intercept/qml-inject make (远程 Linux 编译机) → dist/qml_inject{,_impl}-aarch64.so
+#   tools/create_rcc → dist/zh_CN.rcc
+#   .ts → dist/reMarkable_zh_CN.qm
+dist/
+
+# Go 编译副产物 (部署产物去 dist/, 本地 dev 产物在这里排除)
+*.exe
+*.test
+*.prof
+ime-go/bin/
+ime-go/ime
+ime-go/ime-server
+ime-go/ime-arm64
+ime-go/ime-server-arm64
+ime-go/ime-armv7
+ime-go/ime-server-armv7
+upload-server-go/upload-server
+upload-server-go/upload-server-aarch64
+upload-server-go/upload-server-armv7
+
+# C/C++ 编译副产物
+*.o
+*.a
+intercept/build/
+intercept/*.so
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Node (qml-dump 等可能涉及)
+node_modules/
+
+# ─── 历史/废弃产物 ───
+qmd/_obsolete/
+**/*.bak
+**/*.bak.*
+**/*.old
+**/*.tmp
+
+# ─── 工具临时缓存 ───
+# tools/hashtab 是 install.sh 同步设备时的"工作副本", 每次部署被覆盖;
+# 缺失时从 tools/hashtabs/<机型> 拷贝种子 (install.sh 自动处理).
+# 长期保存的快照在 tools/hashtabs/ 按机型分文件存储, 入库.
+tools/hashtab
+tools/hashtab.device
+
+# ─── 系统垃圾 ───
+.DS_Store
+**/.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# ─── IDE ───
+.idea/
+.vscode/
+*.iml
+
+# ─── 设备调试产物 ───
+*.log
+journal-*.txt
+qml-dump/output/
+
+# librime 交叉编译产物 (244MB, 由 tools/build-librime/build.sh 在构建机重建)
+third_party/librime/lib-*/
+third_party/librime/include/
+
+# librime 源码与构建树 (约 430MB), 只放本机; tools/build-librime/build.sh 会取
+third_party/
+# 本机生成的 hashtab
+tools/hashtab
+tools/hashtab.*

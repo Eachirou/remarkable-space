@@ -1,6 +1,6 @@
 // mkbundle 从仓库产物生成桌面助手的安装包 (zip + manifest.json, 每文件 sha256)。
 //
-//	go run ./cmd/mkbundle -component space -repo ../../rmkit-cn -space-repo .. -out space-bundle.zip
+//	go run ./cmd/mkbundle -component space -repo ../base -space-repo .. -out space-bundle.zip
 //	go run ./cmd/mkbundle -component android-rmppm -android-dir <目录> -out android-rmppm-bundle.zip
 //
 // rmkit-cn 包装的是"底座 + 空间"一整套: 底座 (xovi/注入链/汉化/输入法后端) 按
@@ -52,7 +52,7 @@ var androidFiles = []string{"fitImage.ahab-android", "modules.tar.gz", "rm-andro
 
 func main() {
 	component := flag.String("component", "space", "space | android-rmppm")
-	repo := flag.String("repo", "../../rmkit-cn", "rmkit-cn 底座仓库根目录 (冻结, 只取产物)")
+	repo := flag.String("repo", "../base", "底座目录 (本仓库 base/, 原 rmkit-cn)")
 	spaceRepo := flag.String("space-repo", "..", "remarkable-space 仓库根目录")
 	androidDir := flag.String("android-dir", "", "android 文件目录")
 	out := flag.String("out", "", "输出 zip")

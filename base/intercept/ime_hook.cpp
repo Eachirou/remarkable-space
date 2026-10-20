@@ -1,0 +1,337 @@
+// ime_hook.cpp - LD_PRELOAD 拦截 Qt 输入法 commit，把字母改道到拼音候选栏
+//
+// 协议（QML/ime-server/hook 三方契约，经 /tmp 下三个 flag 文件交换）：
+//   /tmp/rmkit_chinese_mode   存在 → direct mode 下拦截 ASCII 字母
+//                               hook 不调原函数，改写 /tmp/rmkit_char_queue
+//   /tmp/rmkit_pinyin_active  存在 → 拦截退格（replaceFrom<0 的空 commit）
+//                               Qt 把退格发到这里是个不可见的 U+200B 占位符
+//   /tmp/rmkit_char_queue     字符队列，每字符后跟 \n；QML 经 ime-server 的
+//                               /pop-all-chars 端点原子读取并清空
+//
+// 非 direct mode（/tmp/rmkit_chinese_mode 不存在，如系统搜索栏）字母正常流入。
+//
+// 反推自 dist/ime_hook.so：
+//   - 只导出 _ZN17QInputMethodEvent15setCommitStringERK7QStringii
+//   - 依赖 libc/libgcc_s/libm/libstdc++（不链接 Qt，所以手工读 QString 布局）
+//   - .comment = "GCC: (GNU) 13.3.0" 对上 Ferrari SDK 5.0.58-dirty
+//
+// 构建见 intercept/Makefile。
+
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include <dlfcn.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <cstdlib>
+#include <cstdint>
+
+// ─── QString 内存布局（Qt 6.x ABI） ─────────────────────────
+// Qt 6 的 QString 是 inline 三元组，不像 Qt 5 靠 QArrayData 头：
+//   struct QString {
+//       QTypedArrayData<char16_t>* d;   // 存储块指针（literal 时可为 null）
+//       char16_t*                  ptr; // 数据起点
+//       qsizetype                  size;// 字符数（qsizetype = ptrdiff_t）
+//   };
+// 64-bit：sizeof(QString) = 24；32-bit：= 12
+// 对我们只要 ptr 和 size，d 字段完全不用管——能正确处理 literal/detached 两种情形。
+
+struct QStringView6 {
+    void* d;
+    const uint16_t* ptr;
+#if __SIZEOF_POINTER__ == 8
+    long long size;   // ssize_t on LP64
+#else
+    int size;         // ssize_t on ILP32
+#endif
+};
+
+static inline long long qstring_size(const void* qs) {
+    if (!qs) return 0;
+    return reinterpret_cast<const QStringView6*>(qs)->size;
+}
+
+static inline const uint16_t* qstring_utf16(const void* qs) {
+    if (!qs) return nullptr;
+    return reinterpret_cast<const QStringView6*>(qs)->ptr;
+}
+
+// ─── flag 文件探测 ────────────────────────────────────────
+static inline bool file_exists(const char* path) {
+    struct stat st;
+    return ::stat(path, &st) == 0;
+}
+
+// ─── pinyin_active 前沿置位 ──────────────────────────────────
+// 拦下字母时同步建 /tmp/rmkit_pinyin_active, 不等服务端往返回写。
+// 空格/回车/退格/选词键的拦截都以这个标志为门槛, 若等服务端回写, 五笔这种
+// "一个字母就成字、空格紧跟" 的输入会让空格赶在标志生效前落进文档 (光标多走
+// 一格 → 被前端 "前移超一格当回车" 误判)。字母与随后的空格是两次独立按键,
+// 字母这次同步建好, 空格那次就一定看得到。清除仍由服务端在 preedit 空时负责。
+static inline void set_pinyin_active() {
+    int fd = ::open("/tmp/rmkit_pinyin_active", O_WRONLY | O_CREAT, 0644);
+    if (fd >= 0) ::close(fd);
+}
+
+// ─── 键盘来源标记 (动态区分物理/虚拟键盘) ─────────────────────
+// 物理键盘 (含蓝牙/折叠) 的按键走 processKeyEvent (QKeyEvent) → 建标记;
+// 屏幕虚拟键盘走 setCommitString (QInputMethodEvent) → 删标记。
+// 前端 pinyin_ime.qml 每词开头读一次, 据此开/关"光标位移反推回车退格"旁路:
+// 物理键盘回车/退格走 hook 正路 → 关旁路 (开着会在多字母编码上误判吐字);
+// 虚拟键盘回车/退格绕过 hook → 开旁路 (唯一靠它)。RMPPM 插拔蓝牙键盘自动切换。
+static inline void set_phys_kbd() {
+    int fd = ::open("/tmp/rmkit_phys_kbd", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0) { ssize_t w = ::write(fd, "1", 1); (void)w; ::close(fd); }
+}
+static inline void clear_phys_kbd() { ::unlink("/tmp/rmkit_phys_kbd"); }
+
+// ─── ime-server 唤醒通知 (long-poll 0-延迟路径) ────────────────
+// 仅发送 1 字节信号；字符内容仍走 char_queue 文件。如果 socket 不存在
+// (ime-server 旧版/未运行) 静默失败，QML 的 500ms 兜底 polling 会接住。
+// 设计上 fire-and-forget：非阻塞 + 不阻塞 hook 路径。
+static void notify_ime_server() {
+    int s = ::socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (s < 0) return;
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, "/tmp/rmkit_hook_notify.sock", sizeof(addr.sun_path) - 1);
+    const char wake = 1;
+    ::sendto(s, &wake, 1, MSG_DONTWAIT, (struct sockaddr*)&addr, sizeof(addr));
+    ::close(s);
+}
+
+// ─── 字符队列写入 ──────────────────────────────────────────
+// 只会用于 ASCII 字母/空格，但留 UTF-8 fallback 保险
+static void enqueue_char(uint16_t ch) {
+    int fd = ::open("/tmp/rmkit_char_queue",
+                    O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd < 0) return;
+
+    char buf[5];
+    int n = 0;
+    if (ch < 0x80) {
+        buf[n++] = (char)ch;
+    } else if (ch < 0x800) {
+        buf[n++] = (char)(0xC0 | (ch >> 6));
+        buf[n++] = (char)(0x80 | (ch & 0x3F));
+    } else {
+        buf[n++] = (char)(0xE0 | (ch >> 12));
+        buf[n++] = (char)(0x80 | ((ch >> 6) & 0x3F));
+        buf[n++] = (char)(0x80 | (ch & 0x3F));
+    }
+    buf[n++] = '\n';
+    ::write(fd, buf, n);
+    ::close(fd);
+
+    // 写完文件立刻通知 ime-server long-poll handler, 0 polling 路径关键步骤
+    notify_ime_server();
+}
+
+// ─── 原函数指针 ────────────────────────────────────────────
+typedef void (*setCommitString_fn)(void* self, const void* qs,
+                                    int replaceFrom, int replaceLength);
+// QGuiApplicationPrivate::processKeyEvent 是静态成员函数，只有一个参数
+typedef void (*processKeyEvent_fn)(void* keyEvent);
+static setCommitString_fn real_setCommitString = nullptr;
+static processKeyEvent_fn real_processKeyEvent = nullptr;
+static int g_debug = 0;
+
+static void load_orig() {
+    if (!real_setCommitString) {
+        real_setCommitString = (setCommitString_fn)dlsym(
+            RTLD_NEXT,
+            "_ZN17QInputMethodEvent15setCommitStringERK7QStringii");
+    }
+    if (!real_processKeyEvent) {
+        real_processKeyEvent = (processKeyEvent_fn)dlsym(
+            RTLD_NEXT,
+            "_ZN22QGuiApplicationPrivate15processKeyEventEPN29QWindowSystemInterfacePrivate8KeyEventE");
+    }
+}
+
+// ─── QWindowSystemInterfacePrivate::KeyEvent 偏移（Qt 6.8.2） ───
+// 继承链：WindowSystemEvent(有虚析构 → vtable) → UserEvent → InputEvent → KeyEvent
+// QPointer<T> = QWeakPointer<T> = 2 个指针
+//
+// 64-bit (aarch64)：
+//   0  vtable*
+//   8  EventType type
+//  12  int flags
+//  16  bool eventAccepted  (pad 到 24)
+//  24  QPointer window     (16B)
+//  40  unsigned long timestamp
+//  48  QFlags modifiers    (pad 到 56)
+//  56  QInputDevice *device
+//  64  QInputDevice *source
+//  72  int key             (pad 到 80)
+//  80  QString unicode     (24B)
+// 104  bool repeat
+// 106  ushort repeatCount
+// 108  QEvent::Type keyType
+//
+// 32-bit (armv7)：
+//   0  vtable*
+//   4  EventType type
+//   8  int flags
+//  12  bool eventAccepted  (pad 到 16)
+//  16  QPointer window     (8B)
+//  24  unsigned long timestamp
+//  28  QFlags modifiers
+//  32  QInputDevice *device
+//  36  QInputDevice *source
+//  40  int key
+//  44  QString unicode     (12B)
+//  56  bool repeat
+//  58  ushort repeatCount
+//  60  QEvent::Type keyType
+#if __SIZEOF_POINTER__ == 8
+static const size_t KE_KEY_OFFSET     = 72;
+static const size_t KE_UNICODE_OFFSET = 80;
+static const size_t KE_KEYTYPE_OFFSET = 108;
+#else
+static const size_t KE_KEY_OFFSET     = 40;
+static const size_t KE_UNICODE_OFFSET = 44;
+static const size_t KE_KEYTYPE_OFFSET = 60;
+#endif
+
+// QEvent::Type
+static const int QEVENT_KEYPRESS   = 6;
+static const int QEVENT_KEYRELEASE = 7;
+// Qt::Key
+static const int QT_KEY_BACKSPACE = 0x01000003;
+static const int QT_KEY_RETURN = 0x01000004;
+static const int QT_KEY_ENTER  = 0x01000005;
+
+__attribute__((constructor))
+static void init_hook() {
+    g_debug = ::getenv("RMKIT_HOOK_DEBUG") ? 1 : 0;
+    if (g_debug) {
+        fprintf(stderr, "[rmkit-hook] loaded, ptr=%zu\n", sizeof(void*));
+    }
+}
+
+// ─── Hook 本体 ────────────────────────────────────────────
+// QInputMethodEvent::setCommitString(QString const&, int, int)
+// 显式 default：配合 -fvisibility=hidden 只导出这一个符号
+extern "C"
+__attribute__((visibility("default")))
+void _ZN17QInputMethodEvent15setCommitStringERK7QStringii(
+    void* self, const void* qs, int replaceFrom, int replaceLength)
+{
+    load_orig();
+
+    // 退格：replaceFrom<0 的空 commit，仅当拼音正在累积时拦
+    if (replaceFrom < 0 && qstring_size(qs) == 0) {
+        if (file_exists("/tmp/rmkit_pinyin_active")) {
+            // 必须入队转发给引擎: 只吞不转发的话, 引擎的 preedit 原封不动,
+            // 下一个字母直接接在后面 (实测 NI 退格后打 N → NNI 越积越长)。
+            // 旧版缓冲区在 QML 手里可以本地删, 现在归 librime 管, 只能走队列。
+            enqueue_char('\b');
+            if (g_debug) fprintf(stderr, "[rmkit-hook] queue backspace (commit path)\n");
+            return;
+        }
+    }
+
+    // direct mode（编辑器内）拦 ASCII 字母改道候选栏
+    // 拼音累积时（pinyin_active）也拦空格（首候选上屏）和回车（buffer 原文上屏）
+    if (file_exists("/tmp/rmkit_chinese_mode")) {
+        long long n = qstring_size(qs);
+        if (n == 1) {
+            const uint16_t* u = qstring_utf16(qs);
+            if (u) {
+                uint16_t ch = u[0];
+                bool is_letter = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+                bool pinyin = file_exists("/tmp/rmkit_pinyin_active");
+                bool is_space = (ch == ' ') && pinyin;
+                bool is_enter = (ch == '\r' || ch == '\n') && pinyin;
+                bool is_digit = (ch >= '1' && ch <= '9') && pinyin;  // 1-9 选候选
+                // 中文标点拦截 (无论 buffer 状态都拦, chinese_mode 下英文标点 → 中文标点):
+                //   QML 端: buffer 非空时 ,. 翻页, 其他标点 commit 第一候选+插中文标点
+                //           buffer 空时直接插中文标点
+                bool is_cn_punct = (ch == ',' || ch == '.' || ch == '?' || ch == '!' ||
+                                    ch == ':' || ch == ';' || ch == '(' || ch == ')' ||
+                                    ch == '<' || ch == '>' || ch == '\\');
+                if (is_letter || is_space || is_enter || is_digit || is_cn_punct) {
+                    if (is_letter) { set_pinyin_active(); clear_phys_kbd(); }  // 虚拟键盘来源
+                    enqueue_char(ch);
+                    if (g_debug) fprintf(stderr, "[rmkit-hook] queue 0x%02x\n", ch);
+                    return;
+                }
+            }
+        }
+    }
+
+    if (real_setCommitString) {
+        real_setCommitString(self, qs, replaceFrom, replaceLength);
+    }
+}
+
+// ─── processKeyEvent Hook ────────────────────────────────
+// QGuiApplicationPrivate::processKeyEvent(QWindowSystemInterfacePrivate::KeyEvent*)
+//
+// 用途：RM2 这类没有 epaperkeyboardhandler 的设备，记事本 SceneView 直接收 QKeyEvent，
+//       不走 QInputMethodEvent，所以 setCommitString hook 拦不到字母。
+//       在 Qt 中央 KeyEvent 分发点拦一刀：chinese_mode 下 KeyPress 的单个 ASCII 字母
+//       写入 char_queue 并吞事件，SceneView 就不会收到那次 key event。
+//
+// 副作用控制：
+//   - 只处理 /tmp/rmkit_chinese_mode 存在时，其他场景零影响
+//   - 只吞字母（a-z, A-Z），其他键正常派发
+//   - press/release 都吞（保持配对），只在 press 时入队避免重复
+extern "C"
+__attribute__((visibility("default")))
+void _ZN22QGuiApplicationPrivate15processKeyEventEPN29QWindowSystemInterfacePrivate8KeyEventE(
+    void* keyEvent)
+{
+    load_orig();
+
+    if (keyEvent && file_exists("/tmp/rmkit_chinese_mode")) {
+        const uint8_t* base = reinterpret_cast<const uint8_t*>(keyEvent);
+        int keyType = *reinterpret_cast<const int*>(base + KE_KEYTYPE_OFFSET);
+        int key     = *reinterpret_cast<const int*>(base + KE_KEY_OFFSET);
+
+        if (keyType == QEVENT_KEYPRESS || keyType == QEVENT_KEYRELEASE) {
+            const void* qs = base + KE_UNICODE_OFFSET;
+            long long n = qstring_size(qs);
+            const uint16_t* u = (n >= 1) ? qstring_utf16(qs) : nullptr;
+            uint16_t ch = (u && n == 1) ? u[0] : 0;
+            bool pinyin = file_exists("/tmp/rmkit_pinyin_active");
+            bool is_letter = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+            bool is_space  = (ch == ' ') && pinyin;
+            // 退格: 物理键盘走本路径, 之前完全没处理 → 引擎收不到退格。
+            // unicode 里退格是 0x08, 但也按 Qt::Key 兜底 (KeyEvent 的 unicode 可能为空)
+            bool is_backspace = (ch == 0x08 || key == QT_KEY_BACKSPACE) && pinyin;
+            // 回车键的 unicode QString 在 Qt 6 KeyEvent 里可能是空的——按 Qt::Key 判断
+            bool is_enter  = (key == QT_KEY_RETURN || key == QT_KEY_ENTER) && pinyin;
+            bool is_digit  = (ch >= '1' && ch <= '9') && pinyin;  // 1-9 选候选
+            // 中文标点拦截 (chinese_mode 下英文标点 → 中文标点, 同 setCommitString 分支)
+            bool is_cn_punct = (ch == ',' || ch == '.' || ch == '?' || ch == '!' ||
+                                ch == ':' || ch == ';' || ch == '(' || ch == ')' ||
+                                ch == '<' || ch == '>' || ch == '\\');
+            if (g_debug) {
+                fprintf(stderr, "[rmkit-hook] keyev type=%d key=0x%x n=%lld ch=0x%x\n",
+                        keyType, key, n, ch);
+            }
+            if (is_letter || is_space || is_enter || is_digit || is_cn_punct || is_backspace) {
+                if (keyType == QEVENT_KEYPRESS) {
+                    if (is_letter) { set_pinyin_active(); set_phys_kbd(); }  // 物理键盘来源
+                    uint16_t out = is_enter ? '\r' : (is_backspace ? '\b' : ch);
+                    enqueue_char(out);
+                    if (g_debug) fprintf(stderr, "[rmkit-hook] key queue 0x%02x\n", out);
+                }
+                return;  // 吞事件
+            }
+        }
+    }
+
+    if (real_processKeyEvent) {
+        real_processKeyEvent(keyEvent);
+    }
+}

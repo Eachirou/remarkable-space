@@ -1,5 +1,5 @@
 # 空间助手 (Wails v2 桌面程序)
-#   make bundle STORE_KEY=…  生成"空间 + 底座"载荷包 (底座产物取自 RMKIT_REPO, 空间取自本仓库)
+#   make bundle STORE_KEY=…  生成"空间 + 底座"载荷包 (底座取自本仓库 base/, 空间取自仓库根)
 #                            STORE_KEY 是官方商店的客户端标识, 发版必须带; 留空也能打,
 #                            但那个包装出来的设备连不上官方商店 (自建商店不受影响)
 #   make bundle-android    从 ANDROID_DIR 生成 android-rmppm 载荷包
@@ -8,8 +8,8 @@
 #   make cli               构建命令行版 (无 GUI, 同一套内核)
 WAILS ?= $(HOME)/go/bin/wails
 ANDROID_DIR ?= ../../paper-move-android/android-bundle
-# 底座 (冻结): 注入链/汉化/输入法后端的产物仍在 rmkit-cn 仓库里
-RMKIT_REPO ?= ../../rmkit-cn
+# 底座: 注入链/汉化/输入法后端, 2026-10-20 从 rmkit-cn 迁入本仓库 base/ (产物在 base/dist, 不进仓库)
+RMKIT_REPO ?= ../base
 VERSION ?= $(shell git -C .. describe --tags --always 2>/dev/null || echo dev)
 BUILD_TIME := $(shell date +%Y-%m-%d\ %H:%M)
 # 助手只写死发布标签 (RELEASE_TAG, 默认 = VERSION), 按标签去下同版本的安装包; 不再写死整包

@@ -7,7 +7,7 @@ Mac / Windows 上的桌面程序，USB 直连 reMarkable，一次把「空间」
 
 ## 它装什么
 
-**底座（冻结，不再开发）** —— 来自 rmkit-cn 仓库的产物：xovi、qmldiff 注入链与 hashtab、
+**底座（只在系统升级逼着改时才动）** —— 源码在本仓库 `base/`（原 rmkit-cn）：xovi、qmldiff 注入链与 hashtab、
 运行时注入 `.so`、中文汉化 `.qm`、输入法后端。**这部分才是真会把设备弄砖的**：hashtab 和
 固件对不上就是 qmldiff panic → xochitl crash → A/B 回滚。所以设备端沿用 install.sh 那套
 六阶段防砖脚本，原样执行，一行没改。
@@ -26,7 +26,7 @@ Mac / Windows 上的桌面程序，USB 直连 reMarkable，一次把「空间」
 # 1. 先在仓库根出后端二进制
 cd .. && make all
 
-# 2. 打安装包 (底座产物取自 RMKIT_REPO, 默认 ../../rmkit-cn)
+# 2. 打安装包 (底座产物取自 ../base/dist, 见 base/README.md)
 cd assistant && make bundle
 
 # 3. 构建界面

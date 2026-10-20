@@ -1,8 +1,8 @@
 // Package deploy 把「空间」连同它依赖的底座一次装到设备上。
 //
 // 装两样东西:
-//   - 底座 (冻结): xovi、qmldiff 注入链与 hashtab、运行时注入 .so、中文汉化、输入法
-//     后端。这部分来自 rmkit-cn 仓库, 不再开发, 但它才是真会把设备弄砖的部分 ——
+//   - 底座: xovi、qmldiff 注入链与 hashtab、运行时注入 .so、中文汉化、输入法
+//     后端。源码在本仓库 base/ (原 rmkit-cn), 只在系统升级逼着改时才动, 它才是真会把设备弄砖的部分 ——
 //     hashtab 与固件对不上就是 qmldiff panic → xochitl crash → A/B 回滚。
 //   - 空间: 外壳/内置应用/后端 space-server。它走 Qt.createComponent 异步加载,
 //     QML 写坏只是面板打不开, 不会崩 xochitl。

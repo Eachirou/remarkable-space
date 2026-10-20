@@ -68,10 +68,11 @@ Notes are never touched. Individual apps can also be removed one by one from the
 ## Repository layout
 
 The rest of this file is for developers. Space provides the home-screen widgets, the app registry, portable installs and
-background services for apps. It started as part of [rmkit-cn](https://github.com/boangs/rmkit) and is now maintained on its own.
+background services for apps. It started as part of [rmkit-cn](https://github.com/boangs/rmkit); since 2026-10-20 the base layer lives here too (`base/`) and the rmkit repository is no longer updated.
 
 | Here | Was in rmkit-cn | What it is |
 |---|---|---|
+| `base/` | the whole repository | Base layer: injection chain, Chinese localisation, IME backend, post-upgrade recovery scripts; see [base/README.md](base/README.md) |
 | `shell/` | `space/shell/` | The shell `Space.qml`: tabs, widget mounting, app creation and teardown, the `space` API given to apps |
 | `kit/` | `space/kit/` | Shared QML components (`SRow` / `STile` / `SButton` …) and icons |
 | `apps/` | `space/apps/` | **Built-in** apps, deployed by the installer. Only system entry points (settings-like); third-party apps are installed from the catalog and live in another repository |
@@ -107,4 +108,4 @@ background services for apps. It started as part of [rmkit-cn](https://github.co
 
 ## License
 
-[Apache License 2.0](LICENSE).
+[GNU GPL v3.0](LICENSE). Releases up to and including v1.0.10 were published under Apache-2.0 and remain available under it. Third-party code is listed in [base/NOTICE.md](base/NOTICE.md).

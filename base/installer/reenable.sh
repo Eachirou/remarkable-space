@@ -1,0 +1,186 @@
+#!/bin/bash
+# rmkit-cn OTA 后一键恢复脚本
+# 支持 rm2 (armv7l) 和 RMPP/RMPPM (aarch64)
+# OTA 升级后运行一次即可恢复所有功能
+RMKIT_DIR=/home/root/rmkit-cn
+XOVI_DIR=/home/root/xovi
+
+echo "[reenable] 开始恢复 rmkit-cn..."
+ARCH=$(uname -m)
+echo "[reenable] 架构: $ARCH"
+
+# ─── zz-rmkit-cn.conf 内容 (按架构区分 After=home.mount) ────────
+[ "$ARCH" = "aarch64" ] && UNIT_HEADER="[Unit]
+After=home.mount
+
+" || UNIT_HEADER=""
+
+# fail-open: LD_PRELOAD 走 active/ symlink, precheck.sh 每次启动前预检并管理 symlink
+# (cache 重建 + fw 变化触发重编的逻辑已并入 precheck.sh, 不再内联)
+# 运行时 QML 注入只在本机装了胖库时才进 LD_PRELOAD (armv7 无此产物; 写进去只会让
+# ld.so 每次启动刷 cannot be preloaded 警告)。symlink 生死仍归 precheck 管。
+PRELOAD="$RMKIT_DIR/active/xovi.so:$RMKIT_DIR/active/ime_hook.so"
+[ -f "$RMKIT_DIR/bin/qml_inject_impl.so" ] && PRELOAD="$PRELOAD:$RMKIT_DIR/active/qml_inject.so"
+
+ZZ_CONF="${UNIT_HEADER}[Service]
+WatchdogSec=0
+ExecStartPre=-/bin/sh $RMKIT_DIR/bin/precheck.sh
+Environment=\"QML_DISABLE_DISK_CACHE=1\"
+Environment=\"QML_XHR_ALLOW_FILE_WRITE=1\"
+Environment=\"QML_XHR_ALLOW_FILE_READ=1\"
+Environment=\"LD_PRELOAD=$PRELOAD\"
+Environment=\"QT_RESOURCE_REBUILDER_PATH=$XOVI_DIR/exthome/qt-resource-rebuilder/zh_CN.rcc\""
+
+UPLOAD_SVC="[Unit]
+Description=rmkit-cn 文件上传服务
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$RMKIT_DIR/upload-server
+ExecStart=$RMKIT_DIR/upload-server/upload-server -listen 0.0.0.0:8080 -static $RMKIT_DIR/upload-server/static -fonts /home/root/.local/share/rmkit-cn/fonts -screens /home/root/.local/share/rmkit-cn/screens -staging /tmp/rmkit_upload -fonts-active /home/root/.local/share/fonts -xochitl-conf /home/root/.config/remarkable/xochitl.conf
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target"
+
+IME_SVC="[Unit]
+Description=rmkit-cn 拼音输入法 HTTP 服务
+After=multi-user.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=$RMKIT_DIR/bin/ime-server
+# librime 需要知道词库位置: 共享目录是随包下发的预编译产物, 用户目录存 userdb
+# (个人词频/造词) 和编译缓存, 都在 /home 下持久。不设的话 librime 找不到 schema,
+# 启动后候选永远为空。
+Environment="RIME_SHARED_DIR=$RMKIT_DIR/rime"
+Environment="RIME_USER_DIR=/home/root/.rmkit-rime"
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target"
+
+VERSION_SVC="[Unit]
+Description=rmkit-cn 固件版本切换
+After=xochitl.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=$RMKIT_DIR/bin/fw-upgrade.sh"
+
+VERSION_PATH="[Unit]
+Description=监听 reMarkable 固件版本变化
+
+[Path]
+PathChanged=/etc/version
+
+[Install]
+WantedBy=multi-user.target"
+
+OTA_SVC="[Unit]
+Description=rmkit-cn OTA hook (往新固件 slot 注入启动钩子)
+ConditionPathExists=$RMKIT_DIR/bin/ota-watch.sh
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh $RMKIT_DIR/bin/ota-watch.sh"
+
+OTA_TIMER="[Unit]
+Description=rmkit-cn OTA 监控定时器 (检测官方更新写入 inactive slot)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=multi-user.target"
+
+# ─── 写入配置文件 (按架构选择方式) ──────────────────────────────
+mount -o remount,rw / 2>/dev/null || true
+
+if [ "$ARCH" = "aarch64" ]; then
+    # RMPP/RMPPM: /etc 是 overlay, 需要 bind-mount 双写到 lower
+    mkdir -p /tmp/rmkit_lower
+    mount --bind / /tmp/rmkit_lower
+    install_both() {
+        local content="$1" abspath="$2"
+        mkdir -p "$(dirname "$abspath")" "/tmp/rmkit_lower$(dirname "$abspath")"
+        printf '%s\n' "$content" > "$abspath"
+        printf '%s\n' "$content" > "/tmp/rmkit_lower$abspath"
+        chmod 644 "$abspath" "/tmp/rmkit_lower$abspath"
+    }
+    # 自启 symlink 也必须双写。
+    # 坑: 原先这里靠 `systemctl enable`, 而它只写运行时的 /etc —— 那是 upperdir
+    # 在 tmpfs (/var/volatile) 上的 overlay, 一重启 symlink 就没了。表现是 unit
+    # 文件都在、is-enabled 却是 disabled, 开机后中文/上传服务全不起来 (实测多次)。
+    enable_both() {
+        mkdir -p /etc/systemd/system/multi-user.target.wants \
+                 /tmp/rmkit_lower/etc/systemd/system/multi-user.target.wants
+        for u in "$@"; do
+            ln -sf "/etc/systemd/system/$u" "/etc/systemd/system/multi-user.target.wants/$u"
+            ln -sf "/etc/systemd/system/$u" "/tmp/rmkit_lower/etc/systemd/system/multi-user.target.wants/$u"
+        done
+    }
+else
+    # rm2: /etc 直接在 ext4, 直接写即可
+    install_both() {
+        local content="$1" abspath="$2"
+        mkdir -p "$(dirname "$abspath")"
+        printf '%s\n' "$content" > "$abspath"
+        chmod 644 "$abspath"
+    }
+    # rm2 的 /etc 是真实 ext4, 写一次即持久
+    enable_both() {
+        mkdir -p /etc/systemd/system/multi-user.target.wants
+        for u in "$@"; do
+            ln -sf "/etc/systemd/system/$u" "/etc/systemd/system/multi-user.target.wants/$u"
+        done
+    }
+    # 修复 /home/root owner (rm2 出厂重置后可能设成 uid 502)
+    chown root:root /home/root 2>/dev/null || true
+fi
+
+install_both "$ZZ_CONF"      "/etc/systemd/system/xochitl.service.d/zz-rmkit-cn.conf"
+install_both "$UPLOAD_SVC"   "/etc/systemd/system/rmkit-cn-upload.service"
+install_both "$IME_SVC"      "/etc/systemd/system/rmkit-cn-ime-http.service"
+install_both "$VERSION_SVC"  "/etc/systemd/system/rmkit-cn-version.service"
+install_both "$VERSION_PATH" "/etc/systemd/system/rmkit-cn-version.path"
+install_both "$OTA_SVC"      "/etc/systemd/system/rmkit-cn-ota.service"
+install_both "$OTA_TIMER"    "/etc/systemd/system/rmkit-cn-ota.timer"
+
+# 建自启 symlink —— 必须在 bind mount 还挂着的时候做
+enable_both rmkit-cn-upload.service rmkit-cn-ime-http.service \
+            rmkit-cn-version.path rmkit-cn-ota.timer
+
+if [ "$ARCH" = "aarch64" ]; then
+    sync
+    umount -l /tmp/rmkit_lower
+    rmdir /tmp/rmkit_lower 2>/dev/null || true
+fi
+echo "[reenable] ✓ 配置文件写入完成"
+
+# active symlink + 熔断复位 (reenable = 用户明确要求恢复, 给注入一次干净的机会;
+# 若固件仍不兼容, precheck 会在下次启动时再次安全摘除)
+mkdir -p "$RMKIT_DIR/active" "$RMKIT_DIR/quarantine"
+ln -sf "$XOVI_DIR/xovi.so" "$RMKIT_DIR/active/xovi.so"
+ln -sf "$RMKIT_DIR/bin/ime_hook.so" "$RMKIT_DIR/active/ime_hook.so"
+rm -f "$RMKIT_DIR/.fuse_tripped" "$RMKIT_DIR/.starts"
+echo "[reenable] ✓ active symlink 建立, 熔断计数复位"
+
+systemctl daemon-reload
+# 注意: 不用 `systemctl enable` 做持久化 —— 它只写 overlay 上层 (tmpfs), 重启即失。
+# 自启 symlink 已由上面的 enable_both 双写到底层。这里只负责本次启动。
+systemctl start rmkit-cn-upload.service rmkit-cn-ime-http.service \
+                rmkit-cn-version.path rmkit-cn-ota.timer 2>/dev/null || true
+echo "[reenable] ✓ 服务已启用并启动"
+
+# fw-upgrade.sh 后台运行 (SSH 断也不中止)
+echo "[reenable] 启动 fw-upgrade.sh (后台)..."
+nohup bash "$RMKIT_DIR/bin/fw-upgrade.sh" > /tmp/fw-upgrade.log 2>&1 &
+echo "[reenable] ✓ 完成! 观察进度: tail -f /tmp/fw-upgrade.log"
