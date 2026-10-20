@@ -24,6 +24,7 @@
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
+#include <QtCore/QVariant>
 #include <QtCore/QMimeData>
 #include <QtCore/QStringList>
 #include <QtGui/QClipboard>
@@ -39,10 +40,9 @@
 
 // 直接写文件的日志: journal 会限流丢日志, stderr 重定向后有缓冲, 排查时都不可靠
 
-// 读「空间」的语言偏好, 决定侧栏那个词用中文还是英文。
+// 读「空间」存的语言偏好 —— uiLangIsEnglish 读不到系统语言时的退路。
 // 不引 JSON 库 —— 就取一个键, 字符串找足够; 读不到按中文, 和外壳 bootLang 的
-// 默认保持一致 (现有用户都是中文)。注意这只在 xochitl 启动注入时读一次,
-// 用户在设置里切了语言, 侧栏要等下次重启才跟上 —— 面板内部是实时的。
+// 默认保持一致 (现有用户都是中文)。
 static bool spaceLangIsEnglish()
 {
     FILE *f = fopen("/home/root/.local/share/rmkit-cn/space/data/shell/config.json", "rb");
@@ -62,6 +62,30 @@ static bool spaceLangIsEnglish()
         ++p;
     // normLang 只会产出 en / zh-CN, 这里连 en-US 这类也一并认成英文
     return strncmp(p, "en", 2) == 0 && (p[2] == '"' || p[2] == '-' || p[2] == '\0');
+}
+
+// 侧栏那个词用中文还是英文。先看 xochitl 自己加载了哪个翻译文件: Qt 把 .qm 整个
+// mmap 进来, /proc/self/maps 里就有一行 .../translations/reMarkable_<lang>.qm; 系统
+// 设置里一切语言, 旧的解除映射、新的映上, 不用重启 (2026-10-20 rmppm 实测 en ↔ zh_CN)。
+// 空间后端与外壳也是这么判断的 (internal/space/lang.go), 三处口径一致。
+// 中文以外 (en/de/fr/es) 一律显示英文词。读不到 (固件换了文件名) 再退回空间存的偏好。
+static bool uiLangIsEnglish()
+{
+    FILE *f = fopen("/proc/self/maps", "r");
+    if (f) {
+        static const char kTag[] = "/translations/reMarkable_";
+        char line[1024];
+        int found = -1;
+        while (found < 0 && fgets(line, sizeof line, f)) {
+            const char *p = strstr(line, kTag);
+            if (p)
+                found = strncmp(p + sizeof(kTag) - 1, "zh", 2) != 0 ? 1 : 0;
+        }
+        fclose(f);
+        if (found >= 0)
+            return found == 1;
+    }
+    return spaceLangIsEnglish();
 }
 
 static void flog(const char *fmt, ...) {
@@ -760,19 +784,23 @@ static void doInject(QQmlEngine *engine) {
         }
         if (!col)
             continue;
-        // 幂等: 已有 advancedItem 就不重复注入
-        for (QQuickItem *c : col->childItems())
-            if (c->objectName().toUtf8() == "advancedItem")
-                return;
         // 「空间 (SPACE)」启动台就绪后 (安装器落下 space/.primary 标记), 侧栏入口改为"空间"并加载外壳;
         // 否则沿用"高级"面板。用标记文件切换, 不用重编本库。
         const bool useSpace = access("/home/root/rmkit-cn/space/.primary", F_OK) == 0
                            && access("/home/root/rmkit-cn/space/shell/Space.qml", F_OK) == 0;
+        const bool enUI = uiLangIsEnglish();
+        const QString label = QString::fromUtf8(useSpace ? (enUI ? "Space"    : "空间")
+                                                         : (enUI ? "Advanced" : "高级"));
+        // 幂等: 已有 advancedItem 就不重复注入。系统设置里切了语言侧栏不重建, 等不到下次
+        // 注入, 所以这里每轮 (2s) 顺手核对那个词, 变了就换 —— 面板内部本来就是实时的。
+        for (QQuickItem *c : col->childItems())
+            if (c->objectName().toUtf8() == "advancedItem") {
+                if (c->property("label").toString() != label)
+                    c->setProperty("label", label);
+                return;
+            }
         const char *panelUrl = useSpace ? "file:///home/root/rmkit-cn/space/shell/Space.qml"
                                         : "file:///home/root/rmkit-cn/bin/adv_panel.qml";
-        const bool enUI = spaceLangIsEnglish();
-        const char *label = useSpace ? (enUI ? "Space"    : "\\u7a7a\\u95f4")   // 空间
-                                     : (enUI ? "Advanced" : "\\u9ad8\\u7ea7");  // 高级
         // 开发模式 (~/.local/share/rmkit-cn/space/.dev): 每次点击都带时间戳重新读 QML, 改外壳不用重启 xochitl
         const bool devMode = useSpace && access("/home/root/.local/share/rmkit-cn/space/.dev", F_OK) == 0;
         fprintf(stderr, "[impl] 侧栏就绪, 注入%s...\n", useSpace ? "空间" : "高级");
@@ -783,6 +811,7 @@ static void doInject(QQmlEngine *engine) {
             "Rectangle {\n"
             "  id: advItem\n"
             "  objectName: \"advancedItem\"\n"
+            "  property string label: \"") + label.toUtf8() + QByteArray("\"\n"
             "  Layout.preferredWidth: 414\n"
             "  Layout.preferredHeight: 112\n"
             // 注入时就异步预编译面板 (Component.Asynchronous), 点击时直接用缓存, 首开不卡
@@ -792,7 +821,7 @@ static void doInject(QQmlEngine *engine) {
             "  Row { x:32; y:32; spacing:16\n"
             "    Image { width:48; height:48; fillMode: Image.PreserveAspectFit\n"
             "            source:\"qrc:/ark/icons/sliders_horizontal\" }\n"
-            "    Text { text:\"") + label + QByteArray("\"; font.pixelSize:30; color:\"black\"\n"
+            "    Text { text: advItem.label; font.pixelSize:30; color:\"black\"\n"
             "           anchors.verticalCenter: parent.verticalCenter }\n"
             "  }\n"
             "  MouseArea { id: mouse; anchors.fill: parent\n"
