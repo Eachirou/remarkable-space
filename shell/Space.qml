@@ -311,9 +311,9 @@ Rectangle {
     }
 
     // ─── 语言 ─────────────────────────────────────────────────────────
-    // 跑在 xochitl 进程里, 能直接读它的 languageSettings —— 那是用户在系统设置里选的,
-    // 实时且准确。读不到 (固件换了对象名、或这段 QML 没拿到那个上下文) 就用后端兜底,
-    // 后端按 xochitl.conf → 键盘语言 → 环境变量往下猜。
+    // 语言只由后端定 (internal/space/lang.go): 系统正在用的 .qm → 空间里选的 → xochitl.conf
+    // → 环境变量。外壳不再自己合并 —— 商店、应用名也是后端按同一个结果换的, 两处各算各的
+    // 迟早对不上。外壳只在首帧前同步猜一次 (bootLang), 后端结果一到就以它为准。
     property string lang: "en"
     property string langPref: ""   // 用户在设置里显式选的; 空 = 跟着后端推断走
     property string langSystem: "" // xochitl 正在用的界面语言 (看它映射的 .qm); 非空就跟它走, 不给选
@@ -359,15 +359,6 @@ Rectangle {
     property var shellDict: readJsonSync(shellDir + "/i18n/" + bootLang + ".json") || ({})
     property var shellDictEn: bootLang === "en" ? shellDict
                                                 : (readJsonSync(shellDir + "/i18n/en.json") || ({}))
-
-    function detectLang() {
-        var code = ""
-        try {
-            if (typeof languageSettings !== "undefined" && languageSettings && languageSettings.languageCode)
-                code = "" + languageSettings.languageCode
-        } catch (e) { /* 拿不到就算了, 下面用后端的值 */ }
-        return code
-    }
 
     // zh_CN / zh-Hans / zh → zh-CN; 认不出的回落 en。和后端 NormalizeLang 保持一致。
     function normLang(s) {
@@ -481,19 +472,12 @@ Rectangle {
             if (r.tzOffset !== undefined) tzOffset = r.tzOffset
             if (r.timezone) tzName = r.timezone
             devMode = !!r.dev
-            // 优先级: 系统正在用的语言 > 用户在空间里显式选的 > xochitl 的实时值 > 后端猜的。
-            // 后端猜的 (按键盘语言) 不能压过 xochitl 实时值, 否则改了系统语言不生效。
             langPref = r.langPref || ""
             langSystem = normLang(r.langSystem || "")
-            var pref = normLang(r.langPref || "")
-            var raw  = detectLang()
-            var live = normLang(raw)
-            setLang(langSystem || pref || live || r.lang || "en")
+            setLang(r.lang || "en")
             // bootLang 阶段已经同步读过一次了; 只有最终定的语言和开机猜的不一样才重读
             if (lang !== bootLang) loadShellDict()
-            console.warn("SPACE-LANG: system=" + JSON.stringify(langSystem) + " pref=" + JSON.stringify(r.langPref || "")
-                + " live=" + JSON.stringify(raw) + "→" + JSON.stringify(live)
-                + " backend=" + JSON.stringify(r.lang || "") + " ⇒ " + lang)
+            console.warn("SPACE-LANG: system=" + JSON.stringify(langSystem) + " pref=" + JSON.stringify(langPref) + " ⇒ " + lang)
             apps = r.apps || []
         })
         loadRecent()

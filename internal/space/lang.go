@@ -11,8 +11,8 @@ import (
 
 // 语言解析。
 //
-// 外壳跑在 xochitl 进程里, 能直接读 languageSettings.languageCode —— 那是实时值,
-// 最准。这里是它读不到时的后备, 以及给没有 QML 上下文的场合 (商店、后台服务) 用。
+// 这里是整个空间唯一定语言的地方: 外壳、商店索引、应用名都用 CurrentLang 的结果,
+// 应用再从外壳的 space.lang 拿。外壳只在首帧前自己同步猜一次, 之后以这里为准。
 //
 // 顺序: xochitl 正在用的翻译文件 → 空间自己的设置 (用户显式选过) → xochitl 的
 // Language 键 → Keyboard 键 → 系统 LANG → en。
@@ -157,9 +157,8 @@ func ResolveLang(pref, xochitlConf string) string {
 // XochitlConf 是 reMarkable 自己的配置, 只读。
 const XochitlConf = "/home/root/.config/remarkable/xochitl.conf"
 
-// CurrentLang 读外壳配置里的语言偏好 (shell/config.json 的 lang), 再按优先级定稿。
-// 外壳自己能读 languageSettings.languageCode, 比这里准; 这个值是给它兜底的,
-// 也给商店和后台服务这类没有 QML 上下文的地方用。
+// CurrentLang 先看系统正在用的语言, 读不到再按外壳配置里的偏好 (shell/config.json
+// 的 lang) 往下按优先级定稿。
 // LangPref 只读用户在空间里显式选的那个, 没选过就是空串。
 // 外壳要靠它分清"用户选的"和"后端猜的"——猜的不能压过 xochitl 的实时值。
 func (h *Handler) LangPref() string {

@@ -80,7 +80,7 @@ func TestLangFromMaps(t *testing.T) {
 	cases := map[string]string{
 		"ffff96406000-ffff96420000 r--p 00000000 b3:03 9679   /usr/share/remarkable/xochitl/translations/reMarkable_zh_CN.qm\n": "zh-CN",
 		"ffff9c592000-ffff9c5a1000 r--p 00000000 b3:03 7430   /usr/share/remarkable/xochitl/translations/reMarkable_en.qm\n":    "en",
-		"ffffa588b000-ffffa588c000 r--p 00000000 fe:02 803903 /home/root/xovi/exthome/qt-resource-rebuilder/zh_CN.rcc\n":       "",
+		"ffffa588b000-ffffa588c000 r--p 00000000 fe:02 803903 /home/root/xovi/exthome/qt-resource-rebuilder/zh_CN.rcc\n":        "",
 	}
 	for maps, want := range cases {
 		p := filepath.Join(dir, "maps")
