@@ -58,6 +58,9 @@ func fbGeometry() (visW, h, stride int) {
 }
 
 func rmppScreenshot() (image.Image, error) {
+	if b, err := os.ReadFile("/proc/device-tree/model"); err == nil && strings.Contains(string(b), "reMarkable 2") {
+		return rm2Screenshot()
+	}
 	fbW, fbH, fbStride := fbGeometry()
 	frameSize := uint64(fbStride * fbH * 4)
 
@@ -154,4 +157,65 @@ func rmppScreenshot() (image.Image, error) {
 		}
 	}
 	return img, nil
+}
+
+// rm2Screenshot reMarkable 2 (3.29 实测): 没有 card0, /dev/fb0 是 SWTCON 的波形口 (260×23936) 不是画面。
+// 画面是 xochitl 里一张 1404×1872 的 32 位 BGRA QImage, malloc 出来的大块, 放在某个 rw-p 匿名映射
+// 里 (不一定在映射开头)。32 位 glibc 的块头: +4 是 size (低 3 位是标志), 数据从 +8 开始。
+// 逐页扫所有放得下一帧的匿名映射, 找 size&^7 正好比一帧大一点的那一页 (2026-10-20 实测
+// size=10514424, 帧 10513152, 多出的 1272 是 Qt 的对齐余量)。
+func rm2Screenshot() (image.Image, error) {
+	const w, h = 1404, 1872
+	const frameSize = w * h * 4
+	pid, err := xochitlPID()
+	if err != nil {
+		return nil, err
+	}
+	maps, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
+	if err != nil {
+		return nil, fmt.Errorf("read maps: %w", err)
+	}
+	f, err := os.Open(fmt.Sprintf("/proc/%d/mem", pid))
+	if err != nil {
+		return nil, fmt.Errorf("open mem: %w", err)
+	}
+	defer f.Close()
+	var hdr [8]byte
+	for _, line := range strings.Split(string(maps), "\n") {
+		parts := strings.Fields(line)
+		if len(parts) != 5 || parts[1] != "rw-p" {
+			continue
+		}
+		rng := strings.Split(parts[0], "-")
+		if len(rng) != 2 {
+			continue
+		}
+		start, _ := strconv.ParseUint(rng[0], 16, 64)
+		end, _ := strconv.ParseUint(rng[1], 16, 64)
+		if end-start < frameSize+8 {
+			continue
+		}
+		for page := start; page+8+frameSize <= end; page += 4096 {
+			if _, err := f.ReadAt(hdr[:], int64(page)); err != nil {
+				break
+			}
+			sz := uint64(binary.LittleEndian.Uint32(hdr[4:8])) &^ 7
+			if sz < frameSize || sz > frameSize+1<<20 {
+				continue
+			}
+			buf := make([]byte, frameSize)
+			if _, err := f.ReadAt(buf, int64(page+8)); err != nil {
+				return nil, fmt.Errorf("read frame: %w", err)
+			}
+			img := image.NewNRGBA(image.Rect(0, 0, w, h))
+			for y := 0; y < h; y++ {
+				for x := 0; x < w; x++ {
+					off := (y*w + x) * 4
+					img.SetNRGBA(x, y, color.NRGBA{R: buf[off+2], G: buf[off+1], B: buf[off], A: 255})
+				}
+			}
+			return img, nil
+		}
+	}
+	return nil, fmt.Errorf("rm2: 没找到 1404×1872 的帧 (xochitl pid %d)", pid)
 }
