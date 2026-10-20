@@ -296,7 +296,7 @@
         <source>Integrations</source>
         <translation>集成</translation>
     </message>
-</context>
+<message><source>Try again</source><translation>重试</translation></message></context>
 <context>
     <name>TagExplorerView</name>
     <message>
@@ -692,7 +692,7 @@
         <source>Navigation</source>
         <translation>导航</translation>
     </message>
-</context>
+<message><source>Open settings</source><translation>打开设置</translation></message></context>
 <context>
     <name>FileTypeSelectionFoldout</name>
     <message>
@@ -822,7 +822,7 @@
         <source>Attachment name</source>
         <translation>附件名称</translation>
     </message>
-</context>
+<message><source>Save</source><translation>保存</translation></message><message><source>Cancel</source><translation>取消</translation></message></context>
 <context>
     <name>GestureCheatSheet</name>
     <message>
@@ -985,7 +985,7 @@
         <source>Navigation</source>
         <translation>导航</translation>
     </message>
-</context>
+<message><source>Back</source><translation>返回</translation></message></context>
 <context>
     <name>AdjustViewPopup</name>
     <message>
@@ -1157,7 +1157,7 @@
         <source>Work on your documents from My files. You can export them to %1 whenever you like.</source>
         <translation>在“我的文件”中处理文档。您可以随时将其导出至 %1。</translation>
     </message>
-</context>
+<message><source>Send by email</source><translation>通过邮件发送</translation></message><message><source>Share signed documents, annotated presentations, or handwritten notes directly from your paper tablet without losing focus. Send content as PDF, PNG, or SVG files.</source><translation>无需离开当前界面，即可直接从您的电子纸平板分享已签名的文档、带批注的演示文稿或手写笔记。支持以 PDF、PNG 或 SVG 格式发送内容。</translation></message><message><source>This feature is not available in retail demo mode.</source><translation>此功能在零售演示模式下不可用。</translation></message></context>
 <context>
     <name>MyFilesMoreFoldout</name>
     <message>
@@ -1492,7 +1492,7 @@
         <source>Verify later</source>
         <translation>稍后验证</translation>
     </message>
-</context>
+<message><source>Close</source><translation>关闭</translation></message><message><source>Pair your device</source><translation>配对设备</translation></message><message><source>Something went wrong</source><translation>发生错误</translation></message></context>
 <context>
     <name>UnpairingDialog</name>
     <message>
@@ -1521,7 +1521,7 @@
             <numerusform>当前有 %n 个文档已归档。解除配对后，您将无法在设备上检索或打开它们。</numerusform>
         </translation>
     </message>
-</context>
+<message><source>Back</source><translation>返回</translation></message><message><source>Cancel</source><translation>取消</translation></message><message><source>Confirm</source><translation>确认</translation></message></context>
 <context>
     <name>DropdownButton</name>
     <message>
@@ -2019,7 +2019,7 @@
         <source>Make your handwritten notes easy to use in emails, reports, or presentations by converting them into typed text. Handwriting conversion supports 33 languages, cursive and block letters, and sharing your freshly converted notes directly via email.</source>
         <translation>将手写笔记转换为打印文本，方便在电子邮件、报告或演示文稿中使用。手写转换支持 33 种语言、连笔和印刷体，并支持直接通过电子邮件分享转换后的笔记。</translation>
     </message>
-</context>
+<message><source>This feature requires a Wi-Fi connection</source><translation>此功能需要 Wi-Fi 连接</translation></message></context>
 <context>
     <name>Settings</name>
     <message>
@@ -2694,14 +2694,14 @@ After the reset you need to setup your device and pair it to your account to syn
         <source>Skip</source>
         <translation>跳过</translation>
     </message>
-</context>
+<message><source>Back</source><translation>返回</translation></message><message><source>Confirm</source><translation>确认</translation></message></context>
 <context>
     <name>SetupBasePage</name>
     <message>
         <source>Skip</source>
         <translation>跳过</translation>
     </message>
-</context>
+<message><source>Confirm</source><translation>确认</translation></message></context>
 <context>
     <name>LayersMenu</name>
     <message>
@@ -2965,7 +2965,7 @@ After the reset you need to setup your device and pair it to your account to syn
         <source>Try a different combination</source>
         <translation>尝试其他组合</translation>
     </message>
-</context>
+<message><source>Fill this with content</source><comment>notebooks</comment><translation>在此添加内容</translation></message></context>
 <context>
     <name>PagePicker</name>
     <message>
@@ -3051,7 +3051,7 @@ After the reset you need to setup your device and pair it to your account to syn
             <numerusform>删除 %n 个标签？</numerusform>
         </translation>
     </message>
-</context>
+<message><source>Cancel</source><translation>取消</translation></message><message><source>Delete</source><translation>删除</translation></message></context>
 <context>
     <name>SettingsHelpAbout</name>
     <message>
@@ -3186,7 +3186,7 @@ After the reset you need to setup your device and pair it to your account to syn
         <source>Back to page %1</source>
         <translation>返回第 %1 页</translation>
     </message>
-</context>
+<message><source>Try again</source><translation>重试</translation></message></context>
 <context>
     <name>FormatMenuVirtualKeyboard</name>
     <message>
@@ -3227,7 +3227,7 @@ After the reset you need to setup your device and pair it to your account to syn
         <source>Unable to convert text. Please check your Wi-Fi connection.</source>
         <translation>无法转换文本。请检查您的 Wi-Fi 连接。</translation>
     </message>
-</context>
+<message><source>Cancel</source><translation>取消</translation></message></context>
 <context>
     <name>InactiveWarning</name>
     <message>
@@ -3288,7 +3288,7 @@ After the reset you need to setup your device and pair it to your account to syn
         <source>Unable to sync</source>
         <translation>无法同步</translation>
     </message>
-</context>
+<message><source>Anonymous identity</source><translation>匿名身份</translation></message><message><source>EAP method</source><translation>EAP 方法</translation></message><message><source>Password</source><translation>密码</translation></message><message><source>Restart</source><translation>重启</translation></message><message><source>Phase 2 authentication</source><translation>阶段 2 身份验证</translation></message><message><source>Disconnect</source><translation>断开连接</translation></message><message><source>Identity</source><translation>身份</translation></message><message><source>Security</source><translation>安全</translation></message><message><source>Network name</source><translation>网络名称</translation></message><message><source>Manage account</source><translation>管理账户</translation></message></context>
 <context>
     <name>TabControl</name>
     <message>
@@ -3349,7 +3349,7 @@ After the reset you need to setup your device and pair it to your account to syn
         <source>Manage account</source>
         <translation>管理账户</translation>
     </message>
-</context>
+<message><source>Back</source><translation>返回</translation></message><message><source>Cancel</source><translation>取消</translation></message></context>
 <context>
     <name>Accessibility</name>
     <message>
@@ -3886,7 +3886,7 @@ Please check for updates</source>
         <source>Remove passcode</source>
         <translation>移除密码</translation>
     </message>
-</context>
+<message><source>Cancel</source><translation>取消</translation></message><message><source>Reset without syncing</source><translation>不同步并重置</translation></message><message><source>Any unsynced changes will be erased from the device.</source><translation>设备上的所有未同步更改将被清除。</translation></message><message><source>Unable to sync</source><translation>无法同步</translation></message></context>
 <context>
     <name>SecurityPanelPasscode</name>
     <message>
@@ -4022,7 +4022,7 @@ Try again in a little bit.</source>
         <source>Please try a different code to log in with.</source>
         <translation>请尝试使用其他代码登录。</translation>
     </message>
-</context>
+<message><source>Pair your device</source><translation>配对设备</translation></message><message><source>Pairing completed</source><translation>配对完成</translation></message><message><source>Confirm</source><translation>确认</translation></message></context>
 <context>
     <name>SoftwareUpdateDialog</name>
     <message>
@@ -4037,7 +4037,7 @@ Try again in a little bit.</source>
         <source>Update software to view</source>
         <translation>更新软件以查看</translation>
     </message>
-</context>
+<message><source>Cancel</source><translation>取消</translation></message></context>
 <context>
     <name>UpdatePanel</name>
     <message>
@@ -4114,7 +4114,7 @@ Try again in a little bit.</source>
         <source>View all</source>
         <translation>查看全部</translation>
     </message>
-</context>
+<message><source>Back</source><translation>返回</translation></message><message><source>Guides</source><translation>指南</translation></message><message><source>Release notes</source><translation>版本说明</translation></message></context>
 <context>
     <name>SearchNotificationBar</name>
     <message>
@@ -4250,7 +4250,7 @@ Try again in a little bit.</source>
         <source>You can unenroll whenever you want.</source>
         <translation>您可随时退出测试计划。</translation>
     </message>
-</context>
+<message><source>Back</source><translation>返回</translation></message><message><source>Close</source><translation>关闭</translation></message></context>
 <context>
     <name>TimedOutDialog</name>
     <message>
@@ -4328,7 +4328,7 @@ Try again in a little bit.</source>
         <source>Unable to open</source>
         <translation>无法打开</translation>
     </message>
-</context>
+<message><source>Close</source><translation>关闭</translation></message></context>
 <context>
     <name>SecurityPanelPersonalInfo</name>
     <message>
@@ -4372,7 +4372,7 @@ syncing your latest changes?</source>
         <source>Reset your device to factory settings. By doing this all files and settings on your reMarkable will be erased, and your device will be restored to its original state.</source>
         <translation>将设备恢复出厂设置。此操作将清除 reMarkable 上的所有文件和设置，并将设备恢复至初始状态。</translation>
     </message>
-</context>
+<message><source>Cancel</source><translation>取消</translation></message><message><source>Factory reset</source><translation>恢复出厂设置</translation></message><message><source>Confirm</source><translation>确认</translation></message></context>
 <context>
     <name>ScreenShareButton</name>
     <message>
@@ -4383,7 +4383,7 @@ syncing your latest changes?</source>
         <source>Present with Screen Share</source>
         <translation>使用屏幕共享演示</translation>
     </message>
-</context>
+<message><source>Share signed documents, annotated presentations, or handwritten notes directly from your paper tablet without losing focus. Send content as PDF, PNG, or SVG files.</source><translation>无需离开当前界面，即可直接从您的电子纸平板分享已签名的文档、带批注的演示文稿或手写笔记。支持以 PDF、PNG 或 SVG 格式发送内容。</translation></message><message><source>This feature is not available in retail demo mode.</source><translation>此功能在零售演示模式下不可用。</translation></message><message><source>This feature requires a Wi-Fi connection</source><translation>此功能需要 Wi-Fi 连接</translation></message></context>
 <context>
     <name>ShareUtils</name>
     <message>
@@ -4441,7 +4441,7 @@ syncing your latest changes?</source>
         <source>Mechanical pencil</source>
         <translation>自动铅笔</translation>
     </message>
-</context>
+<message><source>Eraser</source><translation>橡皮擦</translation></message></context>
 <context>
     <name>IntegrationsFoldoutItem</name>
     <message>
@@ -4542,7 +4542,7 @@ syncing your latest changes?</source>
         <source>Downgrade of content detected</source>
         <translation>检测到内容已降级</translation>
     </message>
-</context>
+<message><source>Page %1 of %2</source><translation>第 %1 页，共 %2 页</translation></message></context>
 <context>
     <name>AccidentalTouchSlider</name>
     <message>
@@ -5153,7 +5153,7 @@ automatic repair and restart</source>
         <source>Selection tool</source>
         <translation>选择工具</translation>
     </message>
-</context>
+<message><source>Select</source><translation>选择</translation></message></context>
 <context>
     <name>Header</name>
     <message>
@@ -5338,7 +5338,7 @@ automatic repair and restart</source>
         <source>End user agreement reMarkable beta program</source>
         <translation>reMarkable 测试版计划最终用户协议</translation>
     </message>
-</context>
+<message><source>Back</source><translation>返回</translation></message></context>
 <context>
     <name>PagesItem</name>
     <message>
@@ -5395,4 +5395,13 @@ automatic repair and restart</source>
         <translation>查看全部</translation>
     </message>
 </context>
-<context><name>xofm::libs::settings::SettingsModel</name><message><source>Marker</source><translation>手写笔</translation></message><message><source>Account</source><translation>账户</translation></message><message><source>Help</source><translation>帮助</translation></message><message><source>About</source><translation>关于</translation></message><message><source>Cloud</source><translation>云端</translation></message><message><source>Wi-Fi</source><translation>Wi-Fi</translation></message><message><source>Language &amp; keyboard</source><translation>语言与键盘</translation></message><message><source>Accessibility</source><translation>辅助功能</translation></message><message><source>Battery</source><translation>电池</translation></message><message><source>Sharing</source><translation>分享</translation></message><message><source>Storage</source><translation>存储</translation></message><message><source>Display</source><translation>显示</translation></message><message><source>Security</source><translation>安全</translation></message><message><source>Keyboard</source><translation>键盘</translation></message><message><source>General</source><translation>通用</translation></message><message><source>Language and keyboard</source><translation>语言与键盘</translation></message><message><source>Wifi</source><translation>Wi-Fi</translation></message><message><source>Software</source><translation>软件</translation></message><message><source>Developer</source><translation>开发者</translation></message><message><source>Experimental</source><translation>实验功能</translation></message><message><source>Paper tablet</source><translation>设备</translation></message></context><context><name>SettingsPage::Page</name><message><source>Marker</source><translation>手写笔</translation></message><message><source>Account</source><translation>账户</translation></message><message><source>Help</source><translation>帮助</translation></message><message><source>About</source><translation>关于</translation></message><message><source>Cloud</source><translation>云端</translation></message><message><source>Wi-Fi</source><translation>Wi-Fi</translation></message><message><source>Language &amp; keyboard</source><translation>语言与键盘</translation></message><message><source>Accessibility</source><translation>辅助功能</translation></message><message><source>Battery</source><translation>电池</translation></message><message><source>Sharing</source><translation>分享</translation></message><message><source>Storage</source><translation>存储</translation></message><message><source>Display</source><translation>显示</translation></message><message><source>Security</source><translation>安全</translation></message><message><source>Keyboard</source><translation>键盘</translation></message><message><source>General</source><translation>通用</translation></message><message><source>Language and keyboard</source><translation>语言与键盘</translation></message><message><source>Wifi</source><translation>Wi-Fi</translation></message><message><source>Software</source><translation>软件</translation></message><message><source>Developer</source><translation>开发者</translation></message><message><source>Experimental</source><translation>实验功能</translation></message><message><source>Paper tablet</source><translation>设备</translation></message></context><context><name>SettingsModel::Page</name><message><source>Marker</source><translation>手写笔</translation></message><message><source>Account</source><translation>账户</translation></message><message><source>Help</source><translation>帮助</translation></message><message><source>About</source><translation>关于</translation></message><message><source>Cloud</source><translation>云端</translation></message><message><source>Wi-Fi</source><translation>Wi-Fi</translation></message><message><source>Language &amp; keyboard</source><translation>语言与键盘</translation></message><message><source>Accessibility</source><translation>辅助功能</translation></message><message><source>Battery</source><translation>电池</translation></message><message><source>Sharing</source><translation>分享</translation></message><message><source>Storage</source><translation>存储</translation></message><message><source>Display</source><translation>显示</translation></message><message><source>Security</source><translation>安全</translation></message><message><source>Keyboard</source><translation>键盘</translation></message><message><source>General</source><translation>通用</translation></message><message><source>Language and keyboard</source><translation>语言与键盘</translation></message><message><source>Wifi</source><translation>Wi-Fi</translation></message><message><source>Software</source><translation>软件</translation></message><message><source>Developer</source><translation>开发者</translation></message><message><source>Experimental</source><translation>实验功能</translation></message><message><source>Paper tablet</source><translation>设备</translation></message></context></TS>
+<context><name>xofm::libs::settings::SettingsModel</name><message><source>Marker</source><translation>手写笔</translation></message><message><source>Account</source><translation>账户</translation></message><message><source>Help</source><translation>帮助</translation></message><message><source>About</source><translation>关于</translation></message><message><source>Cloud</source><translation>云端</translation></message><message><source>Wi-Fi</source><translation>Wi-Fi</translation></message><message><source>Language &amp; keyboard</source><translation>语言与键盘</translation></message><message><source>Accessibility</source><translation>辅助功能</translation></message><message><source>Battery</source><translation>电池</translation></message><message><source>Sharing</source><translation>分享</translation></message><message><source>Storage</source><translation>存储</translation></message><message><source>Display</source><translation>显示</translation></message><message><source>Security</source><translation>安全</translation></message><message><source>Keyboard</source><translation>键盘</translation></message><message><source>General</source><translation>通用</translation></message><message><source>Language and keyboard</source><translation>语言与键盘</translation></message><message><source>Wifi</source><translation>Wi-Fi</translation></message><message><source>Software</source><translation>软件</translation></message><message><source>Developer</source><translation>开发者</translation></message><message><source>Experimental</source><translation>实验功能</translation></message><message><source>Paper tablet</source><translation>设备</translation></message></context><context><name>SettingsPage::Page</name><message><source>Marker</source><translation>手写笔</translation></message><message><source>Account</source><translation>账户</translation></message><message><source>Help</source><translation>帮助</translation></message><message><source>About</source><translation>关于</translation></message><message><source>Cloud</source><translation>云端</translation></message><message><source>Wi-Fi</source><translation>Wi-Fi</translation></message><message><source>Language &amp; keyboard</source><translation>语言与键盘</translation></message><message><source>Accessibility</source><translation>辅助功能</translation></message><message><source>Battery</source><translation>电池</translation></message><message><source>Sharing</source><translation>分享</translation></message><message><source>Storage</source><translation>存储</translation></message><message><source>Display</source><translation>显示</translation></message><message><source>Security</source><translation>安全</translation></message><message><source>Keyboard</source><translation>键盘</translation></message><message><source>General</source><translation>通用</translation></message><message><source>Language and keyboard</source><translation>语言与键盘</translation></message><message><source>Wifi</source><translation>Wi-Fi</translation></message><message><source>Software</source><translation>软件</translation></message><message><source>Developer</source><translation>开发者</translation></message><message><source>Experimental</source><translation>实验功能</translation></message><message><source>Paper tablet</source><translation>设备</translation></message></context><context><name>SettingsModel::Page</name><message><source>Marker</source><translation>手写笔</translation></message><message><source>Account</source><translation>账户</translation></message><message><source>Help</source><translation>帮助</translation></message><message><source>About</source><translation>关于</translation></message><message><source>Cloud</source><translation>云端</translation></message><message><source>Wi-Fi</source><translation>Wi-Fi</translation></message><message><source>Language &amp; keyboard</source><translation>语言与键盘</translation></message><message><source>Accessibility</source><translation>辅助功能</translation></message><message><source>Battery</source><translation>电池</translation></message><message><source>Sharing</source><translation>分享</translation></message><message><source>Storage</source><translation>存储</translation></message><message><source>Display</source><translation>显示</translation></message><message><source>Security</source><translation>安全</translation></message><message><source>Keyboard</source><translation>键盘</translation></message><message><source>General</source><translation>通用</translation></message><message><source>Language and keyboard</source><translation>语言与键盘</translation></message><message><source>Wifi</source><translation>Wi-Fi</translation></message><message><source>Software</source><translation>软件</translation></message><message><source>Developer</source><translation>开发者</translation></message><message><source>Experimental</source><translation>实验功能</translation></message><message><source>Paper tablet</source><translation>设备</translation></message></context><context><name>AllTagsView</name><message><source>All</source><translation>全部</translation></message><message><source>Back</source><translation>返回</translation></message><message><source>Alphabetical (Z-A)</source><translation>字母顺序 (Z-A)</translation></message><message><source>Alphabetical (A-Z)</source><translation>字母顺序 (A-Z)</translation></message></context><context><name>TemplatesFilters</name><message><source>All</source><translation>全部</translation></message></context><context><name>xofm::libs::toolbar::FilterStateModel</name><message><source>Off</source><translation>关闭</translation></message></context><context><name>DateTimePickerWindow</name><message><source>Set</source><translation>应用</translation></message><message><source>Back</source><translation>返回</translation></message></context><context><name>SecuredPasswordInput</name><message><source>Password</source><translation>密码</translation></message></context><context><name>ChangePasswordWindow</name><message><source>Back</source><translation>返回</translation></message><message><source>Incorrect password. Please try again.</source><translation>密码错误，请重试。</translation></message></context><context><name>ComplianceInformationWindow</name><message><source>Back</source><translation>返回</translation></message></context><context><name>DialogScreen</name><message><source>Back</source><translation>返回</translation></message></context><context><name>ForgotPasscodeScreen</name><message><source>Back</source><translation>返回</translation></message><message><source>Reset stopped</source><translation>重置已停止</translation></message><message><source>Cancel</source><translation>取消</translation></message><message><source>Try again</source><translation>重试</translation></message></context><context><name>InformationDialog</name><message><source>Back</source><translation>返回</translation></message></context><context><name>IntegrationsEmptyViewWindow</name><message><source>Back</source><translation>返回</translation></message><message><source>Integrations</source><translation>集成</translation></message></context><context><name>LicenseInformationWindow</name><message><source>Back</source><translation>返回</translation></message></context><context><name>NetworkEditorForm</name><message><source>Back</source><translation>返回</translation></message><message><source>Select option</source><translation>选择选项</translation></message><message><source>Connect</source><translation>连接</translation></message></context><context><name>OnboardingDialogue</name><message><source>Back</source><translation>返回</translation></message><message><source>Close</source><translation>关闭</translation></message></context><context><name>PincodeDialogPage</name><message><source>Back</source><translation>返回</translation></message></context><context><name>ReleaseNotesWindow</name><message><source>Back</source><translation>返回</translation></message></context><context><name>RetailSetupInfo</name><message><source>Back</source><translation>返回</translation></message></context><context><name>RetailSetupLanguage</name><message><source>Back</source><translation>返回</translation></message></context><context><name>SecurityCredentialsWindow</name><message><source>Back</source><translation>返回</translation></message><message><source>Save</source><translation>保存</translation></message><message><source>Personal information</source><translation>个人信息</translation></message></context><context><name>SelectionComponent</name><message><source>Back</source><translation>返回</translation></message></context><context><name>SettingsInfoWindow</name><message><source>Back</source><translation>返回</translation></message><message><source>System time</source><translation>系统时间</translation></message></context><context><name>SettingsWindow</name><message><source>Back</source><translation>返回</translation></message><message><source>Shortcuts</source><translation>快捷方式</translation></message><message><source>Keyboard</source><translation>键盘</translation></message></context><context><name>SoftwareSettingsWindow</name><message><source>Back</source><translation>返回</translation></message></context><context><name>TemplateSelectorWindow</name><message><source>Back</source><translation>返回</translation></message></context><context><name>TimezoneSelectors</name><message><source>Back</source><translation>返回</translation></message></context><context><name>PdfTextSelectionHandler</name><message><source>Copy</source><translation>复制</translation></message></context><context><name>OnboardingWindow</name><message><source>Close</source><translation>关闭</translation></message><message><source>Cancel</source><translation>取消</translation></message><message><source>Convert</source><translation>转换</translation></message></context><context><name>SetupLanguagePage</name><message><source>English</source><translation>英语</translation></message><message><source>German (beta)</source><translation>德语（测试版）</translation></message></context><context><name>TutorialWindow</name><message><source>Close</source><translation>关闭</translation></message></context><context><name>WifiSetupPage</name><message><source>Wi-Fi</source><translation>Wi-Fi</translation></message></context><context><name>EditDocument</name><message><source>Save</source><translation>保存</translation></message><message><source>Cancel</source><translation>取消</translation></message></context><context><name>RenameEntity</name><message><source>Save</source><translation>保存</translation></message><message><source>Cancel</source><translation>取消</translation></message><message><source>Rename</source><translation>重命名</translation></message></context><context><name>TagsMenu</name><message><source>Tags</source><translation>标签</translation></message></context><context><name>ConnectCalendarDialogWindow</name><message><source>Close</source><translation>关闭</translation></message></context><context><name>CtNConnectRestrictionDialogWindow</name><message><source>Close</source><translation>关闭</translation></message></context><context><name>GetConnectWindow</name><message><source>Close</source><translation>关闭</translation></message></context><context><name>KeyboardLanguageSelect</name><message><source>Close</source><translation>关闭</translation></message></context><context><name>NoConnectWorkbookActionWindow</name><message><source>Close</source><translation>关闭</translation></message><message><source>Connect required</source><translation>需要连接</translation></message></context><context><name>QrDialogWindow</name><message><source>Close</source><translation>关闭</translation></message></context><context><name>UnpairedDialogWindow</name><message><source>Close</source><translation>关闭</translation></message><message><source>Pair your device</source><translation>配对设备</translation></message></context><context><name>LibraryActions</name><message><source>Record ideas, write, and sketch</source><translation>记录灵感、书写与绘图</translation></message><message><source>Long-press for quick sheet</source><translation>长按打开快捷面板</translation></message><message><source>Folder</source><translation>文件夹</translation></message><message><source>Organize your content</source><translation>整理内容</translation></message><message><source>Jot down your thoughts</source><translation>记录您的想法</translation></message><message><source>Notebook</source><translation>笔记本</translation></message><message><source>Create new</source><translation>新建</translation></message><message><source>Unable to add page while file is being exported</source><translation>文件正在导出，无法添加页面</translation></message><message><source>Quick sheet</source><translation>快速笔记</translation></message></context><context><name>xofm::libs::syncinterface::DocumentSyncInterface</name><message><source>Your subscription has been updated</source><translation>您的订阅已更新</translation></message><message><source>You're not connected to the cloud. Check if your app is paired to a reMarkable account.</source><translation>您未连接到云端。请检查是否已绑定 reMarkable 账户。</translation></message><message><source>Your content is not ready. 
+Try restarting if the problem persists.</source><translation>您的内容尚未准备就绪。
+如果问题仍然存在，请尝试重启设备。</translation></message><message><source>Sync completed</source><translation>同步完成</translation></message><message><source>You're not connected to Wi-Fi</source><translation>您未连接到 Wi-Fi</translation></message><message><source>Unable to establish a secure connection to our servers. Please try again, or connect to a different network</source><translation>无法与我们的服务器建立安全连接。请重试，或连接到其他网络。</translation></message><message><source>Checking internet connection...</source><translation>正在检查网络连接...</translation></message><message><source>Unable to sync. 
+Try restarting if the problem persists</source><translation>无法同步。
+如果问题仍然存在，请尝试重启设备。</translation></message><message><source>Not syncing.
+Try restarting if the problem persists</source><translation>未同步。
+如果问题仍然存在，请尝试重启设备。</translation></message><message><source>There might be an issue with the date/time information on your device. Please check System time and try again</source><translation>设备上的日期/时间信息可能存在问题。请检查系统时间并重试。</translation></message><message><source>Waiting for sync</source><translation>等待同步</translation></message><message><source>You're connected to Wi-Fi, but not the internet.
+Check your Wi-Fi settings and try again.</source><translation>您已连接到 Wi-Fi，但未连接到互联网。
+请检查 Wi-Fi 设置并重试。</translation></message></context><context><name>PairingExpiredPopupWindow</name><message><source>Pair your device</source><translation>配对设备</translation></message></context><context><name>SetupRecoveryKeyDialog</name><message><source>Confirm</source><translation>确认</translation></message></context><context><name>HWCLanguagePageWindow</name><message><source>Cancel</source><translation>取消</translation></message><message><source>Handwriting conversion language</source><translation>手写转换语言</translation></message><message><source>Confirm</source><translation>确认</translation></message></context><context><name>EncryptionConfirmation</name><message><source>Cancel</source><translation>取消</translation></message><message><source>Continue</source><translation>继续</translation></message><message><source>Factory reset</source><translation>恢复出厂设置</translation></message><message><source>Reset your device to factory settings. By doing this all files and settings on your reMarkable will be erased, and your device will be restored to its original state.</source><translation>将设备恢复出厂设置。此操作将清除 reMarkable 上的所有文件和设置，并将设备恢复至初始状态。</translation></message></context><context><name>CloudFeaturePopupWindow</name><message><source>Pair your device</source><translation>配对设备</translation></message><message><source>Pairing required</source><translation>需要配对</translation></message><message><source>Verify by pairing</source><translation>通过配对验证</translation></message><message><source>Verify your account by email</source><translation>通过电子邮件验证您的账户</translation></message></context><context><name>NotifyRecovery</name><message><source>Factory reset</source><translation>恢复出厂设置</translation></message><message><source>Recover your paper tablet</source><translation>找回您的平板</translation></message><message><source>Enter recovery code</source><translation>输入恢复码</translation></message></context><context><name>EncryptionDialog</name><message><source>Accept</source><translation>同意</translation></message><message><source>Factory reset</source><translation>恢复出厂设置</translation></message></context><context><name>NoConnectOnboardingWindow</name><message><source>Not subscribed</source><translation>未订阅</translation></message></context><context><name>CreateCollection</name><message><source>Enter tag name</source><translation>输入标签名称</translation></message><message><source>Cancel</source><translation>取消</translation></message><message><source>Create</source><translation>创建</translation></message><message><source>New folder</source><translation>新建文件夹</translation></message><message><source>Create</source><comment>Notebook creator</comment><translation>创建</translation></message></context><context><name>CreateNotebookWindow</name><message><source>Notebook</source><translation>笔记本</translation></message></context><context><name>SendByEmailButton</name><message><source>Send by email</source><translation>通过邮件发送</translation></message></context><context><name>ManualMigrationPopupWindow</name><message><source>Pair your device</source><translation>配对设备</translation></message></context><context><name>PoweroffWindow</name><message><source>Cancel</source><translation>取消</translation></message><message><source>Factory reset</source><translation>恢复出厂设置</translation></message><message><source>Restart</source><translation>重启</translation></message><message><source>Turn off</source><translation>关闭</translation></message></context><context><name>CreateNotebook</name><message><source>New notebook</source><translation>新建笔记本</translation></message><message><source>Templates</source><translation>模板</translation></message><message><source>Cancel</source><translation>取消</translation></message><message><source>Create</source><translation>创建</translation></message><message><source>View all</source><translation>查看全部</translation></message></context><context><name>ToolbarPositionChooserWidget</name><message><source>To reposition the toolbar while in a document, drag the hide/show button to any edge of the screen.</source><translation>在文档中，若需调整工具栏位置，请将隐藏/显示按钮拖至屏幕任意边缘。</translation></message><message><source>Choose your preferred toolbar position.</source><translation>选择您偏好的工具栏位置。</translation></message></context><context><name>EnterPassword</name><message><source>Password</source><translation>密码</translation></message><message><source>Incorrect password. Please try again.</source><translation>密码错误，请重试。</translation></message></context><context><name>ConfirmDeleteTrashWindow</name><message><source>Cancel</source><translation>取消</translation></message><message><source>Delete</source><translation>删除</translation></message></context><context><name>TagsSelector</name><message><source>New tag</source><translation>新建标签</translation></message><message><source>View all</source><translation>查看全部</translation></message></context><context><name>SetupPasswordInput</name><message><source>Incorrect password. Please try again.</source><translation>密码错误，请重试。</translation></message></context><context><name>CriticalErrorWindow</name><message><source>Something went wrong</source><translation>发生错误</translation></message><message><source>Factory reset</source><translation>恢复出厂设置</translation></message></context><context><name>CreateCollectionWindow</name><message><source>Folder</source><translation>文件夹</translation></message></context><context><name>OutdatedSoftwareWindow</name><message><source>Don't show this message again</source><translation>不再显示此消息</translation></message></context><context><name>RetailRestrictedDialog</name><message><source>Enter passcode</source><translation>输入密码</translation></message></context><context><name>SearchButton</name><message><source>Search</source><translation>搜索</translation></message></context><context><name>CompletedWindow</name><message><source>Continue</source><translation>继续</translation></message><message><source>You're good to go</source><translation>一切就绪</translation></message></context><context><name>TrashAction</name><message><source>%n item(s) were deleted</source><translation>
+            </translation></message></context><context><name>xofm::libs::explorer::TreeExplorer</name><message><source>My files</source><translation>我的文件</translation></message></context><context><name>EnterRecoveryCode</name><message><source>Enter recovery code</source><translation>输入恢复码</translation></message></context><context><name>IntegrationsMenu</name><message><source>Integrations</source><translation>集成</translation></message></context><context><name>xofm::libs::syncinterface::DocumentSyncInterfaceHelper</name><message><source>Unable to archive/retrieve without Wi-Fi connection</source><translation>未连接 Wi-Fi，无法归档/检索</translation></message></context><context><name>SeabirdLanguage</name><message><source>Type Folio language</source><translation>Type Folio 语言</translation></message></context></TS>
