@@ -162,11 +162,15 @@ func rmppScreenshot() (image.Image, error) {
 // rm2Screenshot reMarkable 2 (3.29 实测): 没有 card0, /dev/fb0 是 SWTCON 的波形口 (260×23936) 不是画面。
 // 画面是 xochitl 里一张 1404×1872 的 32 位 BGRA QImage, malloc 出来的大块, 放在某个 rw-p 匿名映射
 // 里 (不一定在映射开头)。32 位 glibc 的块头: +4 是 size (低 3 位是标志), 数据从 +8 开始。
-// 逐页扫所有放得下一帧的匿名映射, 找 size&^7 正好比一帧大一点的那一页 (2026-10-20 实测
-// size=10514424, 帧 10513152, 多出的 1272 是 Qt 的对齐余量)。
+//
+// 同尺寸的 QImage 不止一张 (要闻的版面图也是 1404×1872, 解码后一模一样大), 2026-10-20 实测
+// 4 块候选里只有一块是屏幕: 它在 /dev/fb0 映射**之后**的第一块匿名映射里 (开屏时紧跟 fb0 分配的),
+// 也是地址最高的那块 (mmap 从高往低长, 最早分配的最高); 其余是后来解码的图片, 地址更低。
+// 所以只扫 fb0 之后的映射, 取第一块; 找不到 fb0 时退回地址最高的候选。
+// 老固件 (rm2fb 时代) 是 16 位 RGB565, 一并认, 按块大小区分; 3.28 未实测。
 func rm2Screenshot() (image.Image, error) {
 	const w, h = 1404, 1872
-	const frameSize = w * h * 4
+	const frame32, frame16 = w * h * 4, w * h * 2
 	pid, err := xochitlPID()
 	if err != nil {
 		return nil, err
@@ -180,9 +184,17 @@ func rm2Screenshot() (image.Image, error) {
 		return nil, fmt.Errorf("open mem: %w", err)
 	}
 	defer f.Close()
-	var hdr [8]byte
+
+	var fbEnd uint64
+	type region struct{ start, end uint64 }
+	var regions []region
 	for _, line := range strings.Split(string(maps), "\n") {
 		parts := strings.Fields(line)
+		if len(parts) >= 6 && parts[5] == "/dev/fb0" {
+			rng := strings.Split(parts[0], "-")
+			fbEnd, _ = strconv.ParseUint(rng[1], 16, 64)
+			continue
+		}
 		if len(parts) != 5 || parts[1] != "rw-p" {
 			continue
 		}
@@ -190,32 +202,59 @@ func rm2Screenshot() (image.Image, error) {
 		if len(rng) != 2 {
 			continue
 		}
-		start, _ := strconv.ParseUint(rng[0], 16, 64)
-		end, _ := strconv.ParseUint(rng[1], 16, 64)
-		if end-start < frameSize+8 {
-			continue
+		s, _ := strconv.ParseUint(rng[0], 16, 64)
+		e, _ := strconv.ParseUint(rng[1], 16, 64)
+		if e-s >= frame16+8 {
+			regions = append(regions, region{s, e})
 		}
-		for page := start; page+8+frameSize <= end; page += 4096 {
+	}
+	var hdr [8]byte
+	var found uint64
+	bpp := 0
+	for _, r := range regions {
+		if fbEnd != 0 && r.start < fbEnd {
+			continue // fb0 之前的都是后来的图片缓存
+		}
+		for page := r.start; page+8+frame16 <= r.end; page += 4096 {
 			if _, err := f.ReadAt(hdr[:], int64(page)); err != nil {
 				break
 			}
 			sz := uint64(binary.LittleEndian.Uint32(hdr[4:8])) &^ 7
-			if sz < frameSize || sz > frameSize+1<<20 {
+			switch {
+			case sz >= frame32 && sz <= frame32+1<<20 && page+8+frame32 <= r.end:
+				found, bpp = page+8, 4
+			case sz >= frame16 && sz <= frame16+1<<20:
+				found, bpp = page+8, 2
+			default:
 				continue
 			}
-			buf := make([]byte, frameSize)
-			if _, err := f.ReadAt(buf, int64(page+8)); err != nil {
-				return nil, fmt.Errorf("read frame: %w", err)
+			if fbEnd != 0 {
+				break // fb0 之后的第一块就是屏幕
 			}
-			img := image.NewNRGBA(image.Rect(0, 0, w, h))
-			for y := 0; y < h; y++ {
-				for x := 0; x < w; x++ {
-					off := (y*w + x) * 4
-					img.SetNRGBA(x, y, color.NRGBA{R: buf[off+2], G: buf[off+1], B: buf[off], A: 255})
-				}
-			}
-			return img, nil
+			// 没有 fb0 可参照: 继续扫, 留地址最高的
+		}
+		if found != 0 && fbEnd != 0 {
+			break
 		}
 	}
-	return nil, fmt.Errorf("rm2: 没找到 1404×1872 的帧 (xochitl pid %d)", pid)
+	if found == 0 {
+		return nil, fmt.Errorf("rm2: 没找到 1404×1872 的帧 (xochitl pid %d, fb0 end %x)", pid, fbEnd)
+	}
+	buf := make([]byte, w*h*bpp)
+	if _, err := f.ReadAt(buf, int64(found)); err != nil {
+		return nil, fmt.Errorf("read frame: %w", err)
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if bpp == 4 {
+				off := (y*w + x) * 4
+				img.SetNRGBA(x, y, color.NRGBA{R: buf[off+2], G: buf[off+1], B: buf[off], A: 255})
+			} else {
+				v := binary.LittleEndian.Uint16(buf[(y*w+x)*2:])
+				img.SetNRGBA(x, y, color.NRGBA{R: uint8(v>>11) << 3, G: uint8(v>>5&0x3f) << 2, B: uint8(v&0x1f) << 3, A: 255})
+			}
+		}
+	}
+	return img, nil
 }
