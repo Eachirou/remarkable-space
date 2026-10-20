@@ -373,11 +373,12 @@ Rectangle {
     }
 
     // 设置里切语言。写进 shell/config.json 的 lang 键, 顺手把当前应用的词典重读一遍,
-    // 这样不用退出空间再进去。
+    // 这样不用退出空间再进去。应用名 (扫码上传/个性化…) 是后端列表接口按语言换好的,
+    // 商店列表同理。所以存完还得重拉一次 —— 必须等存完, 否则后端还按旧语言给名字。
     function chooseLang(code) {
         langPref = code
         setLang(code)
-        saveShellCfg()
+        saveShellCfg(function() { reload(); if (storeLoaded) loadStore() })
         loadShellDict()
         if (current) loadDict(current)
     }
