@@ -196,7 +196,9 @@ say "    ✓ drop-in 写入 (tmpfs + ext4 lower 双写持久化)" "    ✓ drop-
 
 # ───── 阶段 6: 启动 services + xochitl ─────
 say "  → 阶段 6/6: 启动服务..." "  → Stage 6/6: starting services..."
-systemctl start remarkable-space.service rmkit-cn-ime-http.service 2>/dev/null || true
+# restart 而不是 start: 升级时这两个服务本来就在跑, start 是空操作, 新二进制要等设备重启才生效
+# (2026-10-20 rmpp 升到 v1.0.11 后商店还是 404, 就是旧后台进程没换)
+systemctl restart remarkable-space.service rmkit-cn-ime-http.service 2>/dev/null || true
 systemctl start rmkit-cn-ota.timer 2>/dev/null || true
 [ -f /etc/systemd/system/rmkit-cn-version.path ] && systemctl start rmkit-cn-version.path 2>/dev/null || true
 
