@@ -36,6 +36,8 @@ Rectangle {
     // 以 Paper Pro Move 竖屏短边 954px 为 1.0; Paper Pro (1620x2160) 竖屏约 1.7。横屏时短边不变, 版式靠宽度自适应。
     // 两台机器 DPI 接近 (229 / 264), 所以字号只温和放大 (fs), 边距/卡片高度按 unit 放大, 列数按内容宽度算。
     readonly property real unit: Math.max(0.6, Math.min(width, height) / 954)
+    // 系统剪贴板单例, 注入库经侧栏入口递进来 (空间组件里直接访问 Clipboard 是 ReferenceError); 贴纸用
+    property var rmkitClip: null
     // 纵向另算一套。两台机器高宽比差很多 —— Move 954x1696 (1:1.78), Paper Pro 1620x2160
     // (1:1.33)。尺寸全跟着短边走的话, Paper Pro 上宽度放大 1.70 倍而可用高度只有 1.27 倍,
     // 首页纵向超出约 230px, 要滚一截才看得全。

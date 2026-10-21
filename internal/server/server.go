@@ -161,6 +161,14 @@ func (s *Server) Routes() http.Handler {
 	s.lib.Mount(mux) // 空间外壳取「通知文件库」的活: /space/library/*
 
 	mux.HandleFunc("GET /screenshot", s.screenshotPNG) // 排版核对用: 当前屏幕 PNG
+	// 笔记里的贴纸 (internal/server/sticker.go)
+	mux.HandleFunc("GET /space/sticker/list", s.stickerList)
+	mux.HandleFunc("GET /space/sticker/thumb", s.stickerThumb)
+	mux.HandleFunc("GET /space/sticker/events", s.stickerEvents)
+	mux.HandleFunc("POST /space/sticker/arm", s.stickerArm)
+	mux.HandleFunc("GET /space/sticker/selftest", s.stickerSelftest)
+	mux.HandleFunc("POST /space/sticker/draw", s.drawSticker)
+	mux.HandleFunc("POST /space/sticker/stroke", s.strokeSticker)
 
 	// 「空间」启动台: 应用注册表 / 绿色安装 / 应用后台托管 (internal/space, 与具体应用无关)
 	if s.space != nil {
@@ -938,8 +946,12 @@ func (s *Server) putAIConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) screenshotPNG(w http.ResponseWriter, r *http.Request) {
 	img, err := rmppScreenshot()
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
-		return
+		// 和 AI 识字一样退回 DRM 接口 (重启后帧缓冲不一定紧挨 card0, 第一条路会失败)
+		var err2 error
+		if img, err2 = drmScreenshot(); err2 != nil {
+			httpError(w, http.StatusInternalServerError, err.Error()+" | drm: "+err2.Error())
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "image/png")
 	_ = png.Encode(w, img)

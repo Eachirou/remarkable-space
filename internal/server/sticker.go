@@ -1,0 +1,362 @@
+package server
+
+// 笔记里的「贴纸」: 一个贴纸一个 .rm 笔迹文件 (stickers/<包>/<名>.rm, 坐标以中心为原点、边长 300)。
+// 落到页面上的办法是**虚拟笔描** (2026-10-21 定): .rm 文件进不了 xochitl 的剪贴板/笔迹对象,
+// 只有正在显示的页面才克隆得出笔迹 (后台打开的页面克隆为空, 社区 glossa / xovi-content-inserter
+// 也都停在虚拟笔这一步)。面板 (笔记里的 QML, 注入库挂上) 的流程:
+//   斜滑 (events 长轮询收到 gesture) → 选贴纸 → arm → 用户用笔点一下 (events 收到 tap) →
+//   stroke begin/draw…/end (面板逐笔改笔的颜色粗细) → 切选择工具 → draw lasso 套索选中。
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"math"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	rmscene "github.com/alexgorbatchev/go-rmscene"
+	"github.com/boangs/remarkable-space/internal/handwriting"
+	"github.com/boangs/remarkable-space/internal/sticker"
+)
+
+const stickerDir = "/home/root/.local/share/rmkit-cn/space/stickers"
+
+var (
+	stickerMu     sync.Mutex
+	stickerSess   *handwriting.Session
+	stickerGroups [][][][2]float32 // 按颜色/粗细分组的笔画 (屏幕坐标)
+	stickerInput  *sticker.Input
+	stickerOnce   sync.Once
+)
+
+func (s *Server) stickerIn() *sticker.Input {
+	stickerOnce.Do(func() {
+		p := handwriting.DetectProfile()
+		stickerInput = sticker.NewInput(p.ScreenW, p.ScreenH, p.InputW, p.InputH)
+	})
+	return stickerInput
+}
+
+func cleanRel(rel string) (string, bool) {
+	rel = filepath.Clean(rel)
+	if rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) || filepath.Ext(rel) != ".rm" {
+		return "", false
+	}
+	return rel, true
+}
+
+// GET /space/sticker/list → {packs:[{id,name,name_en,stickers:[{pack,name,rel}]}]}
+func (s *Server) stickerList(w http.ResponseWriter, r *http.Request) {
+	packs, err := sticker.List(stickerDir)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if packs == nil {
+		packs = []sticker.Pack{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"packs": packs})
+}
+
+// GET /space/sticker/thumb?rel=包/名.rm&size=160 → PNG
+func (s *Server) stickerThumb(w http.ResponseWriter, r *http.Request) {
+	rel, ok := cleanRel(r.URL.Query().Get("rel"))
+	if !ok {
+		httpError(w, http.StatusBadRequest, "贴纸路径不对")
+		return
+	}
+	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
+	if size < 32 || size > 512 {
+		size = 160
+	}
+	b, err := sticker.Thumb(stickerDir, rel, size)
+	if err != nil {
+		httpError(w, http.StatusNotFound, "贴纸不存在")
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(b)
+}
+
+// GET /space/sticker/events?wait=25 长轮询: 斜滑 → {type:"gesture"}; 笔点 (arm 之后) → {type:"tap",x,y};
+// 超时 → {type:"none"}。面板用 XHR 循环调用 (运行时注入的组件里 Timer 不触发, 只能靠它)。
+func (s *Server) stickerEvents(w http.ResponseWriter, r *http.Request) {
+	in := s.stickerIn()
+	wait, _ := strconv.Atoi(r.URL.Query().Get("wait"))
+	if wait <= 0 || wait > 60 {
+		wait = 25
+	}
+	ch := in.Subscribe()
+	defer in.Unsubscribe(ch)
+	select {
+	case ev := <-ch:
+		writeJSON(w, http.StatusOK, ev)
+	case <-time.After(time.Duration(wait) * time.Second):
+		writeJSON(w, http.StatusOK, sticker.Event{Type: "none"})
+	case <-r.Context().Done():
+	}
+}
+
+// GET /space/sticker/selftest[?v=N][&consume=1]: 调试用, 读 space/.sticker-selftest[-N] (JSON),
+// consume=1 时读完删掉 (面板先确认页面就绪再 consume, 否则会白白吞掉)
+func (s *Server) stickerSelftest(w http.ResponseWriter, r *http.Request) {
+	p := filepath.Join(filepath.Dir(stickerDir), ".sticker-selftest")
+	if v := r.URL.Query().Get("v"); v != "" {
+		p += "-" + v // 面板改版后用新文件名, 旧实例轮询不会误吞
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"run": false})
+		return
+	}
+	if r.URL.Query().Get("consume") == "1" {
+		_ = os.Remove(p)
+	}
+	var v any
+	if json.Unmarshal(b, &v) != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"run": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"run": true, "tests": v})
+}
+
+// POST /space/sticker/arm {"on":true} 开始/取消等笔点
+func (s *Server) stickerArm(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		On bool `json:"on"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&in)
+	s.stickerIn().Arm(in.On)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// POST /space/sticker/draw {cx, cy, size, lasso:true}: 画一圈套索 (调用方先切到选择工具)
+func (s *Server) drawSticker(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		CX    float32 `json:"cx"`
+		CY    float32 `json:"cy"`
+		Size  float32 `json:"size"`
+		Lasso bool    `json:"lasso"`
+		// 调试: 画一个半径 r 的圆, 点距 spacing 像素, 每点停 delay_ms (看系统存下多少点)
+		Test *struct {
+			R       float32 `json:"r"`
+			Spacing float32 `json:"spacing"`
+			DelayMs float32 `json:"delay_ms"`
+		} `json:"test"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if in.Size <= 0 {
+		in.Size = 200
+	}
+	var ring [][2]float32
+	rx := in.Size * 0.62
+	n := 72
+	var delay time.Duration
+	if t := in.Test; t != nil && t.R > 0 && t.Spacing > 0 {
+		rx = t.R
+		n = int(2 * math.Pi * float64(rx) / float64(t.Spacing))
+		delay = time.Duration(t.DelayMs * float32(time.Millisecond))
+	}
+	for i := 0; i <= n; i++ {
+		a := float64(i) / float64(n) * 2 * math.Pi
+		ring = append(ring, [2]float32{in.CX + rx*float32(math.Cos(a)), in.CY + rx*float32(math.Sin(a))})
+	}
+	sess, err := s.newSession()
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if delay <= 0 {
+		delay = time.Millisecond // 套索圈也用 1ms 一点
+	}
+	sess.Delay = delay
+	defer sess.End()
+	if err := sess.Stroke(ring); err != nil {
+		httpError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) newSession() (*handwriting.Session, error) {
+	in := s.stickerIn()
+	sess, err := handwriting.Begin(handwriting.DetectProfile())
+	if err != nil {
+		return nil, err
+	}
+	sess.OnWrite = in.NoteWritten
+	sess.WaitClear = func() bool {
+		// 真笔在屏幕附近 (最近 300ms 有不是我们写的坐标) 就等, 最多等 8 秒
+		deadline := time.Now().Add(8 * time.Second)
+		for !in.ForeignQuiet(300 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				return false
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		return true
+	}
+	return sess, nil
+}
+
+// 逐笔描贴纸 (面板在笔与笔之间改笔的颜色/粗细):
+//
+//	POST /space/sticker/stroke {op:"begin", sticker, cx, cy, size[, delay_ms]} → {strokes:[{color, argb?, tool, width, count}]}
+//	                                                                 (strokes 是按颜色/粗细分的组)
+//	POST /space/sticker/stroke {op:"draw", index}                   → 描第 index 组 (count 笔)
+//	POST /space/sticker/stroke {op:"wait"}                          → 等 300ms (给界面切工具)
+//	POST /space/sticker/stroke {op:"end"}
+func (s *Server) strokeSticker(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Op      string  `json:"op"`
+		Sticker string  `json:"sticker"`
+		CX      float32 `json:"cx"`
+		CY      float32 `json:"cy"`
+		Size    float32 `json:"size"`
+		Index   int     `json:"index"`
+		DelayMs float32 `json:"delay_ms"` // 调试: 每点停顿 (默认 2ms)
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	stickerMu.Lock()
+	defer stickerMu.Unlock()
+	switch in.Op {
+	case "begin":
+		if stickerSess != nil {
+			stickerSess.End()
+			stickerSess = nil
+		}
+		rel, ok := cleanRel(in.Sticker)
+		if !ok {
+			httpError(w, http.StatusBadRequest, "贴纸路径不对")
+			return
+		}
+		b, err := os.ReadFile(filepath.Join(stickerDir, rel))
+		if err != nil {
+			httpError(w, http.StatusNotFound, "贴纸不存在")
+			return
+		}
+		sc, err := rmscene.Parse(b)
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if in.Size <= 0 {
+			in.Size = 200
+		}
+		k := in.Size / 300
+		// 按 (颜色, 粗细) 分组, 同组的笔一次描完: 面板每换一次笔只需一个来回 (原来逐笔来回, 杯子 8 笔要 5 秒)
+		type group struct {
+			key   string
+			meta  map[string]any
+			paths [][][2]float32
+		}
+		var groups []*group
+		byKey := map[string]*group{}
+		for _, ln := range sticker.Strokes(sc) {
+			st := densify(ln.Points, in.CX, in.CY, k)
+			wpx := 0.0
+			if len(ln.Points) > 0 {
+				wpx = float64(ln.Points[0].Width) / 4 * float64(k)
+			}
+			key := fmt.Sprintf("%d/%d/%.2f", ln.Color, ln.ARGB, wpx)
+			g := byKey[key]
+			if g == nil {
+				m := map[string]any{"color": int(ln.Color), "tool": int(ln.Tool), "width": wpx}
+				if ln.HasRGB {
+					m["argb"] = ln.ARGB
+				}
+				g = &group{key: key, meta: m}
+				byKey[key] = g
+				groups = append(groups, g)
+			}
+			g.paths = append(g.paths, st)
+		}
+		stickerGroups = nil
+		var meta []map[string]any
+		for _, g := range groups {
+			g.meta["count"] = len(g.paths)
+			meta = append(meta, g.meta)
+			stickerGroups = append(stickerGroups, g.paths)
+		}
+		sess, err := s.newSession()
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		sess.Delay = time.Millisecond // 1 像素一个事件, 1ms 一点 ≈ 1000 像素/秒 (停顿走 preciseSleep 自旋)
+		if in.DelayMs > 0 {
+			sess.Delay = time.Duration(in.DelayMs * float32(time.Millisecond))
+		}
+		stickerSess = sess
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "strokes": meta})
+	case "draw":
+		if stickerSess == nil || in.Index < 0 || in.Index >= len(stickerGroups) {
+			httpError(w, http.StatusBadRequest, "没有进行中的贴纸或序号不对")
+			return
+		}
+		t0 := time.Now()
+		w0, d0, p0 := stickerSess.WaitTotal, stickerSess.DrawTotal, stickerSess.Points
+		for _, st := range stickerGroups[in.Index] {
+			if err := stickerSess.Stroke(st); err != nil {
+				httpError(w, http.StatusConflict, err.Error())
+				return
+			}
+		}
+		wt, st := stickerSess.PenStats()
+		log.Printf("sticker: 第 %d 组 %d 笔 %d 点, 总 %s (等笔 %s, 写点 %s, %.2f ms/点; 累计 write %s sleep %s)", in.Index, len(stickerGroups[in.Index]),
+			stickerSess.Points-p0, time.Since(t0).Round(time.Millisecond), (stickerSess.WaitTotal - w0).Round(time.Millisecond),
+			(stickerSess.DrawTotal - d0).Round(time.Millisecond), float64((stickerSess.DrawTotal-d0).Microseconds())/1000/float64(max(1, stickerSess.Points-p0)),
+			wt.Round(time.Millisecond), st.Round(time.Millisecond))
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "wait":
+		time.Sleep(300 * time.Millisecond)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "end":
+		if stickerSess != nil {
+			stickerSess.End()
+			stickerSess = nil
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		httpError(w, http.StatusBadRequest, "op 不对")
+	}
+}
+
+// densify 贴纸笔画换成屏幕坐标, 相邻点间距控制在约 1 像素。2026-10-21 实测 (同一个圆四种发法):
+// 系统存点与发点节奏/密度无关 (都约每 5 像素存一点), 但每个事件跳 3 像素时笔迹引擎按"快速移动"
+// 预测, 圆被压扁、起笔处鼓包; 每事件 1 像素 (2ms 或 5ms 都行) 画出来才是正圆。
+// 太疏 (闭合路径最后那一段直接连回起点) 系统还会把瞬移当噪声丢掉, 实测爱心缺一截。
+func densify(pts []rmscene.Point, cx, cy, k float32) [][2]float32 {
+	const spacing = 1.0
+	var out [][2]float32
+	for _, p := range pts {
+		q := [2]float32{cx + p.X*k, cy + p.Y*k}
+		if n := len(out); n > 0 {
+			a := out[n-1]
+			dx, dy := q[0]-a[0], q[1]-a[1]
+			d := float32(math.Hypot(float64(dx), float64(dy)))
+			if d < spacing*0.7 {
+				continue
+			}
+			for steps, i := int(d/spacing+0.5), 1; i < steps; i++ {
+				f := float32(i) / float32(steps)
+				out = append(out, [2]float32{a[0] + dx*f, a[1] + dy*f})
+			}
+		}
+		out = append(out, q)
+	}
+	return out
+}

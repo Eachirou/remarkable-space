@@ -89,6 +89,10 @@ type rawInputEvent struct {
 type Pen struct {
 	dev     *os.File
 	profile DeviceProfile
+	onWrite func(x, y int32) // 每写一个坐标回调 (贴纸监听器据此分辨真笔)
+	delay   time.Duration    // 每个坐标之间的停顿 (0 = 5ms, 约 200Hz)
+	// 统计 (调速用): 写 uinput 累计 / 停顿累计
+	WriteTotal, SleepTotal time.Duration
 }
 
 func NewPen(profile DeviceProfile) (*Pen, error) {
@@ -176,25 +180,41 @@ func (p *Pen) penUp() error {
 	})
 }
 
-func (p *Pen) gotoXY(x, y int) error {
-	ix, iy := p.screenToInput(x, y)
+func (p *Pen) gotoXY(x, y int) error { return p.gotoXYF(float32(x), float32(y)) }
+
+// gotoXYF 亚像素坐标版: 笔的输入分辨率比屏幕像素细 7 倍, 贴纸描线点距只有 1-3 像素,
+// 先取整再换算会让每个点抖 ±0.5 像素, 画出来像锯齿。
+func (p *Pen) gotoXYF(x, y float32) error {
+	ix, iy := p.screenToInputF(x, y)
+	if p.onWrite != nil {
+		p.onWrite(int32(ix), int32(iy))
+	}
 	// 限速到约 200Hz, 接近真实笔采样速率 —— 让屏幕渲染管线跟得上, 也给视觉上"写字的过程感"。
 	// gotoXY 只发位置 (BTN_TOUCH/PRESSURE/DISTANCE 由 penDown 设, 直到 penUp 才改)。
 	// 实测重发 PRESSURE/DISTANCE 反而会让 e-ink 出现"突然刷一下"的现象, 删掉。
-	defer time.Sleep(5 * time.Millisecond)
-	return p.sendEvents([]struct {
-		T, C uint16
-		V    int32
-	}{
-		{evAbs, absX, int32(ix)},
-		{evAbs, absY, int32(iy)},
-		{evSyn, synReport, 0},
-	})
+	d := p.delay
+	if d <= 0 {
+		d = 5 * time.Millisecond
+	}
+	t0 := time.Now()
+	defer func() {
+		t1 := time.Now()
+		p.WriteTotal += t1.Sub(t0)
+		preciseSleep(d)
+		p.SleepTotal += time.Since(t1)
+	}()
+	// 一个点的三个 event 一次写入 (一个 SYN 就是一个采样, 不会把多点瞬间推进内核)
+	evs := [3]rawInputEvent{{Type: evAbs, Code: absX, Value: int32(ix)}, {Type: evAbs, Code: absY, Value: int32(iy)}, {Type: evSyn, Code: synReport}}
+	buf := (*[3 * unsafe.Sizeof(rawInputEvent{})]byte)(unsafe.Pointer(&evs))[:]
+	_, err := p.dev.Write(buf)
+	return err
 }
 
-func (p *Pen) screenToInput(x, y int) (int, int) {
-	xn := float32(x) / float32(p.profile.ScreenW)
-	yn := float32(y) / float32(p.profile.ScreenH)
+func (p *Pen) screenToInput(x, y int) (int, int) { return p.screenToInputF(float32(x), float32(y)) }
+
+func (p *Pen) screenToInputF(x, y float32) (int, int) {
+	xn := x / float32(p.profile.ScreenW)
+	yn := y / float32(p.profile.ScreenH)
 	if p.profile.SwapXY {
 		ix := int(yn * float32(p.profile.InputW))
 		iy := int(xn * float32(p.profile.InputH))

@@ -1,3 +1,5 @@
+github.com/alexgorbatchev/go-rmscene v0.0.0-20260930034707-bce366db2f41 h1:jRkDZtQeNKzy0FkzkEh2+SQAGSaACi20Pkp9g5RZQgw=
+github.com/alexgorbatchev/go-rmscene v0.0.0-20260930034707-bce366db2f41/go.mod h1:1e7dL2+AtBl5LjzFqAAIdDYUpO7n2xnYj1c9Ieai/xA=
 github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e h1:MRM5ITcdelLK2j1vwZ3Je0FKVCfqOLp5zO6trqMLYs0=
 github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e/go.mod h1:XV66xRDqSt+GTGFMVlhk3ULuV0y9ZmzeVGR4mloJI3M=
 golang.org/x/sys v0.43.0 h1:Rlag2XtaFTxp19wS8MXlJwTvoh8ArU6ezoyFsMyCTNI=

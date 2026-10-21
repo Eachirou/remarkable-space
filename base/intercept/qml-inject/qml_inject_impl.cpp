@@ -23,6 +23,8 @@
 #include <QtCore/QMetaProperty>
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
+#include <QtCore/QPointer>
+#include <sys/stat.h>
 #include <QtCore/QUrl>
 #include <QtCore/QVariant>
 #include <QtCore/QMimeData>
@@ -797,6 +799,10 @@ static void doInject(QQmlEngine *engine) {
             if (c->objectName().toUtf8() == "advancedItem") {
                 if (c->property("label").toString() != label)
                     c->setProperty("label", label);
+                if (!g_clipSingleton)
+                    findUsableContext(c, engine);
+                if (g_clipSingleton && c->property("rmkitClip").value<QObject *>() != g_clipSingleton)
+                    c->setProperty("rmkitClip", QVariant::fromValue(g_clipSingleton));
                 return;
             }
         const char *panelUrl = useSpace ? "file:///home/root/rmkit-cn/space/shell/Space.qml"
@@ -812,6 +818,8 @@ static void doInject(QQmlEngine *engine) {
             "  id: advItem\n"
             "  objectName: \"advancedItem\"\n"
             "  property string label: \"") + label.toUtf8() + QByteArray("\"\n"
+            // 系统剪贴板单例 (C++ 每轮递进来): 空间里的组件访问不到 Clipboard, 由这里转交 (贴纸)
+            "  property var rmkitClip: null\n"
             "  Layout.preferredWidth: 414\n"
             "  Layout.preferredHeight: 112\n"
             // 注入时就异步预编译面板 (Component.Asynchronous), 点击时直接用缓存, 首开不卡
@@ -837,7 +845,7 @@ static void doInject(QQmlEngine *engine) {
             "      var c = ") + (devMode ? QByteArray("Qt.createComponent(\"") + panelUrl + "?t=\" + Date.now())"
                                         : QByteArray("advItem.panelComp")) + QByteArray(";\n"
             "      var mk = function() {\n"
-            "        if (c.status === Component.Ready) c.createObject(host ? host : r);\n"
+            "        if (c.status === Component.Ready) c.createObject(host ? host : r, { rmkitClip: advItem.rmkitClip });\n"
             "        else if (c.status === Component.Error) console.log(\"[advpanel] ERR: \" + c.errorString());\n"
             "      };\n"
             "      if (c.status === Component.Loading) c.statusChanged.connect(mk); else mk();\n"
@@ -1082,6 +1090,108 @@ static void installInputFilter() {
     fprintf(stderr, "[impl] 输入事件过滤器已安装\n");
 }
 
+// ─── 文档内附加组件: 打开笔记时挂到 DocumentView 上的 QML (贴纸面板等) ───
+// 正式: /home/root/rmkit-cn/space/shell/Sticker.qml (随空间安装, 文件在就挂);
+// 开发: /home/root/rmkit-cn/space/docdev.qml, 只在 ~/.local/share/rmkit-cn/space/.docdev 存在时挂。
+// 文件 mtime 变了自动销毁重建, 改面板不用重启 xochitl。组件拿到 docView 与系统剪贴板单例。
+struct docAddon {
+    const char *path;
+    const char *flag; // 可空
+    QPointer<QQuickItem> item;
+    QPointer<QQuickItem> host;
+    time_t mtime = 0;
+};
+static docAddon g_docAddons[] = {
+    {"/home/root/rmkit-cn/space/shell/Sticker.qml", nullptr},
+    {"/home/root/rmkit-cn/space/docdev.qml", "/home/root/.local/share/rmkit-cn/space/.docdev"},
+};
+
+static void hookClipboardDump();
+
+static void doInjectDocAddons(QQmlEngine *engine) {
+    QQuickItem *dv = nullptr;
+    bool looked = false;
+    for (docAddon &a : g_docAddons) {
+        struct stat st;
+        if ((a.flag && access(a.flag, F_OK) != 0) || stat(a.path, &st) != 0) {
+            if (a.item)
+                a.item->deleteLater();
+            continue;
+        }
+        if (a.flag)
+            hookClipboardDump();
+        if (!looked) {
+            looked = true;
+            for (QWindow *w : QGuiApplication::topLevelWindows()) {
+                auto *qw = qobject_cast<QQuickWindow *>(w);
+                if (!qw || !qw->contentItem())
+                    continue;
+                QList<QQuickItem *> views;
+                findAllByClass(qw->contentItem(), "DocumentView_", views);
+                for (QQuickItem *v : views)
+                    if (v->property("sceneController").value<QObject *>()) {
+                        dv = v;
+                        break;
+                    }
+                if (dv)
+                    break;
+            }
+        }
+        if (!dv)
+            continue;
+        if (a.item && a.host == dv && st.st_mtime == a.mtime)
+            continue;
+        if (a.item)
+            a.item->deleteLater();
+        QQmlComponent comp(engine, QUrl(QString("file://%1?t=%2").arg(a.path).arg((long long)st.st_mtime)));
+        if (comp.isError()) {
+            flog("[docaddon] %s 错误: %s\n", a.path, comp.errorString().toUtf8().constData());
+            a.mtime = st.st_mtime; // 同一版错了别反复刷日志
+            a.host = dv;
+            continue;
+        }
+        QObject *obj = comp.create(findUsableContext(dv, engine));
+        auto *item = qobject_cast<QQuickItem *>(obj);
+        if (!item) {
+            delete obj;
+            continue;
+        }
+        item->setProperty("docView", QVariant::fromValue((QObject *)dv));
+        if (g_clipSingleton)
+            item->setProperty("clip", QVariant::fromValue(g_clipSingleton));
+        item->setParentItem(dv);
+        item->setZ(10000);
+        a.item = item;
+        a.host = dv;
+        a.mtime = st.st_mtime;
+        flog("[docaddon] %s 已挂到 %s\n", a.path, dv->metaObject()->className());
+    }
+}
+
+// 开发诊断: 系统剪贴板每变一次, 记下格式/大小/开头字节 (只在 .docdev 存在时挂, 只挂一次)
+static void hookClipboardDump() {
+    static bool hooked = false;
+    if (hooked)
+        return;
+    hooked = true;
+    QClipboard *cb = QGuiApplication::clipboard();
+    QObject::connect(cb, &QClipboard::dataChanged, cb, [cb]() {
+        const QMimeData *md = cb->mimeData(QClipboard::Clipboard);
+        if (!md) {
+            flog("[clipdump] 变了, 无 mimeData\n");
+            return;
+        }
+        const QStringList fmts = md->formats();
+        flog("[clipdump] 变了, %d 种格式\n", (int)fmts.size());
+        for (const QString &f : fmts) {
+            QByteArray d = md->data(f);
+            flog("[clipdump]   %s  %d 字节  头: %s\n", f.toUtf8().constData(), (int)d.size(),
+                 d.left(48).toHex(' ').constData());
+        }
+    });
+    flog("[clipdump] 已挂剪贴板监听\n");
+}
+
 // 跑一遍全部注入 (幂等)。由 ChildAdded 事件驱动调用, 定时器仅作兜底。
 static void runInjectPass() {
     if (!g_engine)
@@ -1116,6 +1226,7 @@ static void runInjectPass() {
     doInjectLanguage(g_engine);
     doInjectGlyphAI(g_engine);
     doInjectTextAI(g_engine);
+    doInjectDocAddons(g_engine);
     clock_gettime(CLOCK_MONOTONIC, &t1);
     long us = (t1.tv_sec - t0.tv_sec) * 1000000L + (t1.tv_nsec - t0.tv_nsec) / 1000;
     static long worst = 0, calls = 0;
