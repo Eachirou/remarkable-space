@@ -9,6 +9,7 @@ package sticker
 import (
 	"encoding/binary"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"strings"
@@ -16,6 +17,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/boangs/remarkable-space/internal/handwriting"
 )
 
 // Event 发给面板的事件: gesture (斜滑) / tap (笔点, 屏幕像素坐标)
@@ -35,11 +38,8 @@ type Input struct {
 	foreign  time.Time
 	penDev   string
 	touchDev string
-	screenW  float32
-	screenH  float32
-	inputW   float32
-	inputH   float32
-	written  [64][2]int32 // 虚拟笔最近写过的坐标环 (区分真笔)
+	profile  handwriting.DeviceProfile // 坐标换算 (笔点落点 / 触屏方向)
+	written  [64][2]int32              // 虚拟笔最近写过的坐标环 (区分真笔)
 	wpos     int
 }
 
@@ -53,26 +53,28 @@ func absRange(f *os.File, code uint) absInfo {
 	return a
 }
 
-// findInput 按设备名找 /dev/input/eventN
-func findInput(sub string) string {
+// findInput 按设备名 (任一子串命中) 找 /dev/input/eventN
+func findInput(subs ...string) string {
 	for i := 0; i < 12; i++ {
 		b, err := os.ReadFile(fmt.Sprintf("/sys/class/input/event%d/device/name", i))
-		if err == nil && strings.Contains(strings.ToLower(string(b)), sub) {
-			return fmt.Sprintf("/dev/input/event%d", i)
+		if err != nil {
+			continue
+		}
+		name := strings.ToLower(string(b))
+		for _, sub := range subs {
+			if strings.Contains(name, sub) {
+				return fmt.Sprintf("/dev/input/event%d", i)
+			}
 		}
 	}
 	return ""
 }
 
-// NewInput 起监听; screenW/H 是屏幕像素, inputW/H 是笔设备坐标范围 (落点换算用)
-func NewInput(screenW, screenH, inputW, inputH int) *Input {
-	in := &Input{subs: map[chan Event]struct{}{}, screenW: float32(screenW), screenH: float32(screenH),
-		inputW: float32(inputW), inputH: float32(inputH)}
-	in.penDev = findInput("marker")
-	if in.penDev == "" {
-		in.penDev = findInput("pen")
-	}
-	in.touchDev = findInput("touch")
+// NewInput 起监听; profile 提供屏幕/笔坐标换算与触屏方向
+func NewInput(profile handwriting.DeviceProfile) *Input {
+	in := &Input{subs: map[chan Event]struct{}{}, profile: profile}
+	in.penDev = findInput("marker", "wacom", "pen")     // Paper Pro: Elan marker input; rm2: Wacom I2C Digitizer
+	in.touchDev = findInput("touch", "pt_mt", "cyttsp") // Paper Pro: Elan touch input; rm2: pt_mt
 	if in.penDev != "" {
 		go in.penLoop()
 	}
@@ -155,11 +157,15 @@ const (
 	absMTPosX, absMTPosY = 0x35, 0x36
 )
 
+// evSize input_event 的大小: 64 位 24 字节 (timeval 两个 8 字节), 32 位 rm2 16 字节
+var evSize = int(unsafe.Sizeof(syscall.Timeval{})) + 8
+
 func readEvent(f *os.File, buf []byte) (typ, code uint16, val int32, ok bool) {
-	if _, err := f.Read(buf); err != nil {
+	if _, err := f.Read(buf[:evSize]); err != nil {
 		return 0, 0, 0, false
 	}
-	return binary.LittleEndian.Uint16(buf[16:]), binary.LittleEndian.Uint16(buf[18:]), int32(binary.LittleEndian.Uint32(buf[20:])), true
+	o := evSize - 8
+	return binary.LittleEndian.Uint16(buf[o:]), binary.LittleEndian.Uint16(buf[o+2:]), int32(binary.LittleEndian.Uint32(buf[o+4:])), true
 }
 
 // penLoop: 真笔检测 + 点一下
@@ -172,7 +178,7 @@ func (in *Input) penLoop() {
 		}
 		xr, yr := absRange(f, absX), absRange(f, absY)
 		if xr.Max > 0 {
-			in.inputW, in.inputH = float32(xr.Max), float32(yr.Max)
+			in.profile.InputW, in.profile.InputH = int(xr.Max), int(yr.Max)
 		}
 		buf := make([]byte, 24)
 		var x, y int32 = -1, -1
@@ -202,9 +208,10 @@ func (in *Input) penLoop() {
 					in.mu.Lock()
 					armed := in.armed
 					in.mu.Unlock()
-					if armed && time.Since(downAt) < 500*time.Millisecond && moved < 0.03*float64(in.inputW) && !in.isOurs(sx, sy) {
+					if armed && time.Since(downAt) < 500*time.Millisecond && moved < 0.03*float64(in.profile.InputW) && !in.isOurs(sx, sy) {
 						in.Arm(false)
-						in.publish(Event{Type: "tap", X: float32(sx) / in.inputW * in.screenW, Y: float32(sy) / in.inputH * in.screenH})
+						px, py := in.profile.InputToScreen(sx, sy)
+						in.publish(Event{Type: "tap", X: px, Y: py})
 					}
 				}
 			case typ == evSyn && code == 0:
@@ -263,10 +270,16 @@ func (in *Input) touchLoop() {
 			case typ == evAbs && code == absMTPosX:
 				if p := cur[slot]; p != nil {
 					p[0] = float64(val-xr.Min) / float64(xr.Max-xr.Min)
+					if in.profile.TouchInvertX {
+						p[0] = 1 - p[0]
+					}
 				}
 			case typ == evAbs && code == absMTPosY:
 				if p := cur[slot]; p != nil {
 					p[1] = float64(val-yr.Min) / float64(yr.Max-yr.Min)
+					if in.profile.TouchInvertY {
+						p[1] = 1 - p[1]
+					}
 				}
 			case typ == evSyn && code == 0:
 				n := len(active)
@@ -294,6 +307,9 @@ func (in *Input) touchLoop() {
 					dx, dy := last[0]-start[0], last[1]-start[1]
 					l := math.Hypot(dx, dy)
 					ang := math.Atan2(dy, -dx) * 180 / math.Pi
+					if l >= 0.15 {
+						log.Printf("sticker: 滑动 起点(%.2f,%.2f) 终点(%.2f,%.2f) 角度 %.0f 长 %.2f 手指 %d 笔近 %v", start[0], start[1], last[0], last[1], ang, l, maxF, penDuring)
+					}
 					if maxF == 1 && !penDuring && start[0] > 0.78 && start[1] < 0.20 && dx < 0 && dy > 0 && ang >= 25 && ang <= 65 && l >= 0.3 {
 						in.publish(Event{Type: "gesture"})
 					}

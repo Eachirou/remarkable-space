@@ -31,8 +31,21 @@ func init() {
 type DeviceProfile struct {
 	ScreenW, ScreenH int
 	InputW, InputH   int
-	InvertY, SwapXY  bool
-	PenDev           string
+	// 屏幕 → 笔输入坐标: 先 (可选) 交换 xy, 再 (可选) 把 ix/iy 各自反向
+	InvertX, InvertY, SwapXY bool
+	PenDev                   string
+	// 触屏 (贴纸手势用): 坐标按范围归一化后再 (可选) 反向
+	TouchInvertX, TouchInvertY bool
+}
+
+// rm2 参数 (2026-10-21 实测: Wacom X 0..20966 对应屏幕竖向且反向, Y 0..15725 对应屏幕横向;
+// 触屏 pt_mt 坐标已是屏幕像素 0..1403/0..1871, 竖向反向 —— 真机日志: 从右上角滑到左下角, 原始归一化坐标是 (0.95,0.93)→(0.25,0.25))
+var ProfileRM2 = DeviceProfile{
+	ScreenW: 1404, ScreenH: 1872,
+	InputW: 20966, InputH: 15725,
+	SwapXY: true, InvertX: true,
+	PenDev:       "/dev/input/event1",
+	TouchInvertY: true,
 }
 
 // RMPPM Chiappa 参数
@@ -57,6 +70,9 @@ func DetectProfile() DeviceProfile {
 	m := strings.ToLower(strings.TrimRight(string(data), "\x00\n"))
 	if strings.Contains(m, "chiappa") {
 		return ProfileChiappa
+	}
+	if strings.Contains(m, "remarkable 2") {
+		return ProfileRM2
 	}
 	return ProfileFerrari
 }
@@ -212,23 +228,38 @@ func (p *Pen) gotoXYF(x, y float32) error {
 
 func (p *Pen) screenToInput(x, y int) (int, int) { return p.screenToInputF(float32(x), float32(y)) }
 
-func (p *Pen) screenToInputF(x, y float32) (int, int) {
-	xn := x / float32(p.profile.ScreenW)
-	yn := y / float32(p.profile.ScreenH)
-	if p.profile.SwapXY {
-		ix := int(yn * float32(p.profile.InputW))
-		iy := int(xn * float32(p.profile.InputH))
-		if p.profile.InvertY {
-			iy = int((1 - xn) * float32(p.profile.InputH))
-		}
-		return ix, iy
+func (p *Pen) screenToInputF(x, y float32) (int, int) { return p.profile.ScreenToInput(x, y) }
+
+// ScreenToInput 屏幕像素 → 笔输入坐标
+func (pr DeviceProfile) ScreenToInput(x, y float32) (int, int) {
+	xn := x / float32(pr.ScreenW)
+	yn := y / float32(pr.ScreenH)
+	if pr.SwapXY {
+		xn, yn = yn, xn
 	}
-	ix := int(xn * float32(p.profile.InputW))
-	iy := int(yn * float32(p.profile.InputH))
-	if p.profile.InvertY {
-		iy = int((1 - yn) * float32(p.profile.InputH))
+	if pr.InvertX {
+		xn = 1 - xn
 	}
-	return ix, iy
+	if pr.InvertY {
+		yn = 1 - yn
+	}
+	return int(xn * float32(pr.InputW)), int(yn * float32(pr.InputH))
+}
+
+// InputToScreen 笔输入坐标 → 屏幕像素 (ScreenToInput 的逆)
+func (pr DeviceProfile) InputToScreen(ix, iy int32) (float32, float32) {
+	xn := float32(ix) / float32(pr.InputW)
+	yn := float32(iy) / float32(pr.InputH)
+	if pr.InvertX {
+		xn = 1 - xn
+	}
+	if pr.InvertY {
+		yn = 1 - yn
+	}
+	if pr.SwapXY {
+		xn, yn = yn, xn
+	}
+	return xn * float32(pr.ScreenW), yn * float32(pr.ScreenH)
 }
 
 // ─── 字体数据（handstrokes.json）─────────────────────────────────

@@ -37,8 +37,7 @@ var (
 
 func (s *Server) stickerIn() *sticker.Input {
 	stickerOnce.Do(func() {
-		p := handwriting.DetectProfile()
-		stickerInput = sticker.NewInput(p.ScreenW, p.ScreenH, p.InputW, p.InputH)
+		stickerInput = sticker.NewInput(handwriting.DetectProfile())
 	})
 	return stickerInput
 }
@@ -257,6 +256,7 @@ func (s *Server) strokeSticker(w http.ResponseWriter, r *http.Request) {
 			in.Size = 200
 		}
 		k := in.Size / 300
+		grayscale := handwriting.DetectProfile().ScreenW == handwriting.ProfileRM2.ScreenW // rm2 黑白屏
 		// 按 (颜色, 粗细) 分组, 同组的笔一次描完: 面板每换一次笔只需一个来回 (原来逐笔来回, 杯子 8 笔要 5 秒)
 		type group struct {
 			key   string
@@ -271,13 +271,22 @@ func (s *Server) strokeSticker(w http.ResponseWriter, r *http.Request) {
 			if len(ln.Points) > 0 {
 				wpx = float64(ln.Points[0].Width) / 4 * float64(k)
 			}
-			key := fmt.Sprintf("%d/%d/%.2f", ln.Color, ln.ARGB, wpx)
-			g := byKey[key]
-			if g == nil {
-				m := map[string]any{"color": int(ln.Color), "tool": int(ln.Tool), "width": wpx}
-				if ln.HasRGB {
+			m := map[string]any{"color": int(ln.Color), "tool": int(ln.Tool), "width": wpx}
+			if ln.HasRGB {
+				if grayscale {
+					// rm2 不认自定义颜色 (color 9 + RGB 画成黑), 按亮度落到黑/灰
+					r, g, b := float64(ln.ARGB>>16&0xff), float64(ln.ARGB>>8&0xff), float64(ln.ARGB&0xff)
+					m["color"] = 0
+					if 0.3*r+0.59*g+0.11*b >= 100 {
+						m["color"] = 1
+					}
+				} else {
 					m["argb"] = ln.ARGB
 				}
+			}
+			key := fmt.Sprintf("%v/%v/%.2f", m["color"], m["argb"], wpx)
+			g := byKey[key]
+			if g == nil {
 				g = &group{key: key, meta: m}
 				byKey[key] = g
 				groups = append(groups, g)
