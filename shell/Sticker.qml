@@ -54,7 +54,6 @@ Item {
         })
     }
     Component.onCompleted: poll()
-
     // ---- 面板 ----
     function show() {
         if (packs.length === 0) {
@@ -72,7 +71,7 @@ Item {
     function choose(rel) {
         open = false
         pending = rel
-        hint = "用笔在页面上点一下，贴纸落在那里 / Tap with the pen where the sticker should go"
+        hint = ""
         post("/space/sticker/arm", { on: true }, function () {})
     }
     function cancel() {
@@ -112,28 +111,42 @@ Item {
         var dsv = visibleDSV(); var tb = dsv ? dsv.toolbar : null
         var pen = tb ? tb.primaryPen : null       // PenSetting {tool, color, colorCode, thickness}
         if (!tb || !pen) { log("place: no page/toolbar"); hint = "这里不能贴 / Not a notebook page"; return }
+        var h = penHandler()
+        if (!h) { log("place: no handler"); hint = "这里不能贴 / Not a notebook page"; return }
         busy = true
-        hint = "正在贴，请把笔移开 / Placing, keep the pen away"
-        // 只改工具栏的「主笔设置」, 让它顺着系统自己的绑定传到笔迹处理器 (dsv.strokeHandler)。
-        // 2026-10-21 教训: 直接给处理器的 lineTool/lineColor 赋值会切断绑定, 之后用户在工具栏选笔也不再生效,
-        // 重开笔记都不恢复 (处理器对象常驻), 只有重启 xochitl 才行。
-        var saved = { t: pen.tool, c: pen.color, cc: pen.colorCode, w: pen.thickness }
+        // 笔型/粗细改工具栏的「主笔设置」(PenSetting), 顺着系统绑定传到处理器 (dsv.strokeHandler)。
+        // 颜色不能这样走: 主笔的调色板里没有 9 (自定义 ARGB), 工具栏在落笔时会把它纠正回黑色 (2026-10-21 实测)。
+        // 所以颜色直接写处理器的 lineColor/lineArgbCode, 描完用 Qt.binding 接回「当前选中那支笔」——
+        // 实测处理器这两个值跟随 primaryPen / secondaryPen / selectionPen 中被选中的那支。
+        // 不接回的后果: 之后用户在工具栏换笔换色都不生效, 重开笔记也不恢复, 只能重启 xochitl。
+        var saved = { t: pen.tool, w: pen.thickness }
         try { tb.selectPen("primary") } catch (e) {}
         var at = { op: "begin", sticker: rel, cx: x, cy: y, size: stickerSize }
         post("/space/sticker/stroke", at, function (st, r) {
             if (st !== 200 || !r) { root.busy = false; root.hint = "贴失败 / Failed"; return }
             var meta = r.strokes, i = 0, retries = 0
-            function restore() { pen.tool = saved.t; pen.color = saved.c; pen.colorCode = saved.cc; pen.thickness = saved.w }
+            function restore() {
+                pen.tool = saved.t; pen.thickness = saved.w
+                function cur() {
+                    var n = tb.selectedTool ? String(tb.selectedTool.objectName) : ""
+                    if (n.indexOf("secondary") === 0) return tb.secondaryPen
+                    if (n.indexOf("selection") === 0) return tb.selectionPen
+                    return tb.primaryPen
+                }
+                h.lineColor = Qt.binding(function () { return cur().color })
+                h.lineArgbCode = Qt.binding(function () { return cur().colorCode })
+                if (h.lineColor !== cur().color) log("restore: binding mismatch " + h.lineColor + " vs " + cur().color)
+            }
             function next() {
                 if (i >= meta.length) { finish(); return }
                 var m = meta[i]
                 pen.tool = 17
-                if (m.argb !== undefined) { pen.color = 9; pen.colorCode = m.argb }   // 自定义颜色: 9 + ARGB
-                else pen.color = root.xoColor(m.color)
+                if (m.argb !== undefined) { h.lineArgbCode = m.argb; h.lineColor = 9 }   // 自定义颜色: 9 + ARGB
+                else { h.lineColor = root.xoColor(m.color); h.lineArgbCode = 0xFF000000 }
                 pen.thickness = Math.max(1, m.width / 1.8)
                 root.post("/space/sticker/stroke", { op: "draw", index: i }, function (st2) {
                     if (st2 === 200) { i++; retries = 0; next(); return }
-                    if (st2 === 409 && retries < 3) { retries++; root.hint = "请把笔移开 / Move the pen away"; next(); return }
+                    if (st2 === 409 && retries < 3) { retries++; next(); return }
                     root.post("/space/sticker/stroke", { op: "end" }, function () { restore(); root.busy = false; root.hint = "贴了一半，笔一直没移开 / Interrupted by the pen" })
                 })
             }
