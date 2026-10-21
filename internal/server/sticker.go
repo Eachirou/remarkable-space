@@ -10,6 +10,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"log"
 	"math"
 	"net/http"
@@ -60,6 +61,22 @@ func (s *Server) stickerList(w http.ResponseWriter, r *http.Request) {
 	if packs == nil {
 		packs = []sticker.Pack{}
 	}
+	// 「常用」放最前 (只列还存在的贴纸; 一个都没有就不出这个页签)
+	have := map[string]sticker.Sticker{}
+	for _, p := range packs {
+		for _, st := range p.Stickers {
+			have[st.Rel] = st
+		}
+	}
+	var recent []sticker.Sticker
+	for _, rel := range loadRecent() {
+		if st, ok := have[rel]; ok {
+			recent = append(recent, st)
+		}
+	}
+	if len(recent) > 0 {
+		packs = append([]sticker.Pack{{ID: "@recent", Name: "常用", NameEn: "Recent", Icon: "@star", Stickers: recent}}, packs...)
+	}
 	lang := "zh"
 	if s.space != nil {
 		lang = s.space.CurrentLang()
@@ -67,18 +84,26 @@ func (s *Server) stickerList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"packs": packs, "lang": lang})
 }
 
-// GET /space/sticker/thumb?rel=包/名.rm&size=160 → PNG
+// GET /space/sticker/thumb?rel=包/名.rm&size=160[&ink=ffffff] → PNG (rel=@star 为「常用」页签图标)
 func (s *Server) stickerThumb(w http.ResponseWriter, r *http.Request) {
-	rel, ok := cleanRel(r.URL.Query().Get("rel"))
-	if !ok {
-		httpError(w, http.StatusBadRequest, "贴纸路径不对")
-		return
+	q := r.URL.Query()
+	rel := q.Get("rel")
+	if rel != "@star" {
+		var ok bool
+		if rel, ok = cleanRel(rel); !ok {
+			httpError(w, http.StatusBadRequest, "贴纸路径不对")
+			return
+		}
 	}
-	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
+	size, _ := strconv.Atoi(q.Get("size"))
 	if size < 32 || size > 512 {
 		size = 160
 	}
-	b, err := sticker.Thumb(stickerDir, rel, size)
+	var ink *color.RGBA
+	if v, err := strconv.ParseUint(q.Get("ink"), 16, 32); err == nil && len(q.Get("ink")) == 6 {
+		ink = &color.RGBA{uint8(v >> 16), uint8(v >> 8), uint8(v), 255}
+	}
+	b, err := sticker.Thumb(stickerDir, rel, size, ink)
 	if err != nil {
 		httpError(w, http.StatusNotFound, "贴纸不存在")
 		return
@@ -86,6 +111,31 @@ func (s *Server) stickerThumb(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(b)
+}
+
+// 「常用」: 最近贴过的贴纸 (最多一页 12 个), 存在 stickers/.recent.json
+const recentMax = 12
+
+func recentPath() string { return filepath.Join(stickerDir, ".recent.json") }
+
+func loadRecent() []string {
+	var out []string
+	if b, err := os.ReadFile(recentPath()); err == nil {
+		_ = json.Unmarshal(b, &out)
+	}
+	return out
+}
+
+func noteRecent(rel string) {
+	list := []string{rel}
+	for _, r := range loadRecent() {
+		if r != rel && len(list) < recentMax {
+			list = append(list, r)
+		}
+	}
+	if b, err := json.Marshal(list); err == nil {
+		_ = os.WriteFile(recentPath(), b, 0o644)
+	}
 }
 
 // GET /space/sticker/events?wait=25 长轮询: 斜滑 → {type:"gesture"}; 笔点 (arm 之后) → {type:"tap",x,y};
@@ -212,6 +262,7 @@ func (s *Server) strokeSticker(w http.ResponseWriter, r *http.Request) {
 			httpError(w, http.StatusNotFound, "贴纸不存在")
 			return
 		}
+		noteRecent(rel)
 		sc, err := rmscene.Parse(b)
 		if err != nil {
 			httpError(w, http.StatusInternalServerError, err.Error())

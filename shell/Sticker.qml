@@ -21,6 +21,11 @@ Item {
     property string hint: ""            // 顶部提示条 (空 = 不显示)
     property var packs: []
     property int tab: 0                 // 当前页签 (贴纸包下标), 面板关了也记着
+    property int page: 0                // 当前页 (墨水屏翻页不滚动)
+    readonly property int perPage: 12   // 4 列 × 3 行
+    readonly property var curStickers: packs.length ? packs[Math.min(tab, packs.length - 1)].stickers : []
+    readonly property int pageCount: Math.max(1, Math.ceil(curStickers.length / perPage))
+    function turn(d) { var p = page + d; if (p >= 0 && p < pageCount) page = p }
     property bool zh: true
     property string pending: ""         // 选中的贴纸 (rel), 等笔点
     property real stickerSize: 200      // 贴纸落到屏幕上的边长 (像素)
@@ -56,17 +61,17 @@ Item {
     Component.onCompleted: poll()
     // ---- 面板 ----
     function show() {
-        if (packs.length === 0) {
-            xhr("GET", "/space/sticker/list", null, function (st, r) {
-                if (st === 200 && r && r.packs) {
-                    root.zh = (r.lang || "zh").indexOf("zh") === 0
-                    root.packs = r.packs
-                    if (root.tab >= r.packs.length) root.tab = 0
-                    root.open = true; root.hint = ""
-                }
-                else root.hint = "贴纸读不到 / Stickers unavailable"
-            })
-        } else { open = true; hint = "" }
+        xhr("GET", "/space/sticker/list", null, function (st, r) {
+            if (st !== 200 || !r || !r.packs) { root.hint = "贴纸读不到 / Stickers unavailable"; return }
+            root.zh = (r.lang || "zh").indexOf("zh") === 0
+            var keep = root.packs.length && root.tab < root.packs.length ? root.packs[root.tab].id : ""
+            root.packs = r.packs
+            var t = 0
+            for (var i = 0; i < r.packs.length; i++) if (r.packs[i].id === keep) t = i
+            root.tab = t
+            if (root.page >= root.pageCount) root.page = 0
+            root.open = true; root.hint = ""
+        })
     }
     function choose(rel) {
         open = false
@@ -170,63 +175,135 @@ Item {
         MouseArea { anchors.fill: parent; onClicked: root.cancel() }
     }
 
-    // 面板: 右上角展开, 点外面关掉
+    // 面板: 居中的对话框, 点外面或 × 关掉。版式: 标题栏 / 图标页签 / 4×3 格子 / 翻页 (墨水屏不滚动)
     MouseArea { anchors.fill: parent; visible: root.open; onClicked: root.cancel(); z: 20 }
     Rectangle {
         id: panel
         visible: root.open; z: 21
-        anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 16 * u
-        width: Math.min(parent.width - 32 * u, 4 * cell + 5 * gap); height: Math.min(parent.height * 0.7, 3 * cell + 2 * gap + 64 * u + 3 * gap)
-        radius: 16 * u; color: "#FFFFFF"; border.width: 2; border.color: "#000"
-        readonly property real cell: 150 * u
-        readonly property real gap: 14 * u
+        readonly property real cell: Math.min(170 * u, (root.width - 64 * u - 5 * gap) / 4)
+        readonly property real gap: 16 * u
+        readonly property real pad: 24 * u
+        anchors.centerIn: parent
+        width: 4 * cell + 3 * gap + 2 * pad
+        height: col.implicitHeight + 2 * pad
+        radius: 18 * u; color: "#F7F6F2"; border.width: 3; border.color: "#000"
         MouseArea { anchors.fill: parent }   // 挡住底下的关闭层
-        // 页签: 每个贴纸包一个
-        Flickable {
-            id: tabs
-            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-            anchors.margins: panel.gap
-            height: 64 * u; clip: true
-            contentWidth: tabRow.width; flickableDirection: Flickable.HorizontalFlick
-            Row {
-                id: tabRow
-                spacing: 8 * u
-                Repeater {
-                    model: root.packs
-                    Rectangle {
-                        property bool cur: index === root.tab
-                        height: tabs.height; width: tabLabel.implicitWidth + 40 * u; radius: 10 * u
-                        color: cur ? "#000" : "#FFF"; border.width: 2; border.color: "#000"
-                        Text {
-                            id: tabLabel; anchors.centerIn: parent
-                            text: (!root.zh && modelData.name_en) ? modelData.name_en : modelData.name
-                            font.pixelSize: 24 * u; color: parent.cur ? "#FFF" : "#000"
+
+        Column {
+            id: col
+            x: panel.pad; y: panel.pad; width: panel.width - 2 * panel.pad
+            spacing: 0
+
+            // 标题栏
+            Item {
+                width: parent.width; height: 64 * u
+                Text {
+                    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                    text: root.zh ? "贴纸" : "Stickers"; font.pixelSize: 36 * u; font.bold: true; color: "#000"
+                }
+                Text {
+                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                    text: "×"; font.pixelSize: 52 * u; color: "#000"
+                    MouseArea { anchors.fill: parent; anchors.margins: -20 * u; onClicked: root.cancel() }
+                }
+            }
+            Item { width: 1; height: 12 * u }
+
+            // 图标页签: 一屏 5 个, 多了左右划
+            Flickable {
+                id: tabs
+                width: parent.width; height: 112 * u; clip: true
+                contentWidth: tabRow.width; flickableDirection: Flickable.HorizontalFlick
+                interactive: contentWidth > width
+                Row {
+                    id: tabRow
+                    Repeater {
+                        model: root.packs
+                        Rectangle {
+                            property bool cur: index === root.tab
+                            width: tabs.width / 5; height: tabs.height
+                            radius: 14 * u; color: cur ? "#000" : "transparent"
+                            Image {
+                                id: tabIcon
+                                anchors.horizontalCenter: parent.horizontalCenter; y: 12 * u
+                                width: 60 * u; height: 60 * u; fillMode: Image.PreserveAspectFit; asynchronous: true; cache: false
+                                source: root.base + "/space/sticker/thumb?size=96&rel=" + encodeURIComponent(modelData.icon || "") + (parent.cur ? "&ink=ffffff" : "")
+                            }
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter; anchors.top: tabIcon.bottom; anchors.topMargin: 6 * u
+                                width: parent.width - 8 * u; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+                                text: (!root.zh && modelData.name_en) ? modelData.name_en : modelData.name
+                                font.pixelSize: 24 * u; color: parent.cur ? "#FFF" : "#000"
+                            }
+                            MouseArea { anchors.fill: parent; onClicked: { root.tab = index; root.page = 0 } }
                         }
-                        MouseArea { anchors.fill: parent; onClicked: { root.tab = index; grid.contentY = 0 } }
                     }
                 }
             }
-        }
-        Flickable {
-            id: grid
-            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-            anchors.top: tabs.bottom; anchors.margins: panel.gap
-            clip: true
-            contentHeight: flow.height
-            Flow {
-                id: flow
-                width: grid.width; spacing: panel.gap
-                Repeater {
-                    model: root.packs.length ? root.packs[Math.min(root.tab, root.packs.length - 1)].stickers : []
-                    Rectangle {
-                        width: panel.cell; height: panel.cell; radius: 10 * u
-                        color: tap.pressed ? "#DDD" : "#F7F5F0"; border.width: 1; border.color: "#BBB"
-                        Image {
-                            anchors.fill: parent; anchors.margins: 10 * u
-                            source: root.base + "/space/sticker/thumb?rel=" + encodeURIComponent(modelData.rel) + "&size=160"
-                            fillMode: Image.PreserveAspectFit; asynchronous: true; cache: false
+            Item { width: 1; height: 16 * u }
+            Rectangle { width: parent.width; height: 2; color: "#CFCCC4" }
+            Item { width: 1; height: panel.gap + 4 * u }
+
+            // 4×3 格子; 左右划翻页
+            Item {
+                id: gridBox
+                width: parent.width; height: 3 * panel.cell + 2 * panel.gap
+                property real pressX: 0
+                MouseArea {   // 空白处也能划
+                    anchors.fill: parent
+                    onPressed: (e) => { gridBox.pressX = e.x }
+                    onReleased: (e) => { var dx = e.x - gridBox.pressX; if (Math.abs(dx) > 60 * u) root.turn(dx < 0 ? 1 : -1) }
+                }
+                Grid {
+                    columns: 4; spacing: panel.gap
+                    Repeater {
+                        model: root.curStickers.slice(root.page * root.perPage, (root.page + 1) * root.perPage)
+                        Rectangle {
+                            width: panel.cell; height: panel.cell; radius: 12 * u
+                            color: tap.pressed ? "#E2DFD8" : "#FFFFFF"; border.width: 2; border.color: "#D8D5CE"
+                            Image {
+                                anchors.fill: parent; anchors.margins: 14 * u
+                                source: root.base + "/space/sticker/thumb?rel=" + encodeURIComponent(modelData.rel) + "&size=192"
+                                fillMode: Image.PreserveAspectFit; asynchronous: true; cache: false
+                            }
+                            MouseArea {
+                                id: tap; anchors.fill: parent
+                                property real px: 0
+                                onPressed: (e) => { px = e.x }
+                                onReleased: (e) => {
+                                    var dx = e.x - px
+                                    if (Math.abs(dx) > 60 * u) root.turn(dx < 0 ? 1 : -1)
+                                    else if (Math.abs(dx) < 20 * u) root.choose(modelData.rel)
+                                }
+                            }
                         }
-                        MouseArea { id: tap; anchors.fill: parent; onClicked: root.choose(modelData.rel) }
+                    }
+                }
+            }
+
+            // 翻页 (只有一页就不显示)
+            Item {
+                visible: root.pageCount > 1
+                width: parent.width; height: visible ? 24 * u + 2 + 24 * u + 64 * u : 0
+                Rectangle { y: 22 * u; width: parent.width; height: 2; color: "#CFCCC4" }
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom
+                    spacing: 64 * u
+                    Rectangle {
+                        width: 72 * u; height: 64 * u; radius: 10 * u; color: "#FFF"
+                        border.width: 2; border.color: root.page > 0 ? "#000" : "#CFCCC4"
+                        Text { anchors.centerIn: parent; text: "‹"; font.pixelSize: 44 * u; color: root.page > 0 ? "#000" : "#B0ADA6" }
+                        MouseArea { anchors.fill: parent; onClicked: root.turn(-1) }
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: (root.page + 1) + " / " + root.pageCount; font.pixelSize: 30 * u; color: "#000"
+                    }
+                    Rectangle {
+                        width: 72 * u; height: 64 * u; radius: 10 * u; color: "#FFF"
+                        border.width: 2; border.color: root.page < root.pageCount - 1 ? "#000" : "#CFCCC4"
+                        Text { anchors.centerIn: parent; text: "›"; font.pixelSize: 44 * u; color: root.page < root.pageCount - 1 ? "#000" : "#B0ADA6" }
+                        MouseArea { anchors.fill: parent; onClicked: root.turn(1) }
                     }
                 }
             }

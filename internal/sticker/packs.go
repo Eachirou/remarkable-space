@@ -29,6 +29,7 @@ type Pack struct {
 	ID       string    `json:"id"`
 	Name     string    `json:"name"`
 	NameEn   string    `json:"name_en"`
+	Icon     string    `json:"icon"` // 页签图标: 包里某个贴纸的 rel (pack.json 的 icon 填贴纸名, 默认第一个)
 	Stickers []Sticker `json:"stickers"`
 }
 
@@ -50,6 +51,7 @@ func List(dir string) ([]Pack, error) {
 		var meta struct {
 			Name   string   `json:"name"`
 			NameEn string   `json:"name_en"`
+			Icon   string   `json:"icon"`
 			Order  []string `json:"order"`
 		}
 		if b, err := os.ReadFile(filepath.Join(dir, e.Name(), "pack.json")); err == nil && json.Unmarshal(b, &meta) == nil {
@@ -82,20 +84,34 @@ func List(dir string) ([]Pack, error) {
 			return p.Stickers[i].Name < p.Stickers[j].Name
 		})
 		if len(p.Stickers) > 0 {
+			p.Icon = p.Stickers[0].Rel
+			for _, st := range p.Stickers {
+				if meta.Icon != "" && st.Name == meta.Icon {
+					p.Icon = st.Rel
+				}
+			}
 			packs = append(packs, p)
 		}
 	}
 	return packs, nil
 }
 
-// Thumb 贴纸缩略图 (size×size 像素, 透明底), 带缓存
-func Thumb(dir, rel string, size int) ([]byte, error) {
+// Thumb 贴纸缩略图 (size×size 像素, 透明底), 带缓存。ink 非空时所有笔画改用这个颜色 (选中页签上的白色图标)。
+// rel 为 "@star" 时画内置的五角星 (「常用」页签图标)。
+func Thumb(dir, rel string, size int, ink *color.RGBA) ([]byte, error) {
+	if rel == "@star" {
+		return encodePNG(render(starStrokes(), size, ink))
+	}
 	src := filepath.Join(dir, rel)
 	st, err := os.Stat(src)
 	if err != nil {
 		return nil, err
 	}
-	cache := filepath.Join(dir, ".thumbs", fmt.Sprintf("%s@%d.png", strings.TrimSuffix(rel, ".rm"), size))
+	tag := ""
+	if ink != nil {
+		tag = fmt.Sprintf("-%02x%02x%02x", ink.R, ink.G, ink.B)
+	}
+	cache := filepath.Join(dir, ".thumbs", fmt.Sprintf("%s@%d%s.png", strings.TrimSuffix(rel, ".rm"), size, tag))
 	if cs, err := os.Stat(cache); err == nil && !cs.ModTime().Before(st.ModTime()) {
 		return os.ReadFile(cache)
 	}
@@ -107,14 +123,35 @@ func Thumb(dir, rel string, size int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	img := render(Strokes(sc), size)
+	b, err = encodePNG(render(Strokes(sc), size, ink))
+	if err != nil {
+		return nil, err
+	}
+	_ = os.MkdirAll(filepath.Dir(cache), 0o755)
+	_ = os.WriteFile(cache, b, 0o644)
+	return b, nil
+}
+
+func encodePNG(img image.Image) ([]byte, error) {
 	w := &bytesWriter{}
 	if err := png.Encode(w, img); err != nil {
 		return nil, err
 	}
-	_ = os.MkdirAll(filepath.Dir(cache), 0o755)
-	_ = os.WriteFile(cache, w.b, 0o644)
 	return w.b, nil
+}
+
+// starStrokes 内置五角星, 贴纸坐标 (中心原点, 边长 300), 线宽同手绘图标
+func starStrokes() []Stroke {
+	var pts []rmscene.Point
+	for i := 0; i <= 10; i++ {
+		r := 110.0
+		if i%2 == 1 {
+			r = 46
+		}
+		a := -math.Pi/2 + float64(i)*math.Pi/5
+		pts = append(pts, rmscene.Point{X: float32(r * math.Cos(a)), Y: float32(r*math.Sin(a)) + 10, Width: 44})
+	}
+	return []Stroke{{Line: &rmscene.Line{Points: pts}}}
 }
 
 type bytesWriter struct{ b []byte }
@@ -139,7 +176,7 @@ func penColor(c rmscene.PenColor) color.RGBA {
 }
 
 // render 贴纸文件坐标以中心为原点、边长 300; 缩略图按 size 缩放, 用圆点沿折线盖出粗线
-func render(lines []Stroke, size int) *image.NRGBA {
+func render(lines []Stroke, size int, ink *color.RGBA) *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, size, size))
 	k := float64(size) / 300
 	for _, ln := range lines {
@@ -149,6 +186,9 @@ func render(lines []Stroke, size int) *image.NRGBA {
 		col := penColor(ln.Color)
 		if ln.HasRGB {
 			col = color.RGBA{uint8(ln.ARGB >> 16), uint8(ln.ARGB >> 8), uint8(ln.ARGB), 255}
+		}
+		if ink != nil {
+			col = *ink
 		}
 		w := float64(ln.Points[0].Width) / 4 * k
 		if w < 1.5 {
