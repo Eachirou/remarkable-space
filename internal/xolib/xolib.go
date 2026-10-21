@@ -141,11 +141,11 @@ type Entry struct {
 	loaded      bool   // 已经由系统建好 (导入器模式), 不用再等 load 回报
 }
 
-// ImportDocument 把一份 PDF / EPUB 写进文件库并排队通知。parent 为空 = 「我的文件」根目录。
+// ImportDocument 把一份 PDF / EPUB / rmdoc (reMarkable 原生笔记本包, 只有导入器模式认) 写进文件库并排队通知。parent 为空 = 「我的文件」根目录。
 // visibleName 是文件库里显示的名字 (一般是去掉扩展名的原文件名)。
 func (l *Library) ImportDocument(r io.Reader, visibleName, ext, parent string) (Entry, error) {
 	ext = strings.TrimPrefix(strings.ToLower(ext), ".")
-	if ext != "pdf" && ext != "epub" {
+	if ext != "pdf" && ext != "epub" && ext != "rmdoc" {
 		return Entry{}, ErrBadType
 	}
 	id, err := newUUID()

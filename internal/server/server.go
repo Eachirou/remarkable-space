@@ -45,7 +45,7 @@ var (
 	allowedMusicExts = map[string]struct{}{".mp3": {}, ".m4a": {}, ".flac": {}, ".wav": {}, ".ogg": {}}
 	// 首页插图: jpg 为主 (照片与水彩都压得住), png 留给带透明的
 	allowedHeroExts = map[string]struct{}{".jpg": {}, ".jpeg": {}, ".png": {}}
-	allowedDocExts  = map[string]struct{}{".pdf": {}, ".epub": {}}
+	allowedDocExts  = map[string]struct{}{".pdf": {}, ".epub": {}, ".rmdoc": {}}
 )
 
 // Config 是构造服务器需要的所有可配项.
@@ -589,7 +589,7 @@ func (s *Server) uploadDocument(w http.ResponseWriter, r *http.Request) {
 	safe := filepath.Base(header.Filename)
 	ext := strings.ToLower(filepath.Ext(safe))
 	if _, ok := allowedDocExts[ext]; !ok {
-		httpError(w, http.StatusBadRequest, "仅支持 .pdf / .epub 文件")
+		httpError(w, http.StatusBadRequest, "仅支持 .pdf / .epub / .rmdoc 文件")
 		return
 	}
 
