@@ -166,7 +166,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /space/sticker/thumb", s.stickerThumb)
 	mux.HandleFunc("GET /space/sticker/events", s.stickerEvents)
 	mux.HandleFunc("POST /space/sticker/arm", s.stickerArm)
-	mux.HandleFunc("GET /space/sticker/selftest", s.stickerSelftest)
 	mux.HandleFunc("POST /space/sticker/draw", s.drawSticker)
 	mux.HandleFunc("POST /space/sticker/stroke", s.strokeSticker)
 

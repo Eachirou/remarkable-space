@@ -103,29 +103,6 @@ func (s *Server) stickerEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GET /space/sticker/selftest[?v=N][&consume=1]: 调试用, 读 space/.sticker-selftest[-N] (JSON),
-// consume=1 时读完删掉 (面板先确认页面就绪再 consume, 否则会白白吞掉)
-func (s *Server) stickerSelftest(w http.ResponseWriter, r *http.Request) {
-	p := filepath.Join(filepath.Dir(stickerDir), ".sticker-selftest")
-	if v := r.URL.Query().Get("v"); v != "" {
-		p += "-" + v // 面板改版后用新文件名, 旧实例轮询不会误吞
-	}
-	b, err := os.ReadFile(p)
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"run": false})
-		return
-	}
-	if r.URL.Query().Get("consume") == "1" {
-		_ = os.Remove(p)
-	}
-	var v any
-	if json.Unmarshal(b, &v) != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"run": false})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"run": true, "tests": v})
-}
-
 // POST /space/sticker/arm {"on":true} 开始/取消等笔点
 func (s *Server) stickerArm(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -143,12 +120,6 @@ func (s *Server) drawSticker(w http.ResponseWriter, r *http.Request) {
 		CY    float32 `json:"cy"`
 		Size  float32 `json:"size"`
 		Lasso bool    `json:"lasso"`
-		// 调试: 画一个半径 r 的圆, 点距 spacing 像素, 每点停 delay_ms (看系统存下多少点)
-		Test *struct {
-			R       float32 `json:"r"`
-			Spacing float32 `json:"spacing"`
-			DelayMs float32 `json:"delay_ms"`
-		} `json:"test"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())
@@ -160,12 +131,6 @@ func (s *Server) drawSticker(w http.ResponseWriter, r *http.Request) {
 	var ring [][2]float32
 	rx := in.Size * 0.62
 	n := 72
-	var delay time.Duration
-	if t := in.Test; t != nil && t.R > 0 && t.Spacing > 0 {
-		rx = t.R
-		n = int(2 * math.Pi * float64(rx) / float64(t.Spacing))
-		delay = time.Duration(t.DelayMs * float32(time.Millisecond))
-	}
 	for i := 0; i <= n; i++ {
 		a := float64(i) / float64(n) * 2 * math.Pi
 		ring = append(ring, [2]float32{in.CX + rx*float32(math.Cos(a)), in.CY + rx*float32(math.Sin(a))})
@@ -175,10 +140,7 @@ func (s *Server) drawSticker(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if delay <= 0 {
-		delay = time.Millisecond // 套索圈也用 1ms 一点
-	}
-	sess.Delay = delay
+	sess.Delay = time.Millisecond // 套索圈也用 1ms 一点
 	defer sess.End()
 	if err := sess.Stroke(ring); err != nil {
 		httpError(w, http.StatusConflict, err.Error())
@@ -210,7 +172,7 @@ func (s *Server) newSession() (*handwriting.Session, error) {
 
 // 逐笔描贴纸 (面板在笔与笔之间改笔的颜色/粗细):
 //
-//	POST /space/sticker/stroke {op:"begin", sticker, cx, cy, size[, delay_ms]} → {strokes:[{color, argb?, tool, width, count}]}
+//	POST /space/sticker/stroke {op:"begin", sticker, cx, cy, size} → {strokes:[{color, argb?, tool, width, count}]}
 //	                                                                 (strokes 是按颜色/粗细分的组)
 //	POST /space/sticker/stroke {op:"draw", index}                   → 描第 index 组 (count 笔)
 //	POST /space/sticker/stroke {op:"wait"}                          → 等 300ms (给界面切工具)
@@ -223,7 +185,6 @@ func (s *Server) strokeSticker(w http.ResponseWriter, r *http.Request) {
 		CY      float32 `json:"cy"`
 		Size    float32 `json:"size"`
 		Index   int     `json:"index"`
-		DelayMs float32 `json:"delay_ms"` // 调试: 每点停顿 (默认 2ms)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())
@@ -306,9 +267,6 @@ func (s *Server) strokeSticker(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sess.Delay = time.Millisecond // 1 像素一个事件, 1ms 一点 ≈ 1000 像素/秒 (停顿走 preciseSleep 自旋)
-		if in.DelayMs > 0 {
-			sess.Delay = time.Duration(in.DelayMs * float32(time.Millisecond))
-		}
 		stickerSess = sess
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "strokes": meta})
 	case "draw":

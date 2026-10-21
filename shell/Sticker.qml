@@ -22,23 +22,9 @@ Item {
     property var packs: []
     property string pending: ""         // 选中的贴纸 (rel), 等笔点
     property real stickerSize: 200      // 贴纸落到屏幕上的边长 (像素)
-    property real delayMs: 0            // 调试: 描线每点停顿 (0 = 后端默认)
     property bool polling: false
 
     function log(s) { console.warn("[sticker] " + s) }
-    function dumpObj(name, o) {   // 调试: 列出对象的属性 (值) 与方法名
-        if (!o) { log(name + ": null"); return }
-        var props = [], fns = []
-        for (var k in o) {
-            var v; try { v = o[k] } catch (e) { v = "<err>" }
-            if (typeof v === "function") fns.push(k)
-            else if (typeof v === "object" && v !== null) props.push(k + "=" + String(v).substring(0, 40))
-            else props.push(k + "=" + v)
-        }
-        log(name + " " + String(o).substring(0, 60) + " props: " + props.join(" | "))
-        log(name + " fns: " + fns.join(" "))
-    }
-
     function xhr(method, path, body, done) {
         var x = new XMLHttpRequest()
         x.onreadystatechange = function () {
@@ -62,46 +48,10 @@ Item {
             if (st !== 200 || !r) { post("/space/sticker/stroke", { op: "wait" }, function () { root.poll() }); return }
             if (r.type === "gesture" && !busy && !pending) root.show()
             else if (r.type === "tap" && pending) root.place(r.x, r.y)
-            else if (r.type === "none" && !busy) root.selftest()
             root.poll()
         })
     }
-    Component.onCompleted: { poll(); selftest() }
-
-    // 调试: 后端有 .sticker-selftest 时, 切到笔, 按里面的参数画测试圆
-    function selftest() {
-        xhr("GET", "/space/sticker/selftest?v=7", null, function (st, r) {
-            if (st !== 200 || !r || !r.run) return
-            var dsv = visibleDSV(); var tb = dsv ? dsv.toolbar : null
-            var h = penHandler()
-            if (!tb || !h) { log("selftest: page not ready, retry later"); return }   // 文件留着, 下个轮询再试
-            xhr("GET", "/space/sticker/selftest?v=7&consume=1", null, function (st2, r2) {
-                if (st2 !== 200 || !r2 || !r2.run) return
-                try { tb.selectPen("primary") } catch (e) {}
-                var tests = r2.tests, i = 0
-                function next() {
-                    if (i >= tests.length) { log("selftest done"); return }
-                    var t = tests[i++]
-                    if (t.dump) {   // ["tb.primaryPen", "h", ...] 按路径取对象后转储
-                        var roots = { tb: tb, h: h, dsv: dsv }
-                        for (var di = 0; di < t.dump.length; di++) {
-                            var parts = t.dump[di].split("."), o = roots[parts[0]]
-                            for (var pi = 1; pi < parts.length && o; pi++) o = o[parts[pi]]
-                            root.dumpObj(t.dump[di], o)
-                        }
-                        next(); return
-                    }
-                    if (t.sticker) { log("selftest: place " + t.sticker); root.delayMs = t.delay_ms || 0; root.pending = t.sticker; root.place(t.cx, t.cy); return }   // 贴一个贴纸 (走正式流程), 之后的测试不再跑
-                    log("selftest before: handler tool=" + h.lineTool + " color=" + h.lineColor + " argb=" + h.lineArgbCode + " thick=" + h.lineThickness)
-                    var pen = tb.primaryPen   // 只改主笔设置 (见 place 的注释)
-                    pen.tool = 17; pen.color = (t.color !== undefined ? t.color : 0); pen.thickness = 2
-                    if (t.argb !== undefined) pen.colorCode = t.argb
-                    root.post("/space/sticker/draw", { cx: t.cx, cy: t.cy, test: { r: t.r, spacing: t.spacing, delay_ms: t.delay_ms } }, function () { next() })
-                }
-                root.post("/space/sticker/stroke", { op: "wait" }, function () { next() })
-            })
-        })
-    }
+    Component.onCompleted: poll()
 
     // ---- 面板 ----
     function show() {
@@ -162,7 +112,7 @@ Item {
         // 重开笔记都不恢复 (处理器对象常驻), 只有重启 xochitl 才行。
         var saved = { t: pen.tool, c: pen.color, cc: pen.colorCode, w: pen.thickness }
         try { tb.selectPen("primary") } catch (e) {}
-        var at = { op: "begin", sticker: rel, cx: x, cy: y, size: stickerSize, delay_ms: root.delayMs }
+        var at = { op: "begin", sticker: rel, cx: x, cy: y, size: stickerSize }
         post("/space/sticker/stroke", at, function (st, r) {
             if (st !== 200 || !r) { root.busy = false; root.hint = "贴失败 / Failed"; return }
             var meta = r.strokes, i = 0, retries = 0
