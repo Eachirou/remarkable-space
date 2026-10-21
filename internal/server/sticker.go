@@ -50,7 +50,7 @@ func cleanRel(rel string) (string, bool) {
 	return rel, true
 }
 
-// GET /space/sticker/list → {packs:[{id,name,name_en,stickers:[{pack,name,rel}]}]}
+// GET /space/sticker/list → {packs:[{id,name,name_en,stickers:[{pack,name,rel}]}], lang}
 func (s *Server) stickerList(w http.ResponseWriter, r *http.Request) {
 	packs, err := sticker.List(stickerDir)
 	if err != nil {
@@ -60,7 +60,11 @@ func (s *Server) stickerList(w http.ResponseWriter, r *http.Request) {
 	if packs == nil {
 		packs = []sticker.Pack{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"packs": packs})
+	lang := "zh"
+	if s.space != nil {
+		lang = s.space.CurrentLang()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"packs": packs, "lang": lang})
 }
 
 // GET /space/sticker/thumb?rel=包/名.rm&size=160 → PNG

@@ -1,8 +1,8 @@
 // 笔记里的「贴纸」面板。注入库 (qml_inject_impl.cpp doInjectDocAddons) 在打开笔记时挂到 DocumentView 上,
 // 文件 mtime 变了会自动重建 (改面板不用重启 xochitl)。
 //
-// 用法: 右上角往左下斜滑 → 面板 → 点一个贴纸 → 用笔在页面上点一下 → 贴纸按原生笔迹描在那里并处于
-// 选中状态 (可拖可缩放)。描是后台用虚拟笔逐笔写的 (/space/sticker/stroke), 每笔之前把笔的颜色/粗细
+// 用法: 右上角往左下斜滑 → 面板 (按贴纸包分页签) → 点一个贴纸 → 用笔在页面上点一下 → 贴纸按原生笔迹
+// 描在那里; 要移动缩放由用户自己用选择工具圈。描是后台用虚拟笔逐笔写的 (/space/sticker/stroke), 每笔之前把笔的颜色/粗细
 // 改成贴纸那一笔的, 描完恢复用户的笔; 真笔靠近屏幕时后台会停下来等。
 //
 // 运行时注入的组件里 Timer 不触发, 所有"等一会"都借后台 (events 长轮询 / stroke wait)。
@@ -20,6 +20,8 @@ Item {
     property bool busy: false
     property string hint: ""            // 顶部提示条 (空 = 不显示)
     property var packs: []
+    property int tab: 0                 // 当前页签 (贴纸包下标), 面板关了也记着
+    property bool zh: true
     property string pending: ""         // 选中的贴纸 (rel), 等笔点
     property real stickerSize: 200      // 贴纸落到屏幕上的边长 (像素)
     property bool polling: false
@@ -57,7 +59,12 @@ Item {
     function show() {
         if (packs.length === 0) {
             xhr("GET", "/space/sticker/list", null, function (st, r) {
-                if (st === 200 && r && r.packs) { root.packs = r.packs; root.open = true; root.hint = "" }
+                if (st === 200 && r && r.packs) {
+                    root.zh = (r.lang || "zh").indexOf("zh") === 0
+                    root.packs = r.packs
+                    if (root.tab >= r.packs.length) root.tab = 0
+                    root.open = true; root.hint = ""
+                }
                 else root.hint = "贴纸读不到 / Stickers unavailable"
             })
         } else { open = true; hint = "" }
@@ -131,14 +138,9 @@ Item {
                 })
             }
             function finish() {
+                // 只管画出来; 选中/移动/缩放交给用户自己用选择工具 (2026-10-21 用户定)
                 root.post("/space/sticker/stroke", { op: "end" }, function () {
-                    restore()
-                    try { tb.selectSelection() } catch (e) {}
-                    root.post("/space/sticker/stroke", { op: "wait" }, function () {
-                        root.post("/space/sticker/draw", { cx: x, cy: y, size: root.stickerSize, lasso: true }, function () {
-                            root.busy = false; root.hint = ""
-                        })
-                    })
+                    restore(); root.busy = false; root.hint = ""
                 })
             }
             next()
@@ -161,40 +163,57 @@ Item {
         id: panel
         visible: root.open; z: 21
         anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 16 * u
-        width: Math.min(parent.width - 32 * u, 4 * cell + 5 * gap); height: Math.min(parent.height * 0.7, grid.contentHeight + 2 * gap)
+        width: Math.min(parent.width - 32 * u, 4 * cell + 5 * gap); height: Math.min(parent.height * 0.7, 3 * cell + 2 * gap + 64 * u + 3 * gap)
         radius: 16 * u; color: "#FFFFFF"; border.width: 2; border.color: "#000"
         readonly property real cell: 150 * u
         readonly property real gap: 14 * u
         MouseArea { anchors.fill: parent }   // 挡住底下的关闭层
+        // 页签: 每个贴纸包一个
         Flickable {
-            id: grid
-            anchors.fill: parent; anchors.margins: panel.gap; clip: true
-            contentHeight: col.height
-            Column {
-                id: col
-                width: grid.width; spacing: panel.gap
+            id: tabs
+            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+            anchors.margins: panel.gap
+            height: 64 * u; clip: true
+            contentWidth: tabRow.width; flickableDirection: Flickable.HorizontalFlick
+            Row {
+                id: tabRow
+                spacing: 8 * u
                 Repeater {
                     model: root.packs
-                    Column {
-                        width: col.width; spacing: panel.gap * 0.6
-                        property var pack: modelData
-                        Text { text: pack.name; font.pixelSize: 22 * u; color: "#000"; visible: root.packs.length > 1 }
-                        Flow {
-                            width: parent.width; spacing: panel.gap
-                            Repeater {
-                                model: pack.stickers
-                                Rectangle {
-                                    width: panel.cell; height: panel.cell; radius: 10 * u
-                                    color: tap.pressed ? "#DDD" : "#F7F5F0"; border.width: 1; border.color: "#BBB"
-                                    Image {
-                                        anchors.fill: parent; anchors.margins: 10 * u
-                                        source: root.base + "/space/sticker/thumb?rel=" + encodeURIComponent(modelData.rel) + "&size=160"
-                                        fillMode: Image.PreserveAspectFit; asynchronous: true; cache: false
-                                    }
-                                    MouseArea { id: tap; anchors.fill: parent; onClicked: root.choose(modelData.rel) }
-                                }
-                            }
+                    Rectangle {
+                        property bool cur: index === root.tab
+                        height: tabs.height; width: tabLabel.implicitWidth + 40 * u; radius: 10 * u
+                        color: cur ? "#000" : "#FFF"; border.width: 2; border.color: "#000"
+                        Text {
+                            id: tabLabel; anchors.centerIn: parent
+                            text: (!root.zh && modelData.name_en) ? modelData.name_en : modelData.name
+                            font.pixelSize: 24 * u; color: parent.cur ? "#FFF" : "#000"
                         }
+                        MouseArea { anchors.fill: parent; onClicked: { root.tab = index; grid.contentY = 0 } }
+                    }
+                }
+            }
+        }
+        Flickable {
+            id: grid
+            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+            anchors.top: tabs.bottom; anchors.margins: panel.gap
+            clip: true
+            contentHeight: flow.height
+            Flow {
+                id: flow
+                width: grid.width; spacing: panel.gap
+                Repeater {
+                    model: root.packs.length ? root.packs[Math.min(root.tab, root.packs.length - 1)].stickers : []
+                    Rectangle {
+                        width: panel.cell; height: panel.cell; radius: 10 * u
+                        color: tap.pressed ? "#DDD" : "#F7F5F0"; border.width: 1; border.color: "#BBB"
+                        Image {
+                            anchors.fill: parent; anchors.margins: 10 * u
+                            source: root.base + "/space/sticker/thumb?rel=" + encodeURIComponent(modelData.rel) + "&size=160"
+                            fillMode: Image.PreserveAspectFit; asynchronous: true; cache: false
+                        }
+                        MouseArea { id: tap; anchors.fill: parent; onClicked: root.choose(modelData.rel) }
                     }
                 }
             }
