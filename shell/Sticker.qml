@@ -175,7 +175,7 @@ Item {
         MouseArea { anchors.fill: parent; onClicked: root.cancel() }
     }
 
-    // 面板: 右上角的对话框, 点外面或 × 关掉。版式: 标题栏 / 图标页签 / 4×3 格子 / 翻页 (墨水屏不滚动)
+    // 面板: 右上角的对话框, 点外面关掉。版式: 图标页签 / 4×3 格子 / 翻页 (墨水屏不滚动)
     MouseArea { anchors.fill: parent; visible: root.open; onClicked: root.cancel(); z: 20 }
     Rectangle {
         id: panel
@@ -194,21 +194,6 @@ Item {
             id: col
             x: panel.pad; y: panel.pad; width: panel.width - 2 * panel.pad
             spacing: 0
-
-            // 标题栏
-            Item {
-                width: parent.width; height: 64 * u
-                Text {
-                    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                    text: root.zh ? "贴纸" : "Stickers"; font.pixelSize: 36 * u; font.bold: true; color: "#000"
-                }
-                Text {
-                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                    text: "×"; font.pixelSize: 52 * u; color: "#000"
-                    MouseArea { anchors.fill: parent; anchors.margins: -20 * u; onClicked: root.cancel() }
-                }
-            }
-            Item { width: 1; height: 12 * u }
 
             // 图标页签: 一屏 5 个, 多了左右划
             Flickable {
