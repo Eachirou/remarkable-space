@@ -158,6 +158,9 @@ func (l *Library) ImportDocument(r io.Reader, visibleName, ext, parent string) (
 	if l.Queue.Importer() {
 		return l.stageDocument(r, id, visibleName, ext, parent)
 	}
+	if ext == "rmdoc" {
+		return Entry{}, ErrBadType // 老固件没有系统导入器, 直接写文件库只会写进一个 zip, 不认
+	}
 	// 顺序: 本体 → .content → .metadata。xochitl 下次扫目录 (或重启) 只认带 .metadata 的条目,
 	// metadata 最后落地, 就不会出现「有条目没本体」的半成品。
 	if err := l.writeFile(id+"."+ext, r); err != nil {
