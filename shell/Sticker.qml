@@ -187,7 +187,7 @@ Item {
         anchors.top: parent.top; anchors.right: parent.right; anchors.topMargin: 128 * u; anchors.rightMargin: 16 * u
         width: 4 * cell + 3 * gap + 2 * pad
         height: col.implicitHeight + 2 * pad
-        radius: 18 * u; color: "#F7F6F2"; border.width: 3; border.color: "#000"
+        radius: 18 * u; color: "#F7F6F2"; border.width: 2; border.color: "#BDBAB2"
         MouseArea { anchors.fill: parent }   // 挡住底下的关闭层
 
         Column {

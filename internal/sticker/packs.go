@@ -1,6 +1,7 @@
 package sticker
 
-// 贴纸包: stickers/<包>/<贴纸>.rm, 可选 stickers/<包>/pack.json {"name": "...", "name_en": "...", "order": [...]}。
+// 贴纸包: stickers/<包>/<贴纸>.rm, 可选 stickers/<包>/pack.json
+// {"name": "装饰", "name_en": "Decor", "icon": "flower", "sort": 10, "order": ["贴纸名", ...]}。
 // 缩略图由本机按笔迹画 (面板用), 缓存在 stickers/.thumbs/<包>/<贴纸>@<尺寸>.png, 源文件 mtime 变了重画。
 
 import (
@@ -43,6 +44,7 @@ func List(dir string) ([]Pack, error) {
 		return nil, err
 	}
 	var packs []Pack
+	var sorts []int
 	for _, e := range ents {
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
@@ -52,6 +54,7 @@ func List(dir string) ([]Pack, error) {
 			Name   string   `json:"name"`
 			NameEn string   `json:"name_en"`
 			Icon   string   `json:"icon"`
+			Sort   int      `json:"sort"`
 			Order  []string `json:"order"`
 		}
 		if b, err := os.ReadFile(filepath.Join(dir, e.Name(), "pack.json")); err == nil && json.Unmarshal(b, &meta) == nil {
@@ -91,9 +94,25 @@ func List(dir string) ([]Pack, error) {
 				}
 			}
 			packs = append(packs, p)
+			sorts = append(sorts, meta.Sort)
 		}
 	}
-	return packs, nil
+	// 页签顺序: pack.json 的 sort 小的在前, 一样就按目录名
+	idx := make([]int, len(packs))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool {
+		if sorts[idx[a]] != sorts[idx[b]] {
+			return sorts[idx[a]] < sorts[idx[b]]
+		}
+		return packs[idx[a]].ID < packs[idx[b]].ID
+	})
+	out := make([]Pack, len(packs))
+	for i, j := range idx {
+		out[i] = packs[j]
+	}
+	return out, nil
 }
 
 // Thumb 贴纸缩略图 (size×size 像素, 透明底), 带缓存。ink 非空时所有笔画改用这个颜色 (选中页签上的白色图标)。
