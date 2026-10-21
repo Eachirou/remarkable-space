@@ -61,7 +61,7 @@ func (s *Server) stickerList(w http.ResponseWriter, r *http.Request) {
 	if packs == nil {
 		packs = []sticker.Pack{}
 	}
-	// 「常用」放最前 (只列还存在的贴纸; 一个都没有就不出这个页签)
+	// 「常用」放最前, 始终显示: 最近贴过的在前, 不满一页用默认的补齐 (只列还存在的贴纸)
 	have := map[string]sticker.Sticker{}
 	for _, p := range packs {
 		for _, st := range p.Stickers {
@@ -69,9 +69,11 @@ func (s *Server) stickerList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var recent []sticker.Sticker
-	for _, rel := range loadRecent() {
-		if st, ok := have[rel]; ok {
+	seen := map[string]bool{}
+	for _, rel := range append(loadRecent(), recentDefaults...) {
+		if st, ok := have[rel]; ok && !seen[rel] && len(recent) < recentMax {
 			recent = append(recent, st)
+			seen[rel] = true
 		}
 	}
 	if len(recent) > 0 {
@@ -115,6 +117,13 @@ func (s *Server) stickerThumb(w http.ResponseWriter, r *http.Request) {
 
 // 「常用」: 最近贴过的贴纸 (最多一页 12 个), 存在 stickers/.recent.json
 const recentMax = 12
+
+// 还没贴过时「常用」先放这些 (各分类挑几个最常用的)
+var recentDefaults = []string{
+	"deco/06_heart.rm", "deco/07_stars.rm", "deco/sparkle.rm", "deco/flower.rm",
+	"plan/checkbox.rm", "plan/03_calendar.rm", "plan/flag.rm", "label/tag.rm",
+	"label/washi.rm", "label/arrow.rm", "life/smile.rm", "life/04_coffee.rm",
+}
 
 func recentPath() string { return filepath.Join(stickerDir, ".recent.json") }
 
