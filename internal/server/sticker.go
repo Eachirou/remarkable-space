@@ -120,9 +120,9 @@ const recentMax = 12
 
 // 还没贴过时「常用」先放这些 (各分类挑几个最常用的)
 var recentDefaults = []string{
-	"deco/k-Heart.rm", "deco/k-Star.rm", "deco/07_stars.rm", "deco/k-Crown.rm",
-	"plan/k-Tick2.rm", "plan/03_calendar.rm", "plan/k-Flag.rm", "label/k-Tag.rm",
-	"label/k-ArrowRight.rm", "weather/k-Sunny.rm", "mood/k-HappyEmoji.rm", "life/04_coffee.rm",
+	"mood/grinning-face.rm", "mood/sun.rm", "plant/sunflower.rm", "food/hot-beverage.rm",
+	"animal/cat-face.rm", "festival/wrapped-gift.rm", "title/today.rm", "title/todo.rm",
+	"tape/washi-pink-dots.rm", "tape/line-wave.rm", "date/week-1.rm", "hand/06_heart.rm",
 }
 
 func recentPath() string { return filepath.Join(stickerDir, ".recent.json") }
@@ -371,19 +371,36 @@ func (s *Server) strokeSticker(w http.ResponseWriter, r *http.Request) {
 // 预测, 圆被压扁、起笔处鼓包; 每事件 1 像素 (2ms 或 5ms 都行) 画出来才是正圆。
 // 太疏 (闭合路径最后那一段直接连回起点) 系统还会把瞬移当噪声丢掉, 实测爱心缺一截。
 func densify(pts []rmscene.Point, cx, cy, k float32) [][2]float32 {
-	const spacing = 1.0
-	var out [][2]float32
+	const spacing, straightSpacing = 1.0, 4.0
+	src := make([][2]float32, 0, len(pts))
 	for _, p := range pts {
-		q := [2]float32{cx + p.X*k, cy + p.Y*k}
+		src = append(src, [2]float32{cx + p.X*k, cy + p.Y*k})
+	}
+	// 涂色的水平扫描行步距放宽到 4 像素, 一张涂满颜色的贴纸点数能砍掉大半
+	straight := func(i int) bool {
+		if i <= 0 || i >= len(src)-1 {
+			return false
+		}
+		a, b, c := src[i-1], src[i], src[i+1]
+		// 只认「纯水平」(涂色的扫描行): 轮廓线上近似直的段放宽步距照样会被笔迹预测拉歪 (2026-10-21 实测脸变成鸡蛋)
+		const eps = 0.01
+		return math.Abs(float64(b[1]-a[1])) < eps && math.Abs(float64(c[1]-b[1])) < eps && b[0] != a[0] && c[0] != b[0]
+	}
+	var out [][2]float32
+	for i, q := range src {
 		if n := len(out); n > 0 {
 			a := out[n-1]
 			dx, dy := q[0]-a[0], q[1]-a[1]
 			d := float32(math.Hypot(float64(dx), float64(dy)))
-			if d < spacing*0.7 {
+			sp := float32(spacing)
+			if straight(i) || straight(i-1) {
+				sp = straightSpacing
+			}
+			if d < sp*0.7 && i < len(src)-1 {
 				continue
 			}
-			for steps, i := int(d/spacing+0.5), 1; i < steps; i++ {
-				f := float32(i) / float32(steps)
+			for steps, j := int(d/sp+0.5), 1; j < steps; j++ {
+				f := float32(j) / float32(steps)
 				out = append(out, [2]float32{a[0] + dx*f, a[1] + dy*f})
 			}
 		}
