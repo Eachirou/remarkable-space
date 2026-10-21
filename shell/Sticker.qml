@@ -175,7 +175,7 @@ Item {
         MouseArea { anchors.fill: parent; onClicked: root.cancel() }
     }
 
-    // 面板: 居中的对话框, 点外面或 × 关掉。版式: 标题栏 / 图标页签 / 4×3 格子 / 翻页 (墨水屏不滚动)
+    // 面板: 右上角的对话框, 点外面或 × 关掉。版式: 标题栏 / 图标页签 / 4×3 格子 / 翻页 (墨水屏不滚动)
     MouseArea { anchors.fill: parent; visible: root.open; onClicked: root.cancel(); z: 20 }
     Rectangle {
         id: panel
@@ -183,7 +183,8 @@ Item {
         readonly property real cell: Math.min(170 * u, (root.width - 64 * u - 5 * gap) / 4)
         readonly property real gap: 16 * u
         readonly property real pad: 24 * u
-        anchors.centerIn: parent
+        // 贴在右上角 (斜滑手势从这里起), 让开顶部工具栏
+        anchors.top: parent.top; anchors.right: parent.right; anchors.topMargin: 128 * u; anchors.rightMargin: 16 * u
         width: 4 * cell + 3 * gap + 2 * pad
         height: col.implicitHeight + 2 * pad
         radius: 18 * u; color: "#F7F6F2"; border.width: 3; border.color: "#000"
