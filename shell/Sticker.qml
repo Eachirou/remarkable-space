@@ -223,18 +223,18 @@ Item {
                         Rectangle {
                             property bool cur: index === root.tab
                             width: tabs.width / 5; height: tabs.height
-                            radius: 14 * u; color: cur ? "#000" : "transparent"
+                            radius: 14 * u; color: cur ? "#C9E0AE" : "transparent"   // 同「计划」底部选中页签: 主色绿再淡一档
                             Image {
                                 id: tabIcon
                                 anchors.horizontalCenter: parent.horizontalCenter; y: 12 * u
                                 width: 60 * u; height: 60 * u; fillMode: Image.PreserveAspectFit; asynchronous: true; cache: false
-                                source: root.base + "/space/sticker/thumb?size=96&rel=" + encodeURIComponent(modelData.icon || "") + (parent.cur ? "&ink=ffffff" : "")
+                                source: root.base + "/space/sticker/thumb?size=96&rel=" + encodeURIComponent(modelData.icon || "") 
                             }
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter; anchors.top: tabIcon.bottom; anchors.topMargin: 6 * u
                                 width: parent.width - 8 * u; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
                                 text: (!root.zh && modelData.name_en) ? modelData.name_en : modelData.name
-                                font.pixelSize: 24 * u; color: parent.cur ? "#FFF" : "#000"
+                                font.pixelSize: 24 * u; color: "#000"
                             }
                             MouseArea { anchors.fill: parent; onClicked: { root.tab = index; root.page = 0 } }
                         }
