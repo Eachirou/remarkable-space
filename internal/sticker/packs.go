@@ -270,7 +270,7 @@ func ImageFile(dir, rel string, px int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	out := filepath.Join(dir, ".images", fmt.Sprintf("%s@%d.png", strings.TrimSuffix(rel, ".rm"), px))
+	out := filepath.Join(dir, ".images", fmt.Sprintf("%s@%dk.png", strings.TrimSuffix(rel, ".rm"), px))
 	orig := strings.TrimSuffix(src, ".rm") + ".png"
 	newest := st.ModTime()
 	if os_, err := os.Stat(orig); err == nil && os_.ModTime().After(newest) {
@@ -298,7 +298,7 @@ func ImageFile(dir, rel string, px int) (string, error) {
 		}
 		img = render(Strokes(sc), px, nil)
 	}
-	b, err := encodePNG(img)
+	b, err := encodePNG(inkToBlack(img))
 	if err != nil {
 		return "", err
 	}
@@ -354,6 +354,28 @@ func fitTransparent(im image.Image, px int) *image.NRGBA {
 			dst.Pix[o+1] = uint8(g / a * 255)
 			dst.Pix[o+2] = uint8(bb / a * 255)
 			dst.Pix[o+3] = uint8(a / n / 257)
+		}
+	}
+	return dst
+}
+
+// inkToBlack 把深灰描边压成纯黑、边缘抗锯齿加实: 原图描边是 #4B4640 一类的深灰, 缩到 176 像素后边缘又是半透明,
+// 墨水屏上看就是灰线 (2026-10-22 用户反馈)。只动低饱和的深色像素, 彩色块不受影响。
+func inkToBlack(im image.Image) *image.NRGBA {
+	b := im.Bounds()
+	dst := image.NewNRGBA(b)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			c := color.NRGBAModel.Convert(im.At(x, y)).(color.NRGBA)
+			if c.A > 0 {
+				lum := 0.299*float64(c.R) + 0.587*float64(c.G) + 0.114*float64(c.B)
+				mx, mn := max(c.R, c.G, c.B), min(c.R, c.G, c.B)
+				if lum < 150 && int(mx)-int(mn) < 70 {
+					c.R, c.G, c.B = 0, 0, 0
+					c.A = uint8(min(255, int(c.A)*3/2))
+				}
+			}
+			dst.SetNRGBA(x, y, c)
 		}
 	}
 	return dst
