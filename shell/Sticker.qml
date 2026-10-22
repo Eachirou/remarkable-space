@@ -280,12 +280,11 @@ Item {
             }
         }
 
-        // 页码 1 2 3 …: 点哪页跳哪页 (只有一页就不显示)
+        // 页码 1 2 3 …: 点哪页跳哪页; 只有一页也显示「1」, 面板大小固定, 切分类时墨水屏不用大面积重刷
         Item {
             id: pager
             x: panel.pad + panel.side + panel.gap; y: panel.pad + panel.side + panel.gap + panel.gridH
-            width: panel.gridW; height: root.pageCount > 1 ? 82 * u : 0
-            visible: root.pageCount > 1
+            width: panel.gridW; height: 82 * u
             Row {
                 anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom
                 spacing: 12 * u
