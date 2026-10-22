@@ -22,7 +22,7 @@ Item {
     property var packs: []
     property int tab: 0                 // 当前页签 (贴纸包下标), 面板关了也记着
     property int page: 0                // 当前页 (墨水屏翻页不滚动)
-    readonly property int perPage: 12   // 4 列 × 3 行
+    readonly property int perPage: 16   // 4 列 × 4 行
     readonly property var curStickers: packs.length ? packs[Math.min(tab, packs.length - 1)].stickers : []
     readonly property int pageCount: Math.max(1, Math.ceil(curStickers.length / perPage))
     function turn(d) { var p = page + d; if (p >= 0 && p < pageCount) page = p }
@@ -175,123 +175,129 @@ Item {
         MouseArea { anchors.fill: parent; onClicked: root.cancel() }
     }
 
-    // 面板: 右上角的对话框, 点外面关掉。版式: 图标页签 / 4×3 格子 / 翻页 (墨水屏不滚动)
+    // 面板: 右上角的对话框, 点外面关掉。版式 (2026-10-22 用户定): L 形分类 —— 左上角交叉处是「常用」,
+    // 其余分类一半排顶部、一半排左侧, 全部一屏放下不用滚; 右下是 4×4 格子, 底部页码 1 2 3 直接跳页。
     MouseArea { anchors.fill: parent; visible: root.open; onClicked: root.cancel(); z: 20 }
     Rectangle {
         id: panel
         visible: root.open; z: 21
-        readonly property real cell: Math.min(170 * u, (root.width - 64 * u - 5 * gap) / 4)
-        readonly property real gap: 16 * u
-        readonly property real pad: 24 * u
-        // 贴在右上角 (斜滑手势从这里起), 让开顶部工具栏
+        readonly property real cell: 116 * u
+        readonly property real gap: 12 * u
+        readonly property real pad: 18 * u
+        readonly property real side: 132 * u                     // 左列宽 = 顶行高 (交叉处是正方形)
+        readonly property real gridW: 4 * cell + 3 * gap
+        readonly property real gridH: 4 * cell + 3 * gap
+        readonly property int topN: Math.min(4, Math.ceil((root.packs.length - 1) / 2))
+        readonly property int leftN: Math.max(0, root.packs.length - 1 - topN)
         anchors.top: parent.top; anchors.right: parent.right; anchors.topMargin: 128 * u; anchors.rightMargin: 16 * u
-        width: 4 * cell + 3 * gap + 2 * pad
-        height: col.implicitHeight + 2 * pad
+        width: pad + side + gap + gridW + pad
+        height: pad + side + gap + gridH + pager.height + pad
         radius: 18 * u; color: "#F7F6F2"; border.width: 2; border.color: "#BDBAB2"
         MouseArea { anchors.fill: parent }   // 挡住底下的关闭层
 
-        Column {
-            id: col
-            x: panel.pad; y: panel.pad; width: panel.width - 2 * panel.pad
-            spacing: 0
+        component Tab: Rectangle {
+            property int idx: 0
+            property bool cur: idx === root.tab
+            readonly property var pk: root.packs[idx] || {}
+            radius: 14 * u; color: cur ? "#C9E0AE" : "transparent"   // 选中: 「计划」底部页签同款淡绿
+            Column {
+                anchors.centerIn: parent; spacing: 4 * u
+                Image {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: 50 * u; height: 50 * u; fillMode: Image.PreserveAspectFit; asynchronous: true; cache: false
+                    source: pk.icon ? root.base + "/space/sticker/thumb?size=96&rel=" + encodeURIComponent(pk.icon) : ""
+                }
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: panel.side - 8 * u; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+                    text: (!root.zh && pk.name_en) ? pk.name_en : (pk.name || "")
+                    font.pixelSize: 22 * u; color: "#000"
+                }
+            }
+            MouseArea { anchors.fill: parent; onClicked: { root.tab = parent.idx; root.page = 0 } }
+        }
 
-            // 图标页签: 一屏 5 个, 多了左右划
-            Flickable {
-                id: tabs
-                width: parent.width; height: 112 * u; clip: true
-                contentWidth: tabRow.width; flickableDirection: Flickable.HorizontalFlick
-                interactive: contentWidth > width
-                Row {
-                    id: tabRow
-                    Repeater {
-                        model: root.packs
-                        Rectangle {
-                            property bool cur: index === root.tab
-                            width: tabs.width / 5; height: tabs.height
-                            radius: 14 * u; color: cur ? "#C9E0AE" : "transparent"   // 同「计划」底部选中页签: 主色绿再淡一档
-                            Column {   // 图标 + 字整体垂直居中, 上下留白一样
-                                anchors.centerIn: parent; spacing: 4 * u
-                                Image {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    width: 52 * u; height: 52 * u; fillMode: Image.PreserveAspectFit; asynchronous: true; cache: false
-                                    source: root.base + "/space/sticker/thumb?size=96&rel=" + encodeURIComponent(modelData.icon || "")
-                                }
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    width: tabs.width / 5 - 8 * u; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
-                                    text: (!root.zh && modelData.name_en) ? modelData.name_en : modelData.name
-                                    font.pixelSize: 24 * u; color: "#000"
-                                }
+        // 交叉处: 第一个包 (常用)
+        Tab { x: panel.pad; y: panel.pad; width: panel.side; height: panel.side; idx: 0; visible: root.packs.length > 0 }
+        // 顶行
+        Repeater {
+            model: panel.topN
+            Tab {
+                idx: 1 + index
+                x: panel.pad + panel.side + panel.gap + index * (panel.gridW / panel.topN); y: panel.pad
+                width: panel.gridW / panel.topN; height: panel.side
+            }
+        }
+        // 左列
+        Repeater {
+            model: panel.leftN
+            Tab {
+                idx: 1 + panel.topN + index
+                readonly property real h: (panel.gridH + panel.gap + pager.height) / Math.max(4, panel.leftN)
+                x: panel.pad; y: panel.pad + panel.side + panel.gap + index * h
+                width: panel.side; height: h
+            }
+        }
+        // 分隔线
+        Rectangle { x: panel.pad + panel.side + panel.gap / 2; y: panel.pad + panel.side + panel.gap / 2; width: panel.gridW + panel.gap / 2; height: 2; color: "#CFCCC4" }
+        Rectangle { x: panel.pad + panel.side + panel.gap / 2; y: panel.pad + panel.side + panel.gap / 2; width: 2; height: panel.gridH + pager.height + panel.gap / 2; color: "#CFCCC4" }
+
+        // 4×4 格子; 左右划翻页
+        Item {
+            id: gridBox
+            x: panel.pad + panel.side + panel.gap; y: panel.pad + panel.side + panel.gap
+            width: panel.gridW; height: panel.gridH
+            property real pressX: 0
+            MouseArea {   // 空白处也能划
+                anchors.fill: parent
+                onPressed: (e) => { gridBox.pressX = e.x }
+                onReleased: (e) => { var dx = e.x - gridBox.pressX; if (Math.abs(dx) > 60 * u) root.turn(dx < 0 ? 1 : -1) }
+            }
+            Grid {
+                columns: 4; spacing: panel.gap
+                Repeater {
+                    model: root.curStickers.slice(root.page * root.perPage, (root.page + 1) * root.perPage)
+                    Rectangle {
+                        width: panel.cell; height: panel.cell; radius: 12 * u
+                        color: tap.pressed ? "#E2DFD8" : "#FFFFFF"; border.width: 2; border.color: "#D8D5CE"
+                        Image {
+                            anchors.fill: parent; anchors.margins: 12 * u
+                            source: root.base + "/space/sticker/thumb?rel=" + encodeURIComponent(modelData.rel) + "&size=160"
+                            fillMode: Image.PreserveAspectFit; asynchronous: true; cache: false
+                        }
+                        MouseArea {
+                            id: tap; anchors.fill: parent
+                            property real px: 0
+                            onPressed: (e) => { px = e.x }
+                            onReleased: (e) => {
+                                var dx = e.x - px
+                                if (Math.abs(dx) > 60 * u) root.turn(dx < 0 ? 1 : -1)
+                                else if (Math.abs(dx) < 20 * u) root.choose(modelData.rel)
                             }
-                            MouseArea { anchors.fill: parent; onClicked: { root.tab = index; root.page = 0 } }
                         }
                     }
                 }
             }
-            Item { width: 1; height: 16 * u }
-            Rectangle { width: parent.width; height: 2; color: "#CFCCC4" }
-            Item { width: 1; height: panel.gap + 4 * u }
+        }
 
-            // 4×3 格子; 左右划翻页
-            Item {
-                id: gridBox
-                width: parent.width; height: 3 * panel.cell + 2 * panel.gap
-                property real pressX: 0
-                MouseArea {   // 空白处也能划
-                    anchors.fill: parent
-                    onPressed: (e) => { gridBox.pressX = e.x }
-                    onReleased: (e) => { var dx = e.x - gridBox.pressX; if (Math.abs(dx) > 60 * u) root.turn(dx < 0 ? 1 : -1) }
-                }
-                Grid {
-                    columns: 4; spacing: panel.gap
-                    Repeater {
-                        model: root.curStickers.slice(root.page * root.perPage, (root.page + 1) * root.perPage)
-                        Rectangle {
-                            width: panel.cell; height: panel.cell; radius: 12 * u
-                            color: tap.pressed ? "#E2DFD8" : "#FFFFFF"; border.width: 2; border.color: "#D8D5CE"
-                            Image {
-                                anchors.fill: parent; anchors.margins: 14 * u
-                                source: root.base + "/space/sticker/thumb?rel=" + encodeURIComponent(modelData.rel) + "&size=192"
-                                fillMode: Image.PreserveAspectFit; asynchronous: true; cache: false
-                            }
-                            MouseArea {
-                                id: tap; anchors.fill: parent
-                                property real px: 0
-                                onPressed: (e) => { px = e.x }
-                                onReleased: (e) => {
-                                    var dx = e.x - px
-                                    if (Math.abs(dx) > 60 * u) root.turn(dx < 0 ? 1 : -1)
-                                    else if (Math.abs(dx) < 20 * u) root.choose(modelData.rel)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 翻页 (只有一页就不显示)
-            Item {
-                visible: root.pageCount > 1
-                width: parent.width; height: visible ? 24 * u + 2 + 24 * u + 64 * u : 0
-                Rectangle { y: 22 * u; width: parent.width; height: 2; color: "#CFCCC4" }
-                Row {
-                    anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom
-                    spacing: 64 * u
+        // 页码 1 2 3 …: 点哪页跳哪页 (只有一页就不显示)
+        Item {
+            id: pager
+            x: panel.pad + panel.side + panel.gap; y: panel.pad + panel.side + panel.gap + panel.gridH
+            width: panel.gridW; height: root.pageCount > 1 ? 82 * u : 0
+            visible: root.pageCount > 1
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom
+                spacing: 12 * u
+                Repeater {
+                    model: root.pageCount
                     Rectangle {
-                        width: 72 * u; height: 64 * u; radius: 10 * u; color: "#FFF"
-                        border.width: 2; border.color: root.page > 0 ? "#000" : "#CFCCC4"
-                        Text { anchors.centerIn: parent; text: "‹"; font.pixelSize: 44 * u; color: root.page > 0 ? "#000" : "#B0ADA6" }
-                        MouseArea { anchors.fill: parent; onClicked: root.turn(-1) }
-                    }
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: (root.page + 1) + " / " + root.pageCount; font.pixelSize: 30 * u; color: "#000"
-                    }
-                    Rectangle {
-                        width: 72 * u; height: 64 * u; radius: 10 * u; color: "#FFF"
-                        border.width: 2; border.color: root.page < root.pageCount - 1 ? "#000" : "#CFCCC4"
-                        Text { anchors.centerIn: parent; text: "›"; font.pixelSize: 44 * u; color: root.page < root.pageCount - 1 ? "#000" : "#B0ADA6" }
-                        MouseArea { anchors.fill: parent; onClicked: root.turn(1) }
+                        property bool cur: index === root.page
+                        width: 60 * u; height: 60 * u; radius: 12 * u
+                        color: cur ? "#C9E0AE" : "#FFF"
+                        border.width: 2; border.color: cur ? "#C9E0AE" : "#CFCCC4"
+                        Text { anchors.centerIn: parent; text: index + 1; font.pixelSize: 26 * u; color: "#000" }
+                        MouseArea { anchors.fill: parent; onClicked: root.page = index }
                     }
                 }
             }
