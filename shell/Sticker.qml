@@ -148,7 +148,7 @@ Item {
                 pen.tool = 17
                 if (m.argb !== undefined) { h.lineArgbCode = m.argb; h.lineColor = 9 }   // 自定义颜色: 9 + ARGB
                 else { h.lineColor = root.xoColor(m.color); h.lineArgbCode = 0xFF000000 }
-                pen.thickness = Math.max(1, m.width / 1.8)
+                pen.thickness = m.thickness !== undefined ? m.thickness : Math.max(1, m.width / 1.8)   // 边缘线: 针管笔标准档
                 root.post("/space/sticker/stroke", { op: "draw", index: i }, function (st2) {
                     if (st2 === 200) { i++; retries = 0; next(); return }
                     if (st2 === 409 && retries < 3) { retries++; next(); return }

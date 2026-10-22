@@ -297,6 +297,10 @@ func (s *Server) strokeSticker(w http.ResponseWriter, r *http.Request) {
 				wpx = float64(ln.Points[0].Width) / 4 * float64(k)
 			}
 			m := map[string]any{"color": int(ln.Color), "tool": int(ln.Tool), "width": wpx}
+			// 整数档位 (1/2/3 = 针管笔细/中/粗) 原样交给笔, 不随贴纸大小缩放
+			if ts := ln.ThicknessScale; ts == math.Trunc(ts) && ts >= 1 && ts <= 3 {
+				m["thickness"] = ts
+			}
 			if ln.HasRGB {
 				if grayscale {
 					// rm2 不认自定义颜色 (color 9 + RGB 画成黑), 按亮度落到黑/灰
@@ -309,7 +313,7 @@ func (s *Server) strokeSticker(w http.ResponseWriter, r *http.Request) {
 					m["argb"] = ln.ARGB
 				}
 			}
-			key := fmt.Sprintf("%v/%v/%.2f", m["color"], m["argb"], wpx)
+			key := fmt.Sprintf("%v/%v/%.2f/%v", m["color"], m["argb"], wpx, m["thickness"])
 			g := byKey[key]
 			if g == nil {
 				g = &group{key: key, meta: m}
