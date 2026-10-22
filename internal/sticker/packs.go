@@ -5,6 +5,7 @@ package sticker
 // 缩略图由本机按笔迹画 (面板用), 缓存在 stickers/.thumbs/<包>/<贴纸>@<尺寸>.png, 源文件 mtime 变了重画。
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -16,6 +17,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	rmscene "github.com/alexgorbatchev/go-rmscene"
 )
@@ -64,12 +66,16 @@ func List(dir string) ([]Pack, error) {
 			}
 			p.NameEn = meta.NameEn
 		}
+		if !usable(dir, e.Name()) {
+			continue // 专属包验不过 (拷来的 / 文件坏了): 整个不显示
+		}
 		files, _ := os.ReadDir(filepath.Join(dir, e.Name()))
 		for _, f := range files {
-			if f.IsDir() || filepath.Ext(f.Name()) != ".rm" {
+			fn := strings.TrimSuffix(f.Name(), ".enc")
+			if f.IsDir() || filepath.Ext(fn) != ".rm" {
 				continue
 			}
-			name := strings.TrimSuffix(f.Name(), ".rm")
+			name := strings.TrimSuffix(fn, ".rm")
 			p.Stickers = append(p.Stickers, Sticker{Pack: e.Name(), Name: name, Rel: e.Name() + "/" + f.Name()})
 		}
 		order := map[string]int{}
@@ -122,20 +128,19 @@ func Thumb(dir, rel string, size int, ink *color.RGBA) ([]byte, error) {
 	if rel == "@star" {
 		return encodePNG(render(starStrokes(), size, ink))
 	}
-	src := filepath.Join(dir, rel)
-	st, err := os.Stat(src)
-	if err != nil {
-		return nil, err
+	srcTime, ok := statFile(dir, rel)
+	if !ok {
+		return nil, os.ErrNotExist
 	}
 	tag := ""
 	if ink != nil {
 		tag = fmt.Sprintf("-%02x%02x%02x", ink.R, ink.G, ink.B)
 	}
 	cache := filepath.Join(dir, ".thumbs", fmt.Sprintf("%s@%d%s.png", strings.TrimSuffix(rel, ".rm"), size, tag))
-	if cs, err := os.Stat(cache); err == nil && !cs.ModTime().Before(st.ModTime()) {
+	if cs, err := os.Stat(cache); err == nil && !cs.ModTime().Before(srcTime) {
 		return os.ReadFile(cache)
 	}
-	b, err := os.ReadFile(src)
+	b, err := ReadFile(dir, rel) // 缩略图只有一两百像素, 解密后照常缓存
 	if err != nil {
 		return nil, err
 	}
@@ -265,30 +270,40 @@ func dot(img *image.NRGBA, cx, cy, r float64, col color.RGBA) {
 // ImageFile 「图片」贴法用的 PNG (边长 px, 透明底), 返回设备上的绝对路径。
 // 包里有同名 .png (原图) 就裁掉透明边后缩小; 没有就按笔迹渲染。缓存在 stickers/.images/<包>/<名>@<px>.png。
 func ImageFile(dir, rel string, px int) (string, error) {
-	src := filepath.Join(dir, rel)
-	st, err := os.Stat(src)
-	if err != nil {
-		return "", err
+	srcTime, ok := statFile(dir, rel)
+	if !ok {
+		return "", os.ErrNotExist
 	}
+	origRel := strings.TrimSuffix(rel, ".rm") + ".png"
+	pack, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
+	sealed := Sealed(dir, pack)
 	out := filepath.Join(dir, ".images", fmt.Sprintf("%s@%dk.png", strings.TrimSuffix(rel, ".rm"), px))
-	orig := strings.TrimSuffix(src, ".rm") + ".png"
-	newest := st.ModTime()
-	if os_, err := os.Stat(orig); err == nil && os_.ModTime().After(newest) {
-		newest = os_.ModTime()
-	}
-	if cs, err := os.Stat(out); err == nil && !cs.ModTime().Before(newest) {
-		return out, nil
+	if sealed {
+		// 专属包不往磁盘留成品图: 解到内存盘的临时文件, xochitl 插图时会把图片拷进笔记, 过一会儿删掉
+		f, err := os.CreateTemp("", "rmkit-sticker-*.png")
+		if err != nil {
+			return "", err
+		}
+		out = f.Name()
+		f.Close()
+		time.AfterFunc(30*time.Second, func() { os.Remove(out) })
+	} else {
+		newest := srcTime
+		if t, ok := statFile(dir, origRel); ok && t.After(newest) {
+			newest = t
+		}
+		if cs, err := os.Stat(out); err == nil && !cs.ModTime().Before(newest) {
+			return out, nil
+		}
 	}
 	var img image.Image
-	if f, err := os.Open(orig); err == nil {
-		im, _, derr := image.Decode(f)
-		f.Close()
-		if derr == nil {
+	if ob, err := ReadFile(dir, origRel); err == nil {
+		if im, _, derr := image.Decode(bytes.NewReader(ob)); derr == nil {
 			img = fitTransparent(im, px)
 		}
 	}
 	if img == nil {
-		b, err := os.ReadFile(src)
+		b, err := ReadFile(dir, rel)
 		if err != nil {
 			return "", err
 		}

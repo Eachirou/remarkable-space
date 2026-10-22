@@ -320,7 +320,7 @@ func (s *Server) strokeSticker(w http.ResponseWriter, r *http.Request) {
 			httpError(w, http.StatusBadRequest, "贴纸路径不对")
 			return
 		}
-		b, err := os.ReadFile(filepath.Join(stickerDir, rel))
+		b, err := sticker.ReadFile(stickerDir, rel)
 		if err != nil {
 			httpError(w, http.StatusNotFound, "贴纸不存在")
 			return
