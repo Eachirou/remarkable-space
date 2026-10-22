@@ -120,9 +120,9 @@ const recentMax = 12
 
 // 还没贴过时「常用」先放这些 (各分类挑几个最常用的)
 var recentDefaults = []string{
-	"mood/grinning-face.rm", "mood/sun.rm", "plant/sunflower.rm", "food/hot-beverage.rm",
-	"animal/cat-face.rm", "festival/wrapped-gift.rm", "title/today.rm", "title/todo.rm",
-	"tape/washi-pink-dots.rm", "tape/line-wave.rm", "date/week-1.rm", "hand/06_heart.rm",
+	"mood/happy.rm", "mood/sun.rm", "deco/star.rm", "deco/heart.rm",
+	"nature/flower.rm", "nature/butterfly.rm", "plan/checklist.rm", "plan/calendar.rm",
+	"label/washi-tape.rm", "label/banner.rm", "life/tea.rm", "date/week-1.rm",
 }
 
 func recentPath() string { return filepath.Join(stickerDir, ".recent.json") }
