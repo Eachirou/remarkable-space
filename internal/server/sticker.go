@@ -330,7 +330,7 @@ func (s *Server) strokeSticker(w http.ResponseWriter, r *http.Request) {
 			httpError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		sess.Delay = time.Millisecond // 1 像素一个事件, 1ms 一点 ≈ 1000 像素/秒 (停顿走 preciseSleep 自旋)
+		sess.Delay = 2 * time.Millisecond // 1 像素一个事件, 2ms 一点 ≈ 500 像素/秒, 接近真人写字; 1ms 时急弯处会甩出去 (2026-10-22)
 		stickerSess = sess
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "strokes": meta})
 	case "draw":
@@ -371,20 +371,30 @@ func (s *Server) strokeSticker(w http.ResponseWriter, r *http.Request) {
 // 预测, 圆被压扁、起笔处鼓包; 每事件 1 像素 (2ms 或 5ms 都行) 画出来才是正圆。
 // 太疏 (闭合路径最后那一段直接连回起点) 系统还会把瞬移当噪声丢掉, 实测爱心缺一截。
 func densify(pts []rmscene.Point, cx, cy, k float32) [][2]float32 {
-	const spacing, straightSpacing = 1.0, 4.0
+	// 步距: 曲线 1 像素, 涂色的水平扫描行 2 像素 (再宽就太快, 行尾刹不住涂出线外, 2026-10-22 实测)
+	const spacing, straightSpacing = 1.0, 2.0
 	src := make([][2]float32, 0, len(pts))
 	for _, p := range pts {
 		src = append(src, [2]float32{cx + p.X*k, cy + p.Y*k})
 	}
-	// 涂色的水平扫描行步距放宽到 4 像素, 一张涂满颜色的贴纸点数能砍掉大半
 	straight := func(i int) bool {
 		if i <= 0 || i >= len(src)-1 {
 			return false
 		}
 		a, b, c := src[i-1], src[i], src[i+1]
-		// 只认「纯水平」(涂色的扫描行): 轮廓线上近似直的段放宽步距照样会被笔迹预测拉歪 (2026-10-21 实测脸变成鸡蛋)
+		// 只认「纯水平」(涂色的扫描行): 轮廓线上近似直的段放宽步距照样会被笔迹预测拉歪
 		const eps = 0.01
 		return math.Abs(float64(b[1]-a[1])) < eps && math.Abs(float64(c[1]-b[1])) < eps && b[0] != a[0] && c[0] != b[0]
+	}
+	// 急转弯 (方向变化超过 60°, 比如扫描行掉头、薯条尖) 原地多停几拍, 让笔迹引擎先刹住再转
+	sharp := func(i int) bool {
+		if i <= 0 || i >= len(src)-1 {
+			return false
+		}
+		a, b, c := src[i-1], src[i], src[i+1]
+		x1, y1, x2, y2 := float64(b[0]-a[0]), float64(b[1]-a[1]), float64(c[0]-b[0]), float64(c[1]-b[1])
+		n := math.Hypot(x1, y1) * math.Hypot(x2, y2)
+		return n > 0 && (x1*x2+y1*y2)/n < 0.5
 	}
 	var out [][2]float32
 	for i, q := range src {
@@ -396,7 +406,7 @@ func densify(pts []rmscene.Point, cx, cy, k float32) [][2]float32 {
 			if straight(i) || straight(i-1) {
 				sp = straightSpacing
 			}
-			if d < sp*0.7 && i < len(src)-1 {
+			if d < sp*0.7 && i < len(src)-1 && !sharp(i) {
 				continue
 			}
 			for steps, j := int(d/sp+0.5), 1; j < steps; j++ {
@@ -405,6 +415,9 @@ func densify(pts []rmscene.Point, cx, cy, k float32) [][2]float32 {
 			}
 		}
 		out = append(out, q)
+		if sharp(i) {
+			out = append(out, q, q, q)
+		}
 	}
 	return out
 }
