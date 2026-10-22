@@ -55,7 +55,11 @@ Item {
         xhr("GET", "/space/sticker/events?wait=25", null, function (st, r) {
             polling = false
             if (st !== 200 || !r) { post("/space/sticker/stroke", { op: "wait" }, function () { root.poll() }); return }
-            if (r.type === "gesture" && !busy && !pending) root.show()
+            if (r.type === "gesture" && !busy) {
+                // 选了贴纸还没点落点时又斜滑 = 反悔: 取消这次选择, 重新打开面板
+                if (pending) { pending = ""; post("/space/sticker/arm", { on: false }, function () {}) }
+                root.show()
+            }
             else if (r.type === "tap" && pending) {
                 if (root.mode === "image") root.placeImage(r.nx, r.ny)
                 else root.place(r.x, r.y)
