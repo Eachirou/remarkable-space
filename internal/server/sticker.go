@@ -83,7 +83,7 @@ func (s *Server) stickerList(w http.ResponseWriter, r *http.Request) {
 	if s.space != nil {
 		lang = s.space.CurrentLang()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"packs": packs, "lang": lang})
+	writeJSON(w, http.StatusOK, map[string]any{"packs": packs, "lang": lang, "mode": loadPrefs().Mode})
 }
 
 // GET /space/sticker/thumb?rel=包/名.rm&size=160[&ink=ffffff] → PNG (rel=@star 为「常用」页签图标)
@@ -113,6 +113,59 @@ func (s *Server) stickerThumb(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(b)
+}
+
+// GET /space/sticker/image?rel=包/名.rm → {"path": 设备上的 PNG 绝对路径}
+// 「图片」贴法用: 面板拿到路径后调 xochitl 的 SceneController.insertImageFileAsSceneItem(QUrl, QPointF) 插进当前页。
+// 包里有同名 .png (原图) 就用原图缩小, 没有就用笔迹渲染; 缓存在 stickers/.images/。
+func (s *Server) stickerImage(w http.ResponseWriter, r *http.Request) {
+	rel, ok := cleanRel(r.URL.Query().Get("rel"))
+	if !ok {
+		httpError(w, http.StatusBadRequest, "贴纸路径不对")
+		return
+	}
+	p, err := sticker.ImageFile(stickerDir, rel, stickerImagePx)
+	if err != nil {
+		httpError(w, http.StatusNotFound, "贴纸不存在")
+		return
+	}
+	noteRecent(rel)
+	writeJSON(w, http.StatusOK, map[string]any{"path": p})
+}
+
+// 图片贴纸的边长 (像素)。xochitl 插图按 1 像素 = 1 页面单位, 默认缩放下约 1.16 屏幕像素,
+// 所以 176 像素落到屏幕上约 200 像素, 和「绘制」的贴纸一样大。
+const stickerImagePx = 176
+
+// 面板偏好 (贴法 image/draw), 存 stickers/.prefs.json
+type stickerPrefs struct {
+	Mode string `json:"mode"`
+}
+
+func loadPrefs() stickerPrefs {
+	p := stickerPrefs{Mode: "draw"}
+	if b, err := os.ReadFile(filepath.Join(stickerDir, ".prefs.json")); err == nil {
+		_ = json.Unmarshal(b, &p)
+	}
+	if p.Mode != "image" {
+		p.Mode = "draw"
+	}
+	return p
+}
+
+// POST /space/sticker/prefs {"mode":"image"|"draw"}
+func (s *Server) stickerPrefsSet(w http.ResponseWriter, r *http.Request) {
+	var in stickerPrefs
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || (in.Mode != "image" && in.Mode != "draw") {
+		httpError(w, http.StatusBadRequest, "mode 只能是 image 或 draw")
+		return
+	}
+	b, _ := json.Marshal(in)
+	if err := os.WriteFile(filepath.Join(stickerDir, ".prefs.json"), b, 0o644); err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // 「常用」: 最近贴过的贴纸 (最多一页 12 个), 存在 stickers/.recent.json

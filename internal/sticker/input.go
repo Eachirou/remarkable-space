@@ -26,6 +26,8 @@ type Event struct {
 	Type string  `json:"type"`
 	X    float32 `json:"x,omitempty"`
 	Y    float32 `json:"y,omitempty"`
+	NX   float32 `json:"nx,omitempty"` // 归一化坐标 0..1 (面板换算到自己的坐标系)
+	NY   float32 `json:"ny,omitempty"`
 	At   int64   `json:"at"`
 }
 
@@ -211,7 +213,7 @@ func (in *Input) penLoop() {
 					if armed && time.Since(downAt) < 500*time.Millisecond && moved < 0.03*float64(in.profile.InputW) && !in.isOurs(sx, sy) {
 						in.Arm(false)
 						px, py := in.profile.InputToScreen(sx, sy)
-						in.publish(Event{Type: "tap", X: px, Y: py})
+						in.publish(Event{Type: "tap", X: px, Y: py, NX: px / float32(in.profile.ScreenW), NY: py / float32(in.profile.ScreenH)})
 					}
 				}
 			case typ == evSyn && code == 0:

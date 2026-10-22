@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	_ "image/jpeg"
 	"image/png"
 	"math"
 	"os"
@@ -259,4 +260,101 @@ func dot(img *image.NRGBA, cx, cy, r float64, col color.RGBA) {
 			img.Pix[o+3] = uint8(na * 255)
 		}
 	}
+}
+
+// ImageFile 「图片」贴法用的 PNG (边长 px, 透明底), 返回设备上的绝对路径。
+// 包里有同名 .png (原图) 就裁掉透明边后缩小; 没有就按笔迹渲染。缓存在 stickers/.images/<包>/<名>@<px>.png。
+func ImageFile(dir, rel string, px int) (string, error) {
+	src := filepath.Join(dir, rel)
+	st, err := os.Stat(src)
+	if err != nil {
+		return "", err
+	}
+	out := filepath.Join(dir, ".images", fmt.Sprintf("%s@%d.png", strings.TrimSuffix(rel, ".rm"), px))
+	orig := strings.TrimSuffix(src, ".rm") + ".png"
+	newest := st.ModTime()
+	if os_, err := os.Stat(orig); err == nil && os_.ModTime().After(newest) {
+		newest = os_.ModTime()
+	}
+	if cs, err := os.Stat(out); err == nil && !cs.ModTime().Before(newest) {
+		return out, nil
+	}
+	var img image.Image
+	if f, err := os.Open(orig); err == nil {
+		im, _, derr := image.Decode(f)
+		f.Close()
+		if derr == nil {
+			img = fitTransparent(im, px)
+		}
+	}
+	if img == nil {
+		b, err := os.ReadFile(src)
+		if err != nil {
+			return "", err
+		}
+		sc, err := rmscene.Parse(b)
+		if err != nil {
+			return "", err
+		}
+		img = render(Strokes(sc), px, nil)
+	}
+	b, err := encodePNG(img)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(out, b, 0o644); err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// fitTransparent 裁掉四周透明边, 等比缩到 px×px 以内 (面积平均, 不发虚), 居中放进 px×px 透明画布
+func fitTransparent(im image.Image, px int) *image.NRGBA {
+	b := im.Bounds()
+	x0, y0, x1, y1 := b.Max.X, b.Max.Y, b.Min.X, b.Min.Y
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if _, _, _, a := im.At(x, y).RGBA(); a > 0x0800 {
+				x0, y0, x1, y1 = min(x0, x), min(y0, y), max(x1, x+1), max(y1, y+1)
+			}
+		}
+	}
+	if x1 <= x0 || y1 <= y0 {
+		x0, y0, x1, y1 = b.Min.X, b.Min.Y, b.Max.X, b.Max.Y
+	}
+	w, h := x1-x0, y1-y0
+	scale := float64(px) / float64(max(w, h))
+	tw, th := max(1, int(float64(w)*scale)), max(1, int(float64(h)*scale))
+	dst := image.NewNRGBA(image.Rect(0, 0, px, px))
+	ox, oy := (px-tw)/2, (px-th)/2
+	for ty := 0; ty < th; ty++ {
+		sy0, sy1 := y0+int(float64(ty)/scale), y0+int(float64(ty+1)/scale)
+		for tx := 0; tx < tw; tx++ {
+			sx0, sx1 := x0+int(float64(tx)/scale), x0+int(float64(tx+1)/scale)
+			var r, g, bb, a, n float64
+			for sy := sy0; sy < max(sy1, sy0+1); sy++ {
+				for sx := sx0; sx < max(sx1, sx0+1); sx++ {
+					cr, cg, cb, ca := im.At(sx, sy).RGBA()
+					r += float64(cr)
+					g += float64(cg)
+					bb += float64(cb)
+					a += float64(ca)
+					n++
+				}
+			}
+			if a == 0 {
+				continue
+			}
+			// 预乘 alpha 平均后还原
+			o := dst.PixOffset(ox+tx, oy+ty)
+			dst.Pix[o] = uint8(r / a * 255)
+			dst.Pix[o+1] = uint8(g / a * 255)
+			dst.Pix[o+2] = uint8(bb / a * 255)
+			dst.Pix[o+3] = uint8(a / n / 257)
+		}
+	}
+	return dst
 }

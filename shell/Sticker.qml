@@ -27,6 +27,8 @@ Item {
     readonly property int pageCount: Math.max(1, Math.ceil(curStickers.length / perPage))
     function turn(d) { var p = page + d; if (p >= 0 && p < pageCount) page = p }
     property bool zh: true
+    property string mode: "draw"        // 贴法: draw = 虚拟笔描成原生笔迹, image = 贴图片 (后台记住)
+    function setMode(m) { mode = m; post("/space/sticker/prefs", { mode: m }, function () {}) }
     property string pending: ""         // 选中的贴纸 (rel), 等笔点
     property real stickerSize: 200      // 贴纸落到屏幕上的边长 (像素)
     property bool polling: false
@@ -54,7 +56,10 @@ Item {
             polling = false
             if (st !== 200 || !r) { post("/space/sticker/stroke", { op: "wait" }, function () { root.poll() }); return }
             if (r.type === "gesture" && !busy && !pending) root.show()
-            else if (r.type === "tap" && pending) root.place(r.x, r.y)
+            else if (r.type === "tap" && pending) {
+                if (root.mode === "image") root.placeImage(r.nx, r.ny)
+                else root.place(r.x, r.y)
+            }
             root.poll()
         })
     }
@@ -64,6 +69,7 @@ Item {
         xhr("GET", "/space/sticker/list", null, function (st, r) {
             if (st !== 200 || !r || !r.packs) { root.hint = "贴纸读不到 / Stickers unavailable"; return }
             root.zh = (r.lang || "zh").indexOf("zh") === 0
+            if (r.mode) root.mode = r.mode
             var keep = root.packs.length && root.tab < root.packs.length ? root.packs[root.tab].id : ""
             root.packs = r.packs
             var t = 0
@@ -109,6 +115,23 @@ Item {
         if (ch) for (var i = 0; i < ch.length; i++) findAll(ch[i], depth + 1, key, out)
     }
     function xoColor(c) { return c === 4 ? 10 : c }   // rmscene GREEN(4)=荧光绿, 笔要用 Green(10)
+
+    // 「图片」贴法: 后台给出 PNG 路径, 用 xochitl 自己的 SceneController.insertImageFileAsSceneItem(QUrl, QPointF)
+    // 插进当前页 (原生图片对象, 可选中/移动/缩放)。点是页面坐标、对应图片中心:
+    // 页面 x 以中线为 0, 屏幕中心对应 defaultCenter, 1 页面单位 = defaultScale × viewScale 屏幕像素 (2026-10-22 实测)。
+    function placeImage(nx, ny) {
+        var rel = pending; pending = ""
+        var dsv = visibleDSV(); var c = dsv ? dsv.controller : null
+        if (!c) { hint = "这里不能贴 / Not a notebook page"; return }
+        xhr("GET", "/space/sticker/image?rel=" + encodeURIComponent(rel), null, function (st, r) {
+            if (st !== 200 || !r || !r.path) { root.hint = "贴失败 / Failed"; return }
+            var sc = dsv.defaultScale * (dsv.viewScale || 1), ctr = dsv.defaultCenter
+            var px = (nx * dsv.width - dsv.width / 2) / sc + ctr.x
+            var py = (ny * dsv.height - dsv.height / 2) / sc + ctr.y
+            try { c.insertImageFileAsSceneItem("file://" + r.path, Qt.point(px, py)) }
+            catch (e) { log("insert image: " + e); root.hint = "贴失败 / Failed" }
+        })
+    }
 
     function place(x, y) {
         var rel = pending; pending = ""
@@ -280,23 +303,42 @@ Item {
             }
         }
 
-        // 页码 1 2 3 …: 点哪页跳哪页; 只有一页也显示「1」, 面板大小固定, 切分类时墨水屏不用大面积重刷
+        // 底栏: 左边页码 1 2 3 … (点哪页跳哪页; 只有一页也显示「1」, 面板大小固定, 切分类时墨水屏不用大面积重刷);
+        // 右边「图片 | 绘制」: 贴成图片 (快、和原图一模一样, 但不是笔迹) 还是用虚拟笔描成原生笔迹 (慢, 可改色可擦)
         Item {
             id: pager
             x: panel.pad + panel.side + panel.gap; y: panel.pad + panel.side + panel.gap + panel.gridH
             width: panel.gridW; height: 82 * u
             Row {
-                anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom
-                spacing: 12 * u
+                anchors.left: parent.left; anchors.bottom: parent.bottom
+                spacing: 10 * u
                 Repeater {
                     model: root.pageCount
                     Rectangle {
                         property bool cur: index === root.page
-                        width: 60 * u; height: 60 * u; radius: 12 * u
+                        width: 56 * u; height: 56 * u; radius: 12 * u
                         color: cur ? "#C9E0AE" : "#FFF"
                         border.width: 2; border.color: cur ? "#C9E0AE" : "#CFCCC4"
-                        Text { anchors.centerIn: parent; text: index + 1; font.pixelSize: 26 * u; color: "#000" }
+                        Text { anchors.centerIn: parent; text: index + 1; font.pixelSize: 24 * u; color: "#000" }
                         MouseArea { anchors.fill: parent; onClicked: root.page = index }
+                    }
+                }
+            }
+            Rectangle {   // 分段切换
+                anchors.right: parent.right; anchors.bottom: parent.bottom
+                width: 2 * 92 * u + 4 * u; height: 56 * u; radius: 12 * u
+                color: "#FFF"; border.width: 2; border.color: "#CFCCC4"
+                Row {
+                    anchors.centerIn: parent
+                    Repeater {
+                        model: [{ k: "image", zh: "图片", en: "Image" }, { k: "draw", zh: "绘制", en: "Draw" }]
+                        Rectangle {
+                            property bool cur: root.mode === modelData.k
+                            width: 92 * u; height: 48 * u; radius: 10 * u
+                            color: cur ? "#C9E0AE" : "transparent"
+                            Text { anchors.centerIn: parent; text: root.zh ? modelData.zh : modelData.en; font.pixelSize: 24 * u; color: "#000" }
+                            MouseArea { anchors.fill: parent; onClicked: root.setMode(modelData.k) }
+                        }
                     }
                 }
             }
