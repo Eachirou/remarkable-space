@@ -143,12 +143,13 @@ type stickerPrefs struct {
 }
 
 func loadPrefs() stickerPrefs {
-	p := stickerPrefs{Mode: "draw"}
+	// 默认贴图片: 原图效果最好、一下就出来 (2026-10-22 用户实测); 想要原生笔迹的人自己切「绘制」
+	p := stickerPrefs{Mode: "image"}
 	if b, err := os.ReadFile(filepath.Join(stickerDir, ".prefs.json")); err == nil {
 		_ = json.Unmarshal(b, &p)
 	}
-	if p.Mode != "image" {
-		p.Mode = "draw"
+	if p.Mode != "draw" {
+		p.Mode = "image"
 	}
 	return p
 }

@@ -27,7 +27,7 @@ Item {
     readonly property int pageCount: Math.max(1, Math.ceil(curStickers.length / perPage))
     function turn(d) { var p = page + d; if (p >= 0 && p < pageCount) page = p }
     property bool zh: true
-    property string mode: "draw"        // 贴法: draw = 虚拟笔描成原生笔迹, image = 贴图片 (后台记住)
+    property string mode: "image"       // 贴法: image = 贴图片 (默认), draw = 虚拟笔描成原生笔迹 (后台记住)
     function setMode(m) { mode = m; post("/space/sticker/prefs", { mode: m }, function () {}) }
     property string pending: ""         // 选中的贴纸 (rel), 等笔点
     property real stickerSize: 200      // 贴纸落到屏幕上的边长 (像素)
