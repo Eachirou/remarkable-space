@@ -76,7 +76,7 @@ func List(dir string) ([]Pack, error) {
 				continue
 			}
 			name := strings.TrimSuffix(fn, ".rm")
-			p.Stickers = append(p.Stickers, Sticker{Pack: e.Name(), Name: name, Rel: e.Name() + "/" + f.Name()})
+			p.Stickers = append(p.Stickers, Sticker{Pack: e.Name(), Name: name, Rel: e.Name() + "/" + fn})
 		}
 		order := map[string]int{}
 		for i, n := range meta.Order {

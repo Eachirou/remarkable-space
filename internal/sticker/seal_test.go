@@ -99,3 +99,36 @@ func TestSealedPackRoundTrip(t *testing.T) {
 		t.Fatal("别的设备上这个包应该整个不显示")
 	}
 }
+
+// 列表里加密贴纸的路径不能带 .enc (面板拿它去要缩略图/图片, 后端只认 .rm)
+func TestListSealedRel(t *testing.T) {
+	key := testKey()
+	dir := t.TempDir()
+	code, pack := "ABCD-EFGH-JKLM", "nature"
+	m := hmac.New(sha256.New, key.Seed())
+	m.Write([]byte("rmkit-space-sticker-key-v1\x00" + code + "\x00" + pack))
+	k := m.Sum(nil)
+	w := stickerWrap(code)
+	kw := make([]byte, 32)
+	for i := range kw {
+		kw[i] = k[i] ^ w[i]
+	}
+	os.MkdirAll(filepath.Join(dir, pack), 0o755)
+	os.WriteFile(filepath.Join(dir, pack, "leaf.rm.enc"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, pack, SealFile), testRecord(key, code, pack, base64.StdEncoding.EncodeToString(kw)), 0o644)
+	old, oldCode := sealPublicKey, localCode
+	defer func() { sealPublicKey, localCode = old, oldCode }()
+	sealPublicKey = base64.StdEncoding.EncodeToString(key.Public().(ed25519.PublicKey))
+	localCode = func() string { return code }
+	sealCache = map[string]*packSeal{}
+	packs, err := List(dir)
+	if err != nil || len(packs) != 1 || len(packs[0].Stickers) != 1 {
+		t.Fatalf("列表不对: %v %+v", err, packs)
+	}
+	if got := packs[0].Stickers[0].Rel; got != "nature/leaf.rm" {
+		t.Fatalf("Rel = %q, 应为 nature/leaf.rm", got)
+	}
+	if packs[0].Icon != "nature/leaf.rm" {
+		t.Fatalf("Icon = %q", packs[0].Icon)
+	}
+}
