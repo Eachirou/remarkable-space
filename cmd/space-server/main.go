@@ -17,9 +17,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 
 	"github.com/boangs/remarkable-space/internal/server"
+	"github.com/boangs/remarkable-space/internal/space"
 )
 
 func main() {
@@ -39,12 +41,23 @@ func main() {
 		spaceUserDir   = flag.String("space-apps", "", "「空间」用户应用目录 (默认: $HOME/.local/share/rmkit-cn/space/apps)")
 		spaceDataDir   = flag.String("space-data", "", "「空间」应用数据目录 (默认: $HOME/.local/share/rmkit-cn/space/data)")
 		spaceModDir    = flag.String("space-modules", "", "「空间」编译应用的 QML 模块目录 (默认: $HOME/.local/share/rmkit-cn/space/qmlmods; 要与 xochitl 的 QML_IMPORT_PATH 一致)")
+		selftest       = flag.String("selftest", "", "自更新用: 对着这个暂存目录自检 (外壳、内置应用清单) 后退出, 不起服务")
 		spaceStore     = flag.String("space-store", "https://boangs.com/rmkit-space/index.json", "「空间」应用商店索引 URL (空 = 关闭商店)")
 		// 默认空: 服务端的握手接口上线之前打开它, 所有设备都会连不上商店。
 		// 等 store-server 部署好再开, 见 docs-store-key.md。
 		spaceStoreAPI = flag.String("space-store-api", "", "「空间」应用商店握手接口 (空 = 不握手, 直接取静态索引)")
 	)
 	flag.Parse()
+
+	if *selftest != "" {
+		arch := map[string]string{"arm64": "aarch64", "arm": "armv7"}[runtime.GOARCH]
+		if err := space.SelfTest(*selftest, arch); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("selftest ok")
+		return
+	}
 
 	// 环境变量兜底: service 文件由 install.sh 生成, 重装会覆盖, 手改的参数会丢。
 	// 放 drop-in 里一行 Environment= 就不会被覆盖, 也不必把整条 ExecStart 抄一遍。
@@ -111,8 +124,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("server.New: %v", err)
 	}
-	server.StartAudioDaemon() // 蓝牙音频 (装了 rmkit-audio 才生效)
-	srv.Space().AutoStart()   // 「空间」里声明了 autostart 的应用后台
+	server.StartAudioDaemon()         // 蓝牙音频 (装了 rmkit-audio 才生效)
+	srv.Space().AutoStart()           // 「空间」里声明了 autostart 的应用后台
+	srv.Space().AutoInstallDefaults() // 原来空间自带、后来拆成商店应用的功能 (AI): 更新上来补装一次
 
 	fmt.Printf("space-server listening on %s\n", *listen)
 	fmt.Printf("  static = %s\n  fonts  = %s\n  screens = %s\n  fonts-active = %s\n  xochitl-conf = %s\n",

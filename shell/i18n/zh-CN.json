@@ -70,5 +70,12 @@
   "confirm_delete_note": "应用数据会保留，重新安装后还在。",
   "install_failed_code": "安装失败 ({code})",
   "about_xhs": "扫码在小红书找到我",
-  "about_xhs_id": "小红书号：boangs"
+  "about_xhs_id": "小红书号：boangs",
+  "upd_available": "{cur}　有新版本 {ver}，点击更新",
+  "upd_downloading": "正在下载新版本 {pct}%",
+  "upd_installing": "正在安装新版本",
+  "upd_restarting": "正在重启后台，装好后关掉空间再打开",
+  "upd_confirm": "更新空间到 {ver}（约 {mb} MB）？\n已装的应用和数据都不受影响，笔记里的功能不会中断。",
+  "upd_failed": "更新没成功：{err}",
+  "upd_rolled_back": "新版本没能启动，已回到原来的版本"
 }

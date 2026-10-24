@@ -481,6 +481,7 @@ Rectangle {
             if (lang !== bootLang) loadShellDict()
             console.warn("SPACE-LANG: boot=" + JSON.stringify(bootLang) + " system=" + JSON.stringify(langSystem) + " pref=" + JSON.stringify(langPref) + " ⇒ " + lang)
             apps = r.apps || []
+            if (!space.upd && r.spaceVersion) space.upd = { current: r.spaceVersion }
         })
         loadRecent()
     }
@@ -507,7 +508,7 @@ Rectangle {
         request("GET", baseUrl + "/space/store" + (refresh ? "?refresh=1" : ""), null, function(st, r) {
             storeLoaded = true
             if (st !== 200 || !r) { storeError = (r && r.error) ? r.error : space.st("store_unreachable", { code: st }); storeApps = []; return }
-            storeApps = r.apps || []
+            storeApps = (r.apps || []).filter(function (a) { return a.id !== "space" })   // 空间自己的新版本在「设置 → 关于空间」里, 不当应用列
         })
     }
 
@@ -974,7 +975,58 @@ Rectangle {
         request("POST", baseUrl + "/space/library/done", out, null)
     }
     Timer { id: libRetry; repeat: false; onTriggered: space.libPoll() }
-    onTabChanged: { if (tab === "discover" && !storeLoaded) loadStore(false) }
+    onTabChanged: {
+        if (tab === "discover" && !storeLoaded) loadStore(false)
+        if (tab === "settings") loadUpdate(false)
+    }
+
+    // ─── 空间自更新 (设置 → 关于空间) ───────────────────────────────────
+    // 后台 GET /space/update 给 当前版本 / 商店里的新版本 / 进行中的阶段; POST 开始。
+    // 更新到最后后台会重启, 中间几秒请求失败是正常的, 轮询接着等。
+    property var upd: null
+    property bool updPolling: false
+    function loadUpdate(refresh) {
+        request("GET", baseUrl + "/space/update" + (refresh ? "?refresh=1" : ""), null, function (st, r) {
+            if (st !== 200 || !r) return
+            var was = space.upd
+            space.upd = r
+            if (r.rolledBack) space.showToast(space.st("upd_rolled_back"))
+            var ph = r.state ? r.state.phase : ""
+            if (ph === "error" && was && was.state && was.state.phase !== "error") space.showToast(space.st("upd_failed", { err: r.state.error || "" }))
+            space.updPolling = ph !== "" && ph !== "error"
+        })
+    }
+    function updCanStart() {
+        return !!(upd && upd.available && (!upd.state || upd.state.phase === "" || upd.state.phase === "error"))
+    }
+    function updDetail() {
+        var cur = (upd && upd.current) ? upd.current : ""
+        var head = (cur ? cur : "") + "\u3000Copyright \u00a9 2026 Boangs"
+        if (!upd) return head
+        var stt = upd.state || {}
+        if (stt.phase === "downloading") return space.st("upd_downloading", { pct: stt.total > 0 ? Math.floor(stt.got * 100 / stt.total) : 0 })
+        if (stt.phase === "verifying" || stt.phase === "testing" || stt.phase === "switching") return space.st("upd_installing")
+        if (stt.phase === "restarting") return space.st("upd_restarting")
+        if (upd.available) return space.st("upd_available", { cur: cur, ver: upd.latest })
+        return head
+    }
+    function askUpdate() {
+        if (!updCanStart()) return
+        var notes = (space.lang === "zh-CN" ? upd.notes : (upd.notes_en || upd.notes)) || ""
+        var mb = upd.size ? Math.max(1, Math.round(upd.size / 1048576)) : 0
+        ask(space.st("upd_confirm", { ver: upd.latest, mb: mb }) + (notes ? "\n\n" + notes : ""), function () {
+            request("POST", baseUrl + "/space/update", {}, function (st, r) {
+                if (st !== 200) { space.showToast(space.st("upd_failed", { err: (r && r.error) ? r.error : st })); return }
+                space.updPolling = true
+                space.loadUpdate(false)
+            })
+        })
+    }
+    Timer {
+        interval: 2000; repeat: true
+        running: space.updPolling && space.visible
+        onTriggered: space.loadUpdate(false)
+    }
 
     // ─── 应用内导航栏 (返回 + 标题) ───────────────────────────────────
     Item {
@@ -1619,13 +1671,15 @@ Rectangle {
                         MouseArea { id: tzMouse; anchors.fill: parent; onClicked: space.chooseTimezone(modelData.name) }
                     }
                 }
+                // 关于空间: 版本号; 商店有新版本时可以点, 在设备上自更新 (internal/space/selfupdate.go)
                 Kit.SRow {
                     Layout.fillWidth: true
                     ui: space.fs
                     iconSource: space.kitDir + "/icons/squares-four.svg"
                     text: space.st("about")
-                    detail: "V1.0　Copyright © 2026 Boangs"
-                    interactive: false
+                    detail: space.updDetail()
+                    interactive: space.updCanStart()
+                    onClicked: space.askUpdate()
                 }
                 // 关于空间下面: 作者的小红书二维码, 居中, 文字在下面
                 Column {

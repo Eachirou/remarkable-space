@@ -70,5 +70,12 @@
   "confirm_delete_note": "App data is kept — it'll still be there if you reinstall.",
   "install_failed_code": "Install failed ({code})",
   "about_xhs": "Scan to find me on Xiaohongshu (RED)",
-  "about_xhs_id": "RED ID: boangs"
+  "about_xhs_id": "RED ID: boangs",
+  "upd_available": "{cur}　Version {ver} is available, tap to update",
+  "upd_downloading": "Downloading the new version {pct}%",
+  "upd_installing": "Installing the new version",
+  "upd_restarting": "Restarting the backend. Close and reopen Space when it's done",
+  "upd_confirm": "Update Space to {ver} (about {mb} MB)?\nYour apps and data stay as they are.",
+  "upd_failed": "Update failed: {err}",
+  "upd_rolled_back": "The new version didn't start, so Space went back to the previous one"
 }

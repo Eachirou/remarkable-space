@@ -117,6 +117,8 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /space/device", h.device)
 	mux.HandleFunc("GET /space/recent", h.recent)
 	mux.HandleFunc("GET /space/hooks/disabled", h.hooksDisabled)
+	mux.HandleFunc("GET /space/update", h.updateStatus)
+	mux.HandleFunc("POST /space/update", h.updateStart)
 }
 
 // hooksDisabled 注入库熔断停用的挂载组件 (挂上后 xochitl 连续两次很快退出)。外壳拿它提示用户:
@@ -339,6 +341,16 @@ func (h *Handler) fetchIndexStatic() ([]byte, error) {
 }
 
 // AutoStart 拉起所有声明了 autostart 的应用后台 (upload-server 启动时调一次)。
+// afterInstall 声明了 autostart 的应用装好就拉起后台 (AI、贴纸的笔记内按钮/面板要它一直在),
+// 不等下次开机。
+func (h *Handler) afterInstall(a App) {
+	if a.Service != nil && a.Service.AutoStart && a.Error == "" {
+		if _, err := h.Sup.Start(a); err != nil {
+			log.Printf("space: %s 装好后拉起后台失败: %v", a.ID, err)
+		}
+	}
+}
+
 func (h *Handler) AutoStart() {
 	for _, a := range h.Reg.List() {
 		if a.Service != nil && a.Service.AutoStart && a.Error == "" {
@@ -367,16 +379,17 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	tzName, tzOffset := h.localTimezone()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"shell":      ShellVersion,
-		"arch":       h.Reg.Arch,
-		"userDir":    h.Reg.UserDir,
-		"apps":       apps,
-		"timezone":   tzName,
-		"tzOffset":   tzOffset, // 分钟, 东八区 = 480; 设备系统时区是 UTC, 外壳用它显示本地时间
-		"dev":        devMode(h.Reg.UserDir),
-		"lang":       lang,         // 唯一的语言结果, 外壳直接用
-		"langPref":   h.LangPref(), // 用户显式选的; 空 = 跟随系统
-		"langSystem": SystemLang(), // xochitl 正在用的界面语言; 非空时外壳跟它走, 隐藏语言设置
+		"shell":        ShellVersion,
+		"arch":         h.Reg.Arch,
+		"userDir":      h.Reg.UserDir,
+		"apps":         apps,
+		"timezone":     tzName,
+		"tzOffset":     tzOffset, // 分钟, 东八区 = 480; 设备系统时区是 UTC, 外壳用它显示本地时间
+		"dev":          devMode(h.Reg.UserDir),
+		"lang":         lang, // 唯一的语言结果, 外壳直接用
+		"spaceVersion": h.SpaceVersion(),
+		"langPref":     h.LangPref(), // 用户显式选的; 空 = 跟随系统
+		"langSystem":   SystemLang(), // xochitl 正在用的界面语言; 非空时外壳跟它走, 隐藏语言设置
 	})
 }
 
@@ -418,6 +431,7 @@ func (h *Handler) installUpload(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	h.afterInstall(app)
 	writeJSON(w, http.StatusOK, app)
 }
 
@@ -450,6 +464,9 @@ func (h *Handler) installURL(w http.ResponseWriter, r *http.Request) {
 			}
 			p.Phase, p.ID, p.Name = "done", app.ID, app.Name
 		})
+		if err == nil {
+			h.afterInstall(app)
+		}
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
 }

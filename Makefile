@@ -13,7 +13,7 @@ $(info === 没有 STORE_KEY: 这版取不到官方商店索引 (服务端会 404
 endif
 GO_FLAGS  := -trimpath -ldflags "-s -w -X '$(KEY_PKG).storeKey=$(STORE_KEY)'"
 
-.PHONY: all aarch64 armv7 vet clean
+.PHONY: all aarch64 armv7 vet clean update-zip
 all: aarch64 armv7
 
 aarch64:
@@ -27,3 +27,17 @@ vet:
 
 clean:
 	rm -f dist/space-server-*
+
+# 设备上自更新用的包 (设置 → 关于空间): 两个架构的后台 + 外壳 + 组件 + 内置应用 + 挂载组件 + 静态页。
+# 不含底座和 systemd 单元 —— 那些只走助手。商店按设备给它签 .integrity (索引里 sealed)。
+#   make update-zip VERSION=v1.1.0 NOTES="..." NOTES_EN="..."
+# testers 只在首次进商店索引时生效 (先给内测名单), 全量开放 = 删掉线上索引里这一项的 testers。
+# 产物 dist/space-<版本>.zip, 拷进应用仓库 dist/ 后 ./pack.sh --index upload 并入商店索引 (id = space)。
+VERSION ?= $(shell git describe --tags --always 2>/dev/null)
+update-zip: aarch64 armv7
+	rm -rf dist/update && mkdir -p dist/update/bin
+	cp dist/space-server-aarch64 dist/space-server-armv7 dist/update/bin/
+	cp -R shell kit apps hooks static dist/update/
+	python3 -c 'import json,os;json.dump({"id":"space","name":"空间","name_en":"Space","version":"$(VERSION)","kind":"space","min_shell":3,"category":"system","testers":True,"notes":os.environ.get("NOTES",""),"notes_en":os.environ.get("NOTES_EN","")},open("dist/update/manifest.json","w"),ensure_ascii=False,indent=2)'
+	rm -f dist/space-$(VERSION).zip && cd dist/update && zip -q -X -r ../space-$(VERSION).zip . -x '*.DS_Store'
+	@ls -l dist/space-$(VERSION).zip

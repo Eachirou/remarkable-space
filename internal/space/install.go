@@ -124,15 +124,20 @@ func setProgress(f func(*Progress)) {
 
 // countingReader 边读边记字节数, 供进度查询。
 type countingReader struct {
-	r io.Reader
-	n int64
+	r  io.Reader
+	n  int64
+	on func(int64)
 }
 
 func (c *countingReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	if n > 0 {
 		c.n += int64(n)
-		setProgress(func(p *Progress) { p.Got = c.n })
+		if c.on != nil {
+			c.on(c.n)
+		} else {
+			setProgress(func(p *Progress) { p.Got = c.n }) // 应用本体下载 (payload.go) 走应用安装的进度
+		}
 	}
 	return n, err
 }
@@ -141,43 +146,19 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // 应用包和索引归同一道门管: 只挡索引是漏的, 链接一旦被记下来 (旧版索引、抓包),
 // 不带凭证照样能一直下。
 func (r *Registry) InstallFromURL(url, sha256hex string, hdr http.Header, sup *Supervisor) (App, error) {
-	client := &http.Client{Timeout: 5 * time.Minute}
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return App{}, fmt.Errorf("下载失败: 地址无效: %w", err)
-	}
-	for k, vs := range hdr {
-		for _, v := range vs {
-			req.Header.Add(k, v)
-		}
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return App{}, fmt.Errorf("下载失败: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return App{}, fmt.Errorf("下载失败: HTTP %d", resp.StatusCode)
-	}
-	setProgress(func(p *Progress) { p.Total = resp.ContentLength; p.Phase = "downloading" })
 	tmp, err := os.CreateTemp("", "space-app-*.zip")
 	if err != nil {
 		return App{}, err
 	}
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
-	h := sha256.New()
-	cr := &countingReader{r: io.LimitReader(resp.Body, maxAppBytes+1)}
-	n, err := io.Copy(io.MultiWriter(tmp, h), cr)
-	if err != nil {
-		return App{}, fmt.Errorf("下载失败: %w", err)
+	setProgress(func(p *Progress) { p.Phase = "downloading" })
+	if err := downloadPkg(url, sha256hex, hdr, tmp, maxAppBytes, func(got, total int64) {
+		setProgress(func(p *Progress) { p.Got, p.Total = got, total })
+	}); err != nil {
+		return App{}, err
 	}
-	if n > maxAppBytes {
-		return App{}, errors.New("应用包超过 256MB")
-	}
-	if sha256hex != "" && !strings.EqualFold(hex.EncodeToString(h.Sum(nil)), sha256hex) {
-		return App{}, errors.New("应用包 sha256 校验不通过")
-	}
+	n, _ := tmp.Seek(0, io.SeekEnd)
 	// 下完了, 后面是校验+解包+搬模块。这几步在设备上也要一两秒 (模块包有好几 MB),
 	// 界面上得换个说法, 不然进度卡在 100% 不动会让人以为死了。
 	setProgress(func(p *Progress) { p.Phase = "installing" })
@@ -500,4 +481,42 @@ func (r *Registry) unlinkHooks(appDir string) {
 			}
 		}
 	}
+}
+
+// downloadPkg 下载应用包 / 更新包写进 f, 带取包凭证 hdr; 超过 limit 或 sha256 对不上都算失败。
+// onProgress(已下字节, 总字节) 给界面显示进度 (总字节 0 = 服务器没给 Content-Length)。
+func downloadPkg(url, sha256hex string, hdr http.Header, f *os.File, limit int64, onProgress func(int64, int64)) error {
+	client := &http.Client{Timeout: 5 * time.Minute}
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("下载失败: 地址无效: %w", err)
+	}
+	for k, vs := range hdr {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("下载失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("下载失败: HTTP %d", resp.StatusCode)
+	}
+	total := resp.ContentLength
+	onProgress(0, total)
+	h := sha256.New()
+	cr := &countingReader{r: io.LimitReader(resp.Body, limit+1), on: func(n int64) { onProgress(n, total) }}
+	n, err := io.Copy(io.MultiWriter(f, h), cr)
+	if err != nil {
+		return fmt.Errorf("下载失败: %w", err)
+	}
+	if n > limit {
+		return fmt.Errorf("包超过 %dMB", limit>>20)
+	}
+	if sha256hex != "" && !strings.EqualFold(hex.EncodeToString(h.Sum(nil)), sha256hex) {
+		return errors.New("sha256 校验不通过")
+	}
+	return nil
 }
