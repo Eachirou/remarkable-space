@@ -216,6 +216,20 @@ Rectangle {
     property var apps: []
     property string listError: ""
     property var storeApps: []
+    // 商店分三栏: apps 应用 / themes 主题与贴纸包 / system 空间本体与系统补丁 (索引里的 section 字段, 由应用仓库 pack.sh 按 manifest 推出)
+    property string storeSection: "apps"
+    readonly property var storeSections: ["apps", "themes", "system"]
+    function storeSectionOf(a) {
+        if (a.section) return a.section
+        // 旧索引没有 section 时按已知字段兜底
+        if (a.kind === "space" || a.category === "system") return "system"
+        if (a.id === "stickers" || String(a.id || "").indexOf("theme-") === 0) return "themes"
+        return "apps"
+    }
+    function storeList() {
+        var sec = storeSection
+        return storeApps.filter(function (a) { return space.storeSectionOf(a) === sec })
+    }
     property var recentDoc: null      // 最近在读的文档 (/space/recent, 取自 xochitl 元数据)
     property string storeError: ""
     property bool storeLoaded: false
@@ -544,14 +558,23 @@ Rectangle {
         request("GET", baseUrl + "/space/store" + (refresh ? "?refresh=1" : ""), null, function(st, r) {
             storeLoaded = true
             if (st !== 200 || !r) { storeError = (r && r.error) ? r.error : space.st("store_unreachable", { code: st }); storeApps = []; return }
-            storeApps = (r.apps || []).filter(function (a) { return a.id !== "space" })   // 空间自己的新版本在「设置 → 关于空间」里, 不当应用列
+            storeApps = (r.apps || []).filter(function (a) { return a.id !== "space" })   // 空间自己的新版本走 /space/update, 在「系统补丁」栏置顶单独画
         })
     }
 
     // 比版本号: 按数字逐段比 ("1.6.13" > "1.2.0"), a 比 b 新返回正数。
     // 商店只在线上版本比本机新时才给「更新」—— 只比相不相等的话, 本机装了更新的
     // (开发版 / 直装) 也会显示「更新」, 一点就降级回旧版。
+    // 带 "-" 预发布后缀的低于同号正式版 (和后端 VersionCmp 一致), 不然装了 v1.1.0-beta.2 的机器看不到 v1.1.0。
     function versionCmp(a, b) {
+        var pa = String(a || "").split("-"), pb = String(b || "").split("-")
+        var d = numCmp(pa[0], pb[0])
+        if (d !== 0) return d
+        if (pa.length === 1 && pb.length > 1) return 1
+        if (pa.length > 1 && pb.length === 1) return -1
+        return numCmp(pa.slice(1).join("-"), pb.slice(1).join("-"))
+    }
+    function numCmp(a, b) {
         var x = String(a || "").match(/\d+/g) || [], y = String(b || "").match(/\d+/g) || []
         for (var i = 0; i < Math.max(x.length, y.length); i++) {
             var d = (parseInt(x[i] || "0", 10)) - (parseInt(y[i] || "0", 10))
@@ -1013,10 +1036,10 @@ Rectangle {
     Timer { id: libRetry; repeat: false; onTriggered: space.libPoll() }
     onTabChanged: {
         if (tab === "discover" && !storeLoaded) loadStore(false)
-        if (tab === "settings") loadUpdate(false)
+        if (tab === "discover" || tab === "settings") loadUpdate(false)
     }
 
-    // ─── 空间自更新 (设置 → 关于空间) ───────────────────────────────────
+    // ─── 空间自更新 (商店 → 系统补丁 置顶一行; 设置 → 关于空间 只显示版本号) ───────
     // 后台 GET /space/update 给 当前版本 / 商店里的新版本 / 进行中的阶段; POST 开始。
     // 更新到最后后台会重启, 中间几秒请求失败是正常的, 轮询接着等。
     property var upd: null
@@ -1035,17 +1058,29 @@ Rectangle {
     function updCanStart() {
         return !!(upd && upd.available && (!upd.state || upd.state.phase === "" || upd.state.phase === "error"))
     }
-    function updDetail() {
-        var cur = (upd && upd.current) ? upd.current : ""
-        var head = (cur ? cur : "") + "\u3000Copyright \u00a9 2026 Boangs"
-        if (!upd) return head
-        var stt = upd.state || {}
+    // \u8fdb\u884c\u4e2d\u7684\u9636\u6bb5\u6587\u5b57; \u7a7a\u95f2\u8fd4\u56de ""
+    function updPhaseText() {
+        var stt = (upd && upd.state) ? upd.state : {}
         if (stt.phase === "downloading") return space.st("upd_downloading", { pct: stt.total > 0 ? Math.floor(stt.got * 100 / stt.total) : 0 })
         if (stt.phase === "verifying" || stt.phase === "testing" || stt.phase === "switching") return space.st("upd_installing")
         if (stt.phase === "restarting") return space.st("upd_restarting")
-        if (upd.available) return space.st("upd_available", { cur: cur, ver: upd.latest })
-        return head
+        return ""
     }
+    // \u5173\u4e8e\u7a7a\u95f4: \u6c38\u8fdc\u5148\u7ed9\u5f53\u524d\u7248\u672c\u53f7; \u6709\u65b0\u7248\u672c\u65f6\u63d0\u793a\u53bb\u5546\u5e97, \u5426\u5219\u8ddf\u7248\u6743
+    function updDetail() {
+        var cur = (upd && upd.current) ? upd.current : ""
+        if (upd && upd.available) return cur + "\u3000" + space.st("about_new", { ver: upd.latest })
+        return cur + "\u3000Copyright \u00a9 2026 Boangs"
+    }
+    // \u5546\u5e97\u300c\u7cfb\u7edf\u8865\u4e01\u300d\u680f\u7a7a\u95f4\u90a3\u4e00\u884c\u7684\u526f\u6587
+    function updRowDetail() {
+        var cur = (upd && upd.current) ? upd.current : ""
+        var ph = updPhaseText()
+        if (ph) return ph
+        if (upd && upd.available) return space.st("upd_row_available", { cur: cur, ver: upd.latest })
+        return space.st("upd_row_latest", { cur: cur })
+    }
+    function gotoSystemUpdates() { storeSection = "system"; tab = "discover" }
     function askUpdate() {
         if (!updCanStart()) return
         var notes = (space.lang === "zh-CN" ? upd.notes : (upd.notes_en || upd.notes)) || ""
@@ -1528,6 +1563,76 @@ Rectangle {
                         Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("hero_tagline_2"); font.pixelSize: space.fpx(24); color: space.th.textBody }
                     }
                 }
+                // 分栏: 应用 / 主题 / 系统补丁
+                Item {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: space.vpx(76)
+                    Layout.bottomMargin: space.vpx(8)
+                    Row {
+                        anchors.fill: parent
+                        Repeater {
+                            model: space.storeSections
+                            delegate: Item {
+                                id: secItem
+                                required property string modelData
+                                readonly property bool active: space.storeSection === modelData
+                                width: parent.width / space.storeSections.length
+                                height: parent.height
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: space.st("store_sec_" + secItem.modelData)
+                                    font.pixelSize: space.fpx(26)
+                                    font.weight: secItem.active ? Font.Medium : Font.Normal
+                                    color: secItem.active ? space.th.text : space.th.text3
+                                }
+                                Rectangle {
+                                    anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
+                                    width: parent.width - space.px(24); height: 3
+                                    color: secItem.active ? space.th.text : "transparent"
+                                }
+                                MouseArea { anchors.fill: parent; onClicked: space.storeSection = secItem.modelData }
+                            }
+                        }
+                    }
+                    Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: space.th.lineSoft }
+                }
+                // 系统补丁栏置顶: 空间本体 (数据来自 /space/update, 不在商店列表里)
+                Item {
+                    visible: space.storeSection === "system" && !!space.upd
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: space.vpx(120)
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: space.px(20)
+                        Rectangle {
+                            Layout.preferredWidth: space.fpx(72); Layout.preferredHeight: space.fpx(72); radius: space.th.radius
+                            color: space.th.fill
+                            Image {
+                                anchors.centerIn: parent
+                                width: space.fpx(40); height: width
+                                source: space.icon("squares-four")
+                                sourceSize.width: width; sourceSize.height: width
+                            }
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+                            Text { text: space.st("tab_home"); font.pixelSize: space.fpx(28); elide: Text.ElideRight; Layout.fillWidth: true }
+                            Text { text: space.updRowDetail(); font.pixelSize: space.fpx(22); color: space.th.text3; elide: Text.ElideRight; Layout.fillWidth: true }
+                        }
+                        Kit.SButton {
+                            th: space.th
+                            ui: space.fs
+                            readonly property bool busy: space.updPhaseText() !== ""
+                            enabled: space.updCanStart()
+                            primary: !!(space.upd && space.upd.available)
+                            text: busy ? space.st("act_updating")
+                                  : ((space.upd && space.upd.available) ? space.st("act_update") : space.st("act_installed"))
+                            onClicked: space.askUpdate()
+                        }
+                    }
+                    Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: space.th.lineSoft }
+                }
                 Text {
                     visible: !space.storeLoaded
                     text: space.st("store_loading")
@@ -1540,12 +1645,13 @@ Rectangle {
                     font.pixelSize: space.fpx(24); color: space.th.textBody; wrapMode: Text.WordWrap
                 }
                 Text {
-                    visible: space.storeLoaded && space.storeError === "" && space.storeApps.length === 0
-                    text: space.st("store_empty")
+                    visible: space.storeLoaded && space.storeError === "" && space.storeList().length === 0
+                    Layout.topMargin: space.vpx(16)
+                    text: space.st("store_empty_" + space.storeSection)
                     font.pixelSize: space.fpx(24); color: space.th.textBody
                 }
                 Repeater {
-                    model: space.storeApps
+                    model: space.storeList()
                     delegate: Item {
                         id: storeRow
                         required property var modelData
@@ -1748,7 +1854,7 @@ Rectangle {
                         MouseArea { id: tzMouse; anchors.fill: parent; onClicked: space.chooseTimezone(modelData.name) }
                     }
                 }
-                // 关于空间: 版本号; 商店有新版本时可以点, 在设备上自更新 (internal/space/selfupdate.go)
+                // 关于空间: 只显示版本号 (当前 + 商店里的最新); 更新本身在商店「系统补丁」栏, 有新版本时点这行跳过去
                 Kit.SRow {
                     th: space.th
                     Layout.fillWidth: true
@@ -1756,8 +1862,8 @@ Rectangle {
                     iconSource: space.icon("squares-four")
                     text: space.st("about")
                     detail: space.updDetail()
-                    interactive: space.updCanStart()
-                    onClicked: space.askUpdate()
+                    interactive: !!(space.upd && space.upd.available)
+                    onClicked: space.gotoSystemUpdates()
                 }
                 // 关于空间下面: 作者的小红书二维码, 居中, 文字在下面
                 Column {
