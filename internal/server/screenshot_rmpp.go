@@ -17,7 +17,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -38,62 +37,93 @@ func xochitlPID() (int, error) {
 	return pid, nil
 }
 
-// fbGeometry 按机型给帧缓冲几何: 可见宽高, 外加每行的真实跨距 (stride)。
-// 两台 Paper Pro 的屏不一样大, 写死一个另一台就读出错位的图 —— 算法本身通用,
-// 只有几何是机型相关的。3.28 起 /sys/class/graphics/fb0 不存在, 只能靠设备树型号认。
-//
-// Paper Pro 的 1620 在帧里补齐到 32 的倍数 = 1632, 按 1620 读会每行偏 12 像素,
-// 整幅图斜着撕开。stride 是 2026-10-04 实测出来的: 把帧按若干候选宽度切行, 算相邻
-// 行的平均差异, 1632 是 5.87 而 1620 是 20.00, 其余候选都在 14 以上。
-func fbGeometry() (visW, h, stride int) {
+// fbGeometry 按机型给帧缓冲的可见宽高。3.28 起 /sys/class/graphics/fb0 不存在, 只能靠设备树型号认。
+// 行跨距不在这里定: 同一机型不同固件会变 (Ferrari 3.27 实测 1632, 3.29 实测 1620), 写死哪个都会在
+// 另一个固件上整幅图斜着撕开或干脆找不到帧 —— 改为从 glibc 块大小反推 (见 frameStride)。
+func fbGeometry() (visW, h int) {
 	b, err := os.ReadFile("/proc/device-tree/model")
 	if err == nil {
 		switch m := string(bytes.TrimRight(b, "\x00")); {
 		case strings.Contains(m, "Chiappa"): // Paper Pro Move
-			return 960, 1696, 960
+			return 960, 1696
 		case strings.Contains(m, "Ferrari"): // Paper Pro
-			return 1620, 2160, 1632
+			return 1620, 2160
 		}
 	}
-	return 960, 1696, 960
+	return 960, 1696
+}
+
+// frameStride 由 malloc 块的大小反推行跨距: 帧是 stride×h×4 字节一次 malloc 出来的, 大块走 mmap,
+// 块大小 = 向上取整到页的 (数据 + 16 字节块头), 除以 h×4 取整就是 stride (页的零头远小于一行)。
+// 跨距只允许比可见宽多不到 64 像素 (对齐填充), 不在这个范围就不是帧。
+func frameStride(chunkLen uint64, visW, h int) (int, bool) {
+	st := int(chunkLen / uint64(h*4))
+	if st < visW || st >= visW+64 {
+		return 0, false
+	}
+	return st, true
+}
+
+// frameScore 验内容: 真正的屏幕相邻两行几乎一样 (大片空白、横向笔画), 纹理/字体图集/窗口表面
+// 的相邻行差异大。取前 240 行抽样算相邻行平均字节差, 越小越像画面; 顺带给出白像素 (0xff) 占比,
+// 几乎没有白的块 (<5%) 也不会是墨水屏画面。
+func frameScore(f *os.File, off int64, stride, rows int) (score float64, white float64, err error) {
+	buf := make([]byte, stride*4*(rows+1))
+	if _, err = io.ReadFull(io.NewSectionReader(f, off, int64(len(buf))), buf); err != nil {
+		return 0, 0, err
+	}
+	rowB := stride * 4
+	var sum, n, ff float64
+	for y := 0; y < rows; y++ {
+		a, b := buf[y*rowB:(y+1)*rowB], buf[(y+1)*rowB:(y+2)*rowB]
+		for i := 0; i < rowB; i += 7 {
+			d := int(a[i]) - int(b[i])
+			if d < 0 {
+				d = -d
+			}
+			sum += float64(d)
+			n++
+			if a[i] == 0xff {
+				ff++
+			}
+		}
+	}
+	return sum / n, ff / n, nil
 }
 
 func rmppScreenshot() (image.Image, error) {
 	if b, err := os.ReadFile("/proc/device-tree/model"); err == nil && strings.Contains(string(b), "reMarkable 2") {
 		return rm2Screenshot()
 	}
-	fbW, fbH, fbStride := fbGeometry()
-	frameSize := uint64(fbStride * fbH * 4)
+	fbW, fbH := fbGeometry()
+	frameMin := uint64(fbW * fbH * 4)
 
 	pid, err := xochitlPID()
 	if err != nil {
 		return nil, err
 	}
 
-	// 找 card0 之后大匿名映射的起始地址（~6.5MB）
 	maps, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
 	if err != nil {
 		return nil, fmt.Errorf("read maps: %w", err)
 	}
-	// 帧缓冲是 glibc 大块 malloc 出来的 mmap (大小 ≈ 一帧 + 一页), 紧跟在**某一条** card0 映射之后
-	// (card0 有几十条 rw-s 映射, 散在 maps 里, 帧缓冲通常在其中一条的下一行; xochitl 重启后实测中间也可能
-	// 先夹一块小映射)。别只看最后一条 card0 之后: 那边排的是 8 MB 线程栈和 954 宽的窗口表面 (大小也像一帧,
-	// 按它截出来是歪的, 2026-10-24 rmppm)。所以对每条 card0 向后看 6 行收候选, 按离 card0 的距离排序,
-	// 近的先试, 每个都跑帧指针搜索, 搜到合法块头的才算。尺寸上界放宽到 64 MB: 实测某次固件/旋转后是 8,146,944。
+	// 帧缓冲是 glibc 大块 malloc 出来的 mmap, 在**某一条** card0 映射之后不远处 (card0 有几十条 rw-s 映射散在
+	// maps 里; Chiappa 3.29 实测在下一行, Ferrari 3.29 实测在第 9 行, 中间夹着别的匿名映射)。每条 card0 向后
+	// 看 12 行收候选, 大小够一帧、不超过 64 MB 的都算; 真假靠块大小反推跨距 + frameScore 验内容, 不靠位置猜。
 	type cand struct {
 		start, size uint64
-		dist        int
 	}
 	var cands []cand
+	seen := map[uint64]bool{}
 	lines := strings.Split(string(maps), "\n")
 	for i, line := range lines {
 		if !strings.Contains(line, "/dev/dri/card0") {
 			continue
 		}
-		for d := 1; d <= 6 && i+d < len(lines); d++ {
+		for d := 1; d <= 12 && i+d < len(lines); d++ {
 			parts := strings.Fields(lines[i+d])
-			if len(parts) != 5 || !strings.HasPrefix(parts[1], "rw") { // 有文件名 / 保护页: 离开这一片
-				break
+			if len(parts) != 5 || !strings.HasPrefix(parts[1], "rw") { // 有文件名 / 保护页: 跳过, 继续往后看
+				continue
 			}
 			rng := strings.Split(parts[0], "-")
 			if len(rng) != 2 {
@@ -101,21 +131,15 @@ func rmppScreenshot() (image.Image, error) {
 			}
 			s, _ := strconv.ParseUint(rng[0], 16, 64)
 			e, _ := strconv.ParseUint(rng[1], 16, 64)
-			if sz := e - s; sz >= frameSize && sz < 64<<20 {
-				cands = append(cands, cand{s, sz, d})
+			if sz := e - s; sz >= frameMin && sz < 64<<20 && !seen[s] {
+				seen[s] = true
+				cands = append(cands, cand{s, sz})
 			}
 		}
 	}
 	if len(cands) == 0 {
-		return nil, fmt.Errorf("no framebuffer anonymous mapping found after card0 (需 >= %d 字节)", frameSize)
+		return nil, fmt.Errorf("no framebuffer anonymous mapping found after card0 (需 >= %d 字节)", frameMin)
 	}
-	// 同一距离里取地址高的 (原来的写法是"最后一个匹配的赢", 几个月没出过错; 低地址那些是后分配的窗口表面)
-	sort.SliceStable(cands, func(i, j int) bool {
-		if cands[i].dist != cands[j].dist {
-			return cands[i].dist < cands[j].dist
-		}
-		return cands[i].start > cands[j].start
-	})
 
 	f, err := os.Open(fmt.Sprintf("/proc/%d/mem", pid))
 	if err != nil {
@@ -123,48 +147,58 @@ func rmppScreenshot() (image.Image, error) {
 	}
 	defer f.Close()
 
-	// Ghostwriter 帧指针搜索: 沿 glibc 块头链 (+8 处的 length) 往后走, 找第一块 ≥ 一帧的
-	findFrame := func(anonStart uint64) (int64, error) {
+	// Ghostwriter 帧指针搜索: 沿 glibc 块头链 (+8 处的 length) 往后走, 找第一块 ≥ 一帧的, 连块大小一起给出
+	findFrame := func(anonStart uint64) (int64, uint64, error) {
 		var offset, length uint64 = 0, 2
 		for i := 0; i < 50; i++ {
 			offset += length - 2
-			if _, err := f.Seek(int64(anonStart+offset+8), io.SeekStart); err != nil {
-				return 0, fmt.Errorf("seek at iter %d: %w", i, err)
-			}
 			var hdr [8]byte
-			if _, err := io.ReadFull(f, hdr[:]); err != nil {
-				return 0, fmt.Errorf("read hdr at iter %d offset %d: %w", i, offset, err)
+			if _, err := f.ReadAt(hdr[:], int64(anonStart+offset+8)); err != nil {
+				return 0, 0, fmt.Errorf("read hdr at iter %d offset %d: %w", i, offset, err)
 			}
 			length = uint64(binary.LittleEndian.Uint32(hdr[:4]))
 			if length < 2 {
-				return 0, fmt.Errorf("invalid length %d at offset %d", length, offset)
+				return 0, 0, fmt.Errorf("invalid length %d at offset %d", length, offset)
 			}
-			if length >= frameSize {
-				return int64(anonStart + offset), nil
+			if length >= frameMin {
+				return int64(anonStart + offset), length, nil
 			}
 		}
-		return 0, fmt.Errorf("frame pointer not found")
+		return 0, 0, fmt.Errorf("frame pointer not found")
 	}
-	var frameOff int64
-	var lastErr error
+	var bestOff int64
+	bestStride := 0
+	bestScore := 1e9
+	var tried []string
 	for _, c := range cands {
-		off, err := findFrame(c.start)
-		if err == nil {
-			frameOff = off
-			break
+		off, length, err := findFrame(c.start)
+		if err != nil {
+			tried = append(tried, fmt.Sprintf("0x%x: %v", c.start, err))
+			continue
 		}
-		lastErr = fmt.Errorf("候选 0x%x (%d 字节): %w", c.start, c.size, err)
+		st, ok := frameStride(length, fbW, fbH)
+		if !ok {
+			tried = append(tried, fmt.Sprintf("0x%x: 块 %d 字节不像一帧", c.start, length))
+			continue
+		}
+		score, white, err := frameScore(f, off+16, st, 240)
+		if err != nil {
+			tried = append(tried, fmt.Sprintf("0x%x: %v", c.start, err))
+			continue
+		}
+		tried = append(tried, fmt.Sprintf("0x%x: stride=%d score=%.2f white=%.0f%%", c.start, st, score, white*100))
+		if white < 0.05 || score >= bestScore {
+			continue
+		}
+		bestOff, bestStride, bestScore = off, st, score
 	}
-	if frameOff == 0 {
-		return nil, fmt.Errorf("%d 个候选都不是帧缓冲, 最后一个: %v", len(cands), lastErr)
+	if bestStride == 0 {
+		return nil, fmt.Errorf("%d 个候选都不是帧缓冲: %s", len(cands), strings.Join(tried, "; "))
 	}
 
-	// 读帧缓冲
-	if _, err := f.Seek(frameOff, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("seek frame: %w", err)
-	}
-	buf := make([]byte, fbStride*fbH*4)
-	if _, err := io.ReadFull(f, buf); err != nil {
+	// 读帧缓冲 (跳过 16 字节块头)
+	buf := make([]byte, bestStride*fbH*4)
+	if _, err := f.ReadAt(buf, bestOff+16); err != nil && err != io.EOF {
 		return nil, fmt.Errorf("read frame: %w", err)
 	}
 
@@ -172,7 +206,7 @@ func rmppScreenshot() (image.Image, error) {
 	img := image.NewNRGBA(image.Rect(0, 0, fbW, fbH))
 	for y := 0; y < fbH; y++ {
 		for x := 0; x < fbW; x++ {
-			off := (y*fbStride + x) * 4
+			off := (y*bestStride + x) * 4
 			img.SetNRGBA(x, y, color.NRGBA{
 				R: buf[off], G: buf[off+1], B: buf[off+2], A: buf[off+3],
 			})
