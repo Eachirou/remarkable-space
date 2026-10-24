@@ -74,19 +74,23 @@ func rmppScreenshot() (image.Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read maps: %w", err)
 	}
+	// 帧缓冲在最后一块 card0 映射之后的匿名映射里。通常紧挨着, 但 xochitl 重启后实测中间
+	// 会先夹一块 1.6 MB 的小匿名映射 (2026-10-24 rmppm), 所以往后看几块, 取第一块放得下一帧的;
+	// 碰到有文件名的映射就停 (已经离开 card0 那一片了)。
+	// 尺寸窗口原本写死 6MB~8MB, 实测某次固件/旋转后这块映射变成 8,146,944 字节, 刚好卡在
+	// 窗口外 → 找不到帧缓冲 → AI 截图降级成纯文字。尺寸只需保证放得下一帧, 上界放宽即可。
 	var anonStart uint64
 	lines := strings.Split(string(maps), "\n")
+	last := -1
 	for i, line := range lines {
-		if !strings.Contains(line, "/dev/dri/card0") {
-			continue
+		if strings.Contains(line, "/dev/dri/card0") {
+			last = i
 		}
-		if i+1 >= len(lines) {
-			continue
-		}
-		next := lines[i+1]
-		parts := strings.Fields(next)
+	}
+	for i := last + 1; last >= 0 && i < len(lines) && i <= last+6; i++ {
+		parts := strings.Fields(lines[i])
 		if len(parts) != 5 { // 匿名映射没有 pathname 字段
-			continue
+			break
 		}
 		rng := strings.Split(parts[0], "-")
 		if len(rng) != 2 {
@@ -94,12 +98,9 @@ func rmppScreenshot() (image.Image, error) {
 		}
 		s, _ := strconv.ParseUint(rng[0], 16, 64)
 		e, _ := strconv.ParseUint(rng[1], 16, 64)
-		// 尺寸窗口原本写死 6MB~8MB, 实测某次固件/旋转后这块映射变成 8,146,944
-		// 字节, 刚好卡在窗口外 → 找不到帧缓冲 → 截图降级成纯文字 prompt, 于是
-		// AI 一本正经地解释起帧缓冲报错。定位真正靠的是"紧邻 card0 的匿名映射"
-		// (实测全局唯一), 尺寸只需保证放得下一帧, 上界放宽即可。
 		if sz := e - s; sz >= frameSize && sz < 64<<20 {
 			anonStart = s
+			break
 		}
 	}
 	if anonStart == 0 {
