@@ -29,7 +29,7 @@ Rectangle {
 
     // 2: 文件库桥 (/space/library/*: 热导入、建文件夹/笔记本, 外壳调 requestLoadEntry)。
     //    用到它的应用 (如手写画布 lib/ink) 在 manifest 里写 min_shell: 2
-    readonly property int shellVersion: 2
+    readonly property int shellVersion: 3
     readonly property string kitDir: "file:///home/root/rmkit-cn/space/kit"
     property string baseUrl: "http://127.0.0.1:8080"
     // ─── 尺寸基准: 不写死任何机型 ───
@@ -592,7 +592,8 @@ Rectangle {
 
     function filterApps(pred) {
         var out = []
-        for (var i = 0; i < apps.length; i++) if (pred(apps[i])) out.push(apps[i])
+        // 贴纸包只是走商店装的内容, 不是应用, 哪儿都不列
+        for (var i = 0; i < apps.length; i++) if (!apps[i].stickers && pred(apps[i])) out.push(apps[i])
         return out
     }
     // 应用有没有首页小组件 —— 明文发布看 widgetUrl, 编译发布看 module.widget。

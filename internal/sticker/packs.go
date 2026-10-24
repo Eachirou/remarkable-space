@@ -49,7 +49,11 @@ func List(dir string) ([]Pack, error) {
 	var packs []Pack
 	var sorts []int
 	for _, e := range ents {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		// 商店装的包是指向应用目录的链接, 跟过去看是不是目录 (断了的链接跳过)
+		if st, err := os.Stat(filepath.Join(dir, e.Name())); err != nil || !st.IsDir() {
 			continue
 		}
 		p := Pack{ID: e.Name(), Name: e.Name()}

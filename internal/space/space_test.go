@@ -252,3 +252,38 @@ func TestInstallFetchURLAndDigest(t *testing.T) {
 		})
 	}
 }
+
+func TestInstallStickerPacks(t *testing.T) {
+	tmp := t.TempDir()
+	r := &Registry{BuiltinDir: filepath.Join(tmp, "b"), UserDir: filepath.Join(tmp, "space", "apps"), DataDir: filepath.Join(tmp, "d"), Arch: "aarch64"}
+	sd := r.StickerDir()
+	// 自带的明文包 hand 不能被覆盖; 旧的专属包 nature (带 .seal) 要被换成链接
+	writeApp(t, sd, "hand", `{}`)
+	_ = os.MkdirAll(filepath.Join(sd, "nature"), 0o755)
+	_ = os.WriteFile(filepath.Join(sd, "nature", ".seal"), []byte("{}"), 0o644)
+
+	zr := makeZip(t, map[string]string{
+		"manifest.json":              `{"id":"stickers","name":"贴纸","version":"1.0","stickers":"packs"}`,
+		"packs/nature/pack.json":     `{}`,
+		"packs/nature/flower.rm.enc": "x",
+		"packs/hand/pack.json":       `{}`,
+	})
+	if _, err := r.InstallZip(zr, nil, nil); err != nil {
+		t.Fatalf("安装失败: %v", err)
+	}
+	if t2, err := os.Readlink(filepath.Join(sd, "nature")); err != nil || t2 != filepath.Join(r.UserDir, "stickers", "packs", "nature") {
+		t.Errorf("nature 应链到应用目录: %q %v", t2, err)
+	}
+	if _, err := os.Readlink(filepath.Join(sd, "hand")); err == nil {
+		t.Error("自带的 hand 不该被换成链接")
+	}
+	if err := r.Uninstall("stickers", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(sd, "nature")); err == nil {
+		t.Error("卸载后链接应删掉")
+	}
+	if _, err := os.Stat(filepath.Join(sd, "hand", "manifest.json")); err != nil {
+		t.Error("卸载不该动自带包")
+	}
+}

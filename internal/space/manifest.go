@@ -22,7 +22,8 @@ import (
 //
 //	1: 初版
 //	2: 文件库桥 /space/library/* (热导入、建文件夹/笔记本); 手写画布 (应用仓库 lib/ink) 要它
-const ShellVersion = 2
+//	3: 贴纸包 (manifest.stickers); 取商店索引时带 X-Space-Shell, 商店不给旧外壳列它装不了的条目
+const ShellVersion = 3
 
 // ManifestName 是应用目录里清单文件的固定名字。
 const ManifestName = "manifest.json"
@@ -79,6 +80,9 @@ type Manifest struct {
 	Launch      *Launch  `json:"launch,omitempty"`
 	Module      *Module  `json:"module,omitempty"`  // 编译发布: 与 entry/widget 二选一
 	Install     *Install `json:"install,omitempty"` // 装完应用包之后还要装的"本体"
+	// Stickers 贴纸包: 应用目录里放贴纸包的子目录 (下面每个子目录是一个包)。这种条目只为了走
+	// 商店的下载/升级/删除, 不出现在应用格子里; 装好后由安装器把包挂进贴纸目录。
+	Stickers string `json:"stickers,omitempty"`
 }
 
 // Install 描述"应用包之外还得装点别的"。
@@ -128,8 +132,11 @@ func (m *Manifest) Validate() error {
 	if strings.TrimSpace(m.Version) == "" {
 		return errors.New("version 不能为空")
 	}
-	if m.Entry == "" && m.Launch == nil && m.Module == nil {
-		return errors.New("entry (界面 QML)、module (编译模块) 与 launch (外部启动) 至少要有一个")
+	if m.Stickers != "" && !isRelativeInside(m.Stickers) {
+		return fmt.Errorf("stickers 必须是应用目录内的相对路径: %q", m.Stickers)
+	}
+	if m.Entry == "" && m.Launch == nil && m.Module == nil && m.Stickers == "" {
+		return errors.New("entry (界面 QML)、module (编译模块)、launch (外部启动) 与 stickers (贴纸包) 至少要有一个")
 	}
 	if m.Module != nil {
 		if !moduleURIRe.MatchString(m.Module.URI) {

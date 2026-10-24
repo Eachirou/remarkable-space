@@ -65,6 +65,12 @@ func (r *Registry) InstallZip(zr *zip.Reader, hdr http.Header, sup *Supervisor) 
 			_ = os.RemoveAll(filepath.Join(r.ModuleDir, name))
 		}
 	}
+	if m.Stickers != "" {
+		if err := r.linkStickers(final, m); err != nil {
+			_ = os.RemoveAll(final)
+			return App{}, err
+		}
+	}
 	// 本体 (别人发布的那部分) 放最后装: 它要下几十 MB 又要跑脚本, 失败率比前面高,
 	// 而应用目录这时已经完整 —— 用户至少能看到这个应用、能再点一次重装。
 	if err := r.runInstall(final, m, hdr); err != nil {
@@ -200,6 +206,7 @@ func (r *Registry) Uninstall(id string, sup *Supervisor) error {
 		// 本体 (装在应用目录之外的那部分) 得趁脚本还在的时候收掉
 		r.runUninstall(dir, m)
 	}
+	r.unlinkStickers(dir)
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
@@ -392,4 +399,52 @@ func staleModuleNames(appDir, id string) []string {
 		out = append(out, strings.ToUpper(id[:1])+id[1:])
 	}
 	return out
+}
+
+// StickerDir 贴纸目录 (和应用目录同级): 空间自带的包是真目录, 商店装的包是指向应用目录的链接。
+func (r *Registry) StickerDir() string { return filepath.Join(filepath.Dir(r.UserDir), "stickers") }
+
+// linkStickers 把贴纸包应用里的每个包挂进贴纸目录。同名的旧包是链接或商店专属包 (带 .seal) 才替换,
+// 空间自带的明文包不动 —— 商店的包不该覆盖掉随空间发的那份。
+func (r *Registry) linkStickers(appDir string, m *Manifest) error {
+	src := filepath.Join(appDir, m.Stickers)
+	ents, err := os.ReadDir(src)
+	if err != nil {
+		return fmt.Errorf("贴纸包里缺 %s/: %w", m.Stickers, err)
+	}
+	root := r.StickerDir()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	for _, e := range ents {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		dst := filepath.Join(root, e.Name())
+		if st, err := os.Lstat(dst); err == nil {
+			if st.Mode()&os.ModeSymlink != 0 {
+				_ = os.Remove(dst)
+			} else if _, err := os.Stat(filepath.Join(dst, ".seal")); err == nil {
+				_ = os.RemoveAll(dst)
+			} else {
+				continue
+			}
+		}
+		if err := os.Symlink(filepath.Join(src, e.Name()), dst); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// unlinkStickers 删掉贴纸目录里指向 appDir 的链接 (卸载贴纸包应用时)
+func (r *Registry) unlinkStickers(appDir string) {
+	root := r.StickerDir()
+	ents, _ := os.ReadDir(root)
+	for _, e := range ents {
+		p := filepath.Join(root, e.Name())
+		if t, err := os.Readlink(p); err == nil && strings.HasPrefix(t, appDir+string(filepath.Separator)) {
+			_ = os.Remove(p)
+		}
+	}
 }

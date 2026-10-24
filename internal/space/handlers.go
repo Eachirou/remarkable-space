@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -259,6 +260,7 @@ func (h *Handler) getIndexWithTicket() ([]byte, error) {
 		return nil, fmt.Errorf("商店地址无效: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+ticket)
+	req.Header.Set("X-Space-Shell", strconv.Itoa(ShellVersion))
 	if h.StoreKey != "" {
 		req.Header.Set("X-Space-Key", h.StoreKey)
 	}
