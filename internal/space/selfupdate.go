@@ -403,7 +403,20 @@ func (h *Handler) AutoInstallDefaults() {
 			if locked, _ := e["locked"].(bool); locked || url == "" {
 				continue
 			}
+			// 跟商店页的安装共用一份进度: 先占住 (商店页这时点获取会看到在装什么),
+			// 装完一定要放开 —— 停在 installing 的话之后商店页每次点获取都被当成"正在安装"拒掉
+			if p := InstallProgress(); p.Phase == "downloading" || p.Phase == "installing" {
+				continue // 用户正在商店里装别的, 下次开机再补
+			}
+			setProgress(func(p *Progress) { *p = Progress{ID: id, Name: id, Phase: "downloading"} })
 			app, err := h.Reg.InstallFromURL(url, sha, h.downloadHeader(), h.Sup)
+			setProgress(func(p *Progress) {
+				if err != nil {
+					p.Phase, p.Error = "error", err.Error()
+				} else {
+					p.Phase, p.ID, p.Name = "done", app.ID, app.Name
+				}
+			})
 			if err != nil {
 				log.Printf("space: 补装 %s 失败: %v", id, err)
 				continue
