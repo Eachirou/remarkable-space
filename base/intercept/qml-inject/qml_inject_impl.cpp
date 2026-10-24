@@ -1155,7 +1155,8 @@ static void doInject(QQmlEngine *engine) {
             "        r = p;\n"
             "        if (('' + p).indexOf('MainView') === 0) { host = p; break; }\n"
             "      }\n"
-            "      var c = ") + (devMode ? QByteArray("Qt.createComponent(\"") + panelUrl + (panelUrl.contains('?') ? "&" : "?") + "t=\" + Date.now())"
+            // 开发模式也读 panelUrl 属性 (每轮按真实路径刷新), 别用注入时定死的地址 —— 自更新切了版本目录它就旧了
+            "      var c = ") + (devMode ? QByteArray("Qt.createComponent(advItem.panelUrl + (advItem.panelUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now())")
                                         : QByteArray("advItem.panelComp")) + QByteArray(";\n"
             "      var triedPrev = false;\n"
             "      var mk = function() {\n"
