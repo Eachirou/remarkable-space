@@ -671,10 +671,12 @@ Rectangle {
         return filterApps(function(a) { return space.hasWidget(a) && a.widget_size !== "hero" && !a.error })
     }
     // space.st("app_fallback_name") = 非设置类 (设置类只出现在space.st("tab_settings")标签)
-    function isSetting(a) { return a.category === "settings" || a.category === "system" }
-    function userApps() { return filterApps(function(a) { return !isSetting(a) }) }
+    // 系统补丁 (category=system) 哪里都不列: 状态只在「商店 → 系统补丁」里看, 装过的点那一行打开
+    function isSetting(a) { return a.category === "settings" }
+    function isSystem(a) { return a.category === "system" }
+    function userApps() { return filterApps(function(a) { return !isSetting(a) && !isSystem(a) }) }
     function homeApps() {
-        var l = filterApps(function(a) { return !a.error && !isSetting(a) })
+        var l = filterApps(function(a) { return !a.error && !isSetting(a) && !isSystem(a) })
         var n = homeGrid.columns * 2   // 首页只放两行, 其余在space.st("app_fallback_name")页
         return l.length > n ? l.slice(0, n) : l
     }
@@ -692,6 +694,11 @@ Rectangle {
     function openById(id) {
         for (var i = 0; i < apps.length; i++) if (apps[i].id === id) { open(apps[i]); return }
         showToast(space.st("not_installed", { id: id }))
+    }
+    // 商店「系统补丁」栏: 装过且带状态页的补丁, 点那一行打开 (它不在设置列表里)
+    function installedWithUi(id) {
+        for (var i = 0; i < apps.length; i++) if (apps[i].id === id) return space.hasUi(apps[i]) ? apps[i] : null
+        return null
     }
 
     function open(app) {
@@ -1656,8 +1663,16 @@ Rectangle {
                         id: storeRow
                         required property var modelData
                         readonly property string installed: space.installedVersion(modelData.id)
+                        readonly property var openable: space.storeSection === "system" ? space.installedWithUi(modelData.id) : null
                         Layout.fillWidth: true
                         Layout.preferredHeight: space.vpx(120)
+                        Rectangle { anchors.fill: parent; color: rowMouse.pressed ? space.th.press : "transparent" }
+                        MouseArea {
+                            id: rowMouse
+                            anchors.fill: parent
+                            enabled: storeRow.openable !== null
+                            onClicked: space.open(storeRow.openable)
+                        }
                         RowLayout {
                             anchors.fill: parent
                             spacing: space.px(20)
