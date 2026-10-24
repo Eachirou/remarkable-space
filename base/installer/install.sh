@@ -224,7 +224,8 @@ fi
 #   - 用 xovi-reenable.service 在 home.mount 后 restart xochitl
 # aarch64 (RMPP/RMPPM):
 #   - /etc 是 overlay, 需要 bind-mount 双写
-#   - /home 是 LUKS 加密, After=home.mount 安全且必要
+#   - /home 是 LUKS 加密, 但 xochitl **不能** After=home.mount (原厂 JobTimeoutSec=60s 会砖),
+#     只在 ExecStartPre 里有上限地等, 再由 rmkit-cn-reenable.service 兜底
 case "$ARCH" in
   armv7l)
     # rm2: fstab 让 /home 在 xochitl.service 之后挂载 (x-systemd.after=xochitl.service)。
@@ -236,12 +237,17 @@ case "$ARCH" in
     ZZ_UNIT_HEADER="[Unit]"
     ;;
   aarch64)
-    # rmpp/rmppm: 有 home.mount unit, After 让 xochitl 等 /home 挂好再启动。
-    # ConditionPathExists 此时安全可用 (xovi 未装时不加 LD_PRELOAD 防砖)
+    # rmpp/rmppm: **绝不能** After=home.mount / ConditionPathExists=/home/...
+    # 原厂 xochitl-service-override.conf 给 xochitl 设了 JobTimeoutSec=60s + OnFailure=emergency.target:
+    # start job 在队列里等 /home 超过 60 s 就超时 → emergency → reboot → 三次切槽 (2026-10-24 rmpp
+    # 双槽砖, 受控复现实锤; /home 是加密盘, homecryptor 开机解锁 + 两遍 fsck, 非正常关机后轻松超 60 s)。
+    # 改为在 ExecStartPre 里有上限地等 /home (最多 25 s, 到点放行): 正常开机 /home 5 s 就好, 注入
+    # 第一次启动就生效; 极端情况 xochitl 原生启动 (链接不存在 ld.so 跳过), 由 rmkit-cn-reenable.service
+    # 在 /home 挂好后重启一次补上。循环里不用 $ 变量, 免得被 heredoc 展开。
     ZZ_UNIT_HEADER="[Unit]
-After=home.mount
-ConditionPathExists=/home/root/xovi/xovi.so
-ConditionPathExists=/home/root/rmkit-cn/bin/ime_hook.so"
+
+[Service]
+ExecStartPre=-/bin/sh -c 'for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do grep -q " /home " /proc/mounts && break; sleep 1; done; true'"
     ;;
 esac
 
@@ -737,6 +743,14 @@ for f in /tmp/rmkit-cn-systemd-staging/*.service /tmp/rmkit-cn-systemd-staging/*
       # 落空需本单元重启一次恢复。其它机型 /home 早于 xochitl, 用不上 (文件仍拷入
       # /etc 但不建 wants symlink → 不启用)。
       if [ "$(uname -m)" = "armv7l" ]; then
+        ln -sf /etc/systemd/system/$base /etc/systemd/system/multi-user.target.wants/$base
+        ln -sf /etc/systemd/system/$base /tmp/lc/etc/systemd/system/multi-user.target.wants/$base
+      fi
+      ;;
+    rmkit-cn-reenable.service)
+      # 仅 aarch64 (rmpp/rmppm) 启用: xochitl 不再等 /home, /home 晚到时它原生启动, 本单元在
+      # /home 挂好后重启一次补上注入 (见单元文件头的说明)。
+      if [ "$(uname -m)" = "aarch64" ]; then
         ln -sf /etc/systemd/system/$base /etc/systemd/system/multi-user.target.wants/$base
         ln -sf /etc/systemd/system/$base /tmp/lc/etc/systemd/system/multi-user.target.wants/$base
       fi

@@ -1,0 +1,23 @@
+[Unit]
+Description=rmkit-cn: /home 挂好后若注入没生效就重启一次 xochitl (Paper Pro / Move)
+# 为什么有这个单元 (2026-10-24 rmpp 双槽砖, 受控复现实锤):
+#   原厂 xochitl.service.d/xochitl-service-override.conf 给 xochitl 设了 JobTimeoutSec=60s +
+#   OnFailure=emergency.target。底座 drop-in 以前写 After=home.mount, 让 xochitl 的 start job
+#   在队列里等 /home; /home 是加密盘, homecryptor 每次开机要 TEE 解锁 + 两遍 fsck, 非正常关机后
+#   能超过 60 s → job 超时 → emergency → rm-emergency.sh reboot → 三次切槽, 两槽都有钩子就砖。
+#   现在 drop-in 不再等 /home (只在 ExecStartPre 里有上限地等 25 s), xochitl 按原厂时机启动;
+#   /home 来得太晚时它是原生起的 (LD_PRELOAD 指向的 /home 上的链接还不存在, ld.so 跳过),
+#   本单元在 /home 挂好后检查一次, 注入没生效就重启一次 xochitl。fail-open: 最坏只是英文, 不砖。
+#   rm2 的同款见 rmkit-cn-rm2-reenable.service (那边 /home 排在 xochitl 之后, 情况不同)。
+After=home.mount xochitl.service
+ConditionPathExists=/home/root/rmkit-cn/bin/precheck.sh
+
+[Service]
+Type=oneshot
+# 原生 xochitl 在 /home 晚到时会在挂载后几秒崩 (对照实验: 挂上 8 s 后 SIGSEGV → emergency),
+# 所以不多等, 2 秒后就检查并重启; 重启前写 .intentional_restart, precheck.sh 不把它计入 crashloop。
+# 熔断已开 (active/ 下没有 xovi.so 链接) 或注入已生效都直接退出, 绝不反复重启。
+ExecStart=/bin/sh -c 'sleep 2; [ -e /home/root/rmkit-cn/active/xovi.so ] || { echo "熔断中, 不重启"; exit 0; }; X=$(pidof xochitl); if [ -n "$X" ] && grep -q xovi.so /proc/$X/maps; then echo "注入已生效, 无需重启"; exit 0; fi; echo "注入未生效 (xochitl 早于 /home 启动), 重启 xochitl 一次"; date +%s > /home/root/rmkit-cn/.intentional_restart; systemctl restart xochitl.service'
+
+[Install]
+WantedBy=multi-user.target

@@ -53,6 +53,14 @@ for f in /tmp/rmkit-cn-systemd-staging/*.service /tmp/rmkit-cn-systemd-staging/*
         ln -sf /etc/systemd/system/$base /tmp/lc/etc/systemd/system/multi-user.target.wants/$base
       fi
       ;;
+    rmkit-cn-reenable.service)
+      # 仅 aarch64 (rmpp/rmppm) 启用: xochitl 不再等 /home, /home 晚到时它原生启动, 本单元在
+      # /home 挂好后重启一次补上注入 (见单元文件头的说明)。
+      if [ "$(uname -m)" = "aarch64" ]; then
+        ln -sf /etc/systemd/system/$base /etc/systemd/system/multi-user.target.wants/$base
+        ln -sf /etc/systemd/system/$base /tmp/lc/etc/systemd/system/multi-user.target.wants/$base
+      fi
+      ;;
   esac
 done
 # upload-server 已退役, 它的活全归 remarkable-space (同样 8080)。老设备上可能还留着
@@ -212,7 +220,7 @@ else
 fi
 sleep 5
 # 安全验证: xochitl 必须真的活着, 否则立即回退删 drop-in
-# (start-limit 锁死之前抓住 → 避免冷启动 ConditionPathExists 死锁)
+# (start-limit 锁死之前抓住)
 XPID=$(pidof xochitl 2>/dev/null)
 if [ -z "$XPID" ]; then
   say "    ✗ xochitl 没启动起来! 立即回退..." "    ✗ xochitl did not start! Rolling back..."

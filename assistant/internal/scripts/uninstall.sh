@@ -4,7 +4,7 @@ REMOTE_BASE=/home/root/rmkit-cn
     systemctl disable rmkit-cn-upload.service rmkit-cn-version.path rmkit-cn-ime-http.service 2>/dev/null || true
     # rm2 老安装还有 OTA 定时器与冷启动重启服务, 以前漏清 (2026-10-18)
     systemctl stop    rmkit-cn-ota.timer 2>/dev/null || true
-    systemctl disable rmkit-cn-ota.timer rmkit-cn-rm2-reenable.service 2>/dev/null || true
+    systemctl disable rmkit-cn-ota.timer rmkit-cn-rm2-reenable.service rmkit-cn-reenable.service 2>/dev/null || true
     # 历史 Python IME unit (现已归档到 legacy/ime-py/), 老设备上可能残留, 一并清
     systemctl stop    rmkit-cn-ime.service rmkit-cn-ime-udev.service 2>/dev/null || true
     systemctl disable rmkit-cn-ime.service rmkit-cn-ime-udev.service 2>/dev/null || true

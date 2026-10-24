@@ -134,11 +134,14 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 			return nil, errors.New(i18n.T("设备没有 xovi 且安装包不含 vendor/xovi, 无法自动部署", "the device has no xovi and the bundle has no vendor/xovi; cannot deploy automatically"))
 		}
 	}
-	// install.sh 223-241: 按架构的 drop-in [Unit] 头
+	// install.sh 的 ZZ_UNIT_HEADER: 按架构的 drop-in 头。
+	// aarch64 绝不 After=home.mount / ConditionPathExists=/home/...: 原厂 xochitl 有 JobTimeoutSec=60s +
+	// OnFailure=emergency.target, /home 晚到 (加密盘解锁 + fsck) 就 job 超时 → emergency → 三次切槽
+	// (2026-10-24 rmpp 双槽砖)。改为 ExecStartPre 有上限地等 /home 25 s, 晚到由 rmkit-cn-reenable.service 兜底。
 	if info.Arch == "armv7l" {
 		p.zzHeader = "[Unit]"
 	} else {
-		p.zzHeader = "[Unit]\nAfter=home.mount\nConditionPathExists=/home/root/xovi/xovi.so\nConditionPathExists=/home/root/rmkit-cn/bin/ime_hook.so"
+		p.zzHeader = "[Unit]\n\n[Service]\n" + `ExecStartPre=-/bin/sh -c 'for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do grep -q " /home " /proc/mounts && break; sleep 1; done; true'`
 	}
 
 	add := func(device, source string, mode int64) {

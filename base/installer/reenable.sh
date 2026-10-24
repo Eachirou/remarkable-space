@@ -9,10 +9,13 @@ echo "[reenable] 开始恢复 rmkit-cn..."
 ARCH=$(uname -m)
 echo "[reenable] 架构: $ARCH"
 
-# ─── zz-rmkit-cn.conf 内容 (按架构区分 After=home.mount) ────────
+# ─── zz-rmkit-cn.conf 内容 (按架构区分) ────────
+# aarch64 绝不 After=home.mount (原厂 xochitl JobTimeoutSec=60s + OnFailure=emergency, /home 晚到就砖,
+# 2026-10-24 实锤); 改为 ExecStartPre 有上限地等 /home 25 s, 晚到由 rmkit-cn-reenable.service 兜底。
 [ "$ARCH" = "aarch64" ] && UNIT_HEADER="[Unit]
-After=home.mount
 
+[Service]
+ExecStartPre=-/bin/sh -c 'for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do grep -q \" /home \" /proc/mounts && break; sleep 1; done; true'
 " || UNIT_HEADER=""
 
 # fail-open: LD_PRELOAD 走 active/ symlink, precheck.sh 每次启动前预检并管理 symlink

@@ -1,8 +1,9 @@
 # 紧急修复: 让设备以原厂状态启动。设备开机途中一连上就执行, 所以要快、要幂等、
 # 每一步失败都不能挡住后面的步骤 (不用 set -e)。不删用户数据, 摘下来的东西都留着备份。
 #
-# 为什么两个槽都要处理: 底座 drop-in 的 [Unit] 里有 After=home.mount, 冷启动时 /home
-# 加密盘解密慢, xochitl 被推迟, 触发 reMarkable 自带的启动看门狗 —— 重启三次后切槽。
+# 为什么两个槽都要处理: 老版底座 drop-in 的 [Unit] 里有 After=home.mount, /home 加密盘解锁慢时
+# xochitl 的 start job 撞上原厂的 JobTimeoutSec=60s → OnFailure=emergency.target → reboot, 三次后切槽
+# (2026-10-24 rmpp 实锤; 新版 drop-in 已不等 /home, 但老设备上还有旧版)。
 # 如果另一个槽也被 ota-watch 注入过同样的 drop-in, 切过去照样起不来, 设备就在两个槽之间
 # 来回转。所以 /home 里的熔断不够 (它管不到启动顺序), 必须把两个槽 rootfs 下层的
 # drop-in 都摘掉。
