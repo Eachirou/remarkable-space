@@ -65,6 +65,12 @@ func (r *Registry) InstallZip(zr *zip.Reader, hdr http.Header, sup *Supervisor) 
 			_ = os.RemoveAll(filepath.Join(r.ModuleDir, name))
 		}
 	}
+	if len(m.Hooks) > 0 {
+		if err := r.linkHooks(final, m); err != nil {
+			_ = os.RemoveAll(final)
+			return App{}, err
+		}
+	}
 	if m.Stickers != "" {
 		if err := r.linkStickers(final, m); err != nil {
 			_ = os.RemoveAll(final)
@@ -207,6 +213,7 @@ func (r *Registry) Uninstall(id string, sup *Supervisor) error {
 		r.runUninstall(dir, m)
 	}
 	r.unlinkStickers(dir)
+	r.unlinkHooks(dir)
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
@@ -445,6 +452,52 @@ func (r *Registry) unlinkStickers(appDir string) {
 		p := filepath.Join(root, e.Name())
 		if t, err := os.Readlink(p); err == nil && strings.HasPrefix(t, appDir+string(filepath.Separator)) {
 			_ = os.Remove(p)
+		}
+	}
+}
+
+// HookDir 应用挂载组件的链接目录 (注入库扫的第二个目录; 第一个是空间自带的 /home/root/rmkit-cn/space/hooks)
+func (r *Registry) HookDir() string { return filepath.Join(filepath.Dir(r.UserDir), "hooks") }
+
+// linkHooks 把应用声明的挂载组件链进 hooks/<挂点>/<应用>-<文件名>。先摘掉这个应用旧的, 再按清单建。
+func (r *Registry) linkHooks(appDir string, m *Manifest) error {
+	if !devMode(r.UserDir) {
+		if err := VerifyIntegrity(appDir, m.ID); err != nil {
+			return fmt.Errorf("「%s」要挂进笔记界面, 只能从商店安装 (%v)", m.Name, err)
+		}
+	}
+	r.unlinkHooks(appDir)
+	for pt, files := range m.Hooks {
+		dir := filepath.Join(r.HookDir(), pt)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		for _, f := range files {
+			src := filepath.Join(appDir, f)
+			if _, err := os.Stat(src); err != nil {
+				return fmt.Errorf("hooks.%s 声明的 %s 不在包里", pt, f)
+			}
+			dst := filepath.Join(dir, m.ID+"-"+filepath.Base(f))
+			_ = os.Remove(dst)
+			if err := os.Symlink(src, dst); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// unlinkHooks 摘掉 hooks/*/ 里指向 appDir 的链接
+func (r *Registry) unlinkHooks(appDir string) {
+	pts, _ := os.ReadDir(r.HookDir())
+	for _, pt := range pts {
+		dir := filepath.Join(r.HookDir(), pt.Name())
+		ents, _ := os.ReadDir(dir)
+		for _, e := range ents {
+			p := filepath.Join(dir, e.Name())
+			if t, err := os.Readlink(p); err == nil && strings.HasPrefix(t, appDir+string(filepath.Separator)) {
+				_ = os.Remove(p)
+			}
 		}
 	}
 }

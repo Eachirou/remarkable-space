@@ -12,7 +12,7 @@ var LoadWait = 8 * time.Second
 
 // Mount 挂外壳用的三个接口:
 //
-//	GET  /space/library/next?wait=25  长连接取活, 没活时等到超时返回 204
+//	GET  /space/library/next?wait=25  长连接取活, 没活时等到超时返回 204 (role=bridge: 常驻桥, 不算空间开着)
 //	POST /space/library/done          回报一条结果
 //	POST /space/library/bye           外壳关闭 (之后上传一律拒绝)
 //	GET  /space/library/status        空间开着没有 / 还有几条没通知 (扫码页用)
@@ -73,7 +73,8 @@ func (l *Library) Mount(mux *http.ServeMux) {
 		case "load":
 			l.SetImporter(false)
 		}
-		jobs := l.Queue.Next(r.Context(), wait)
+		// role=bridge: 常驻的文件库桥 (不代表空间开着); 其余 (外壳) 照旧算在线
+		jobs := l.Queue.Next(r.Context(), wait, r.URL.Query().Get("role") != "bridge")
 		if len(jobs) == 0 {
 			w.WriteHeader(http.StatusNoContent)
 			return

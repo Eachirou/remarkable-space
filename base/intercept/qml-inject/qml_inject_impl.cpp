@@ -25,6 +25,11 @@
 #include <QtCore/QTimer>
 #include <QtCore/QPointer>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <algorithm>
+#include <QtCore/QCryptographicHash>
+#include <QtCore/QHash>
+#include <QtCore/QSet>
 #include <QtCore/QUrl>
 #include <QtCore/QVariant>
 #include <QtCore/QMimeData>
@@ -502,6 +507,253 @@ static void doInjectLanguage(QQmlEngine *engine) {
     }
 }
 
+// ─── 通用挂载点 (hooks): 注入库只管"挂在哪", 挂什么由空间 / 应用放文件决定 ───
+//
+// 五个挂点, 每个对应一个目录 (空间自带的在前, 商店应用装的在后, 后者由空间安装器建链接):
+//   sidebar    侧栏「空间」下面                    (无参数)
+//   document   打开的笔记页 (DocumentView)        docView, clip
+//   selection  手写圈选的工具栏                   tools, selectionRoot
+//   textmenu   打字文字的选择菜单                 tools, menuRoot   (上下文带 rmkitClipText)
+//   root       全屏顶层, 开机就挂, 一直在         host
+// 每个 *.qml 一个组件; 文件 mtime 变了就销毁重建 (改挂载文件不用重启 xochitl), 文件删了就摘掉。
+// 组件里 Timer 不触发: document / root 的组件有 hookTick 属性的话, 这里每秒递增它。
+//
+// 熔断: 某个文件挂上后 60 秒内 xochitl 没了 (崩溃), 记一次; 连续两次就停用这个文件
+// (hooks-state/disabled-<id>), 直到文件内容变了 (mtime 变 = 新 id)。空间读这个目录给用户提示。
+//
+// 空间目录下没有 hooks/ (老空间) 时整段不生效, 走下面的旧路径 (bin/ 里的 AI 按钮、shell/Sticker.qml)。
+static const char *kHookDirs[] = {"/home/root/rmkit-cn/space/hooks",
+                                  "/home/root/.local/share/rmkit-cn/space/hooks"};
+static const char *kHookState = "/home/root/.local/share/rmkit-cn/space/hooks-state";
+
+static bool hooksMode() { return access(kHookDirs[0], F_OK) == 0; }
+
+struct HookFile {
+    QString path;
+    QString name;
+    long long mtime;
+};
+
+static QList<HookFile> listHooks(const char *point) {
+    QList<HookFile> out;
+    for (const char *d : kHookDirs) {
+        const QByteArray dir = QByteArray(d) + "/" + point;
+        DIR *dp = opendir(dir.constData());
+        if (!dp)
+            continue;
+        while (struct dirent *e = readdir(dp)) {
+            const size_t n = strlen(e->d_name);
+            if (e->d_name[0] == '.' || n < 5 || strcmp(e->d_name + n - 4, ".qml") != 0)
+                continue;
+            const QByteArray p = dir + "/" + e->d_name;
+            struct stat st;
+            if (stat(p.constData(), &st) != 0)
+                continue; // 断了的链接 (应用卸了)
+            out.append({QString::fromUtf8(p), QString::fromUtf8(e->d_name), (long long)st.st_mtime});
+        }
+        closedir(dp);
+    }
+    std::sort(out.begin(), out.end(), [](const HookFile &a, const HookFile &b) { return a.name < b.name; });
+    return out;
+}
+
+static QByteArray hookId(const HookFile &h) {
+    return QCryptographicHash::hash((h.path + "@" + QString::number(h.mtime)).toUtf8(), QCryptographicHash::Sha1)
+        .toHex()
+        .left(16);
+}
+
+static QByteArray hookStatePath(const char *kind, const QByteArray &id) {
+    return QByteArray(kHookState) + "/" + kind + "-" + id;
+}
+
+static bool hookDisabled(const HookFile &h) { return access(hookStatePath("disabled", hookId(h)).constData(), F_OK) == 0; }
+
+// 挂之前落一个 pending 标记, 活过 60 秒就删掉 (连同之前的记过)。每个文件每个进程只落一次。
+static void hookArm(const HookFile &h) {
+    static QSet<QByteArray> armed;
+    const QByteArray id = hookId(h);
+    if (armed.contains(id))
+        return;
+    armed.insert(id);
+    mkdir("/home/root/.local/share/rmkit-cn/space", 0755);
+    mkdir(kHookState, 0755);
+    const QByteArray pend = hookStatePath("pending", id);
+    if (FILE *f = fopen(pend.constData(), "w")) {
+        fprintf(f, "%s\n%lld\n", h.path.toUtf8().constData(), h.mtime);
+        fclose(f);
+    }
+    QTimer::singleShot(60000, QCoreApplication::instance(), [id]() {
+        unlink(hookStatePath("pending", id).constData());
+        unlink(hookStatePath("strikes", id).constData());
+    });
+}
+
+// 启动时: 上次留下的 pending = 挂上后 60 秒内进程就没了。记过, 两次停用。
+static void hookCheckCrashes() {
+    DIR *dp = opendir(kHookState);
+    if (!dp)
+        return;
+    QList<QByteArray> ids;
+    while (struct dirent *e = readdir(dp))
+        if (strncmp(e->d_name, "pending-", 8) == 0)
+            ids.append(QByteArray(e->d_name + 8));
+    closedir(dp);
+    for (const QByteArray &id : ids) {
+        const QByteArray pend = hookStatePath("pending", id), strikes = hookStatePath("strikes", id);
+        int n = 0;
+        if (FILE *f = fopen(strikes.constData(), "r")) {
+            if (fscanf(f, "%d", &n) != 1)
+                n = 0;
+            fclose(f);
+        }
+        n++;
+        if (n >= 2) {
+            rename(pend.constData(), hookStatePath("disabled", id).constData());
+            unlink(strikes.constData());
+            flog("[hooks] %s 连续两次挂上后 xochitl 退出, 已停用\n", id.constData());
+            continue;
+        }
+        if (FILE *f = fopen(strikes.constData(), "w")) {
+            fprintf(f, "%d\n", n);
+            fclose(f);
+        }
+        unlink(pend.constData());
+    }
+}
+
+struct HookComp {
+    QQmlComponent *comp;
+    long long mtime;
+};
+static QHash<QString, HookComp> g_hookComps;
+
+static QQmlComponent *hookComponent(QQmlEngine *engine, const HookFile &h) {
+    auto it = g_hookComps.find(h.path);
+    if (it != g_hookComps.end()) {
+        if (it->mtime == h.mtime)
+            return it->comp;
+        it->comp->deleteLater();
+        g_hookComps.erase(it);
+    }
+    // 带 mtime 做查询串: 同一路径的新内容不会命中引擎里的旧类型缓存
+    auto *c = new QQmlComponent(engine, QUrl(QStringLiteral("file://%1?t=%2").arg(h.path).arg(h.mtime)),
+                                QCoreApplication::instance());
+    if (c->isError())
+        flog("[hooks] %s 编译错误: %s\n", h.path.toUtf8().constData(), c->errorString().toUtf8().constData());
+    g_hookComps.insert(h.path, {c, h.mtime});
+    return c;
+}
+
+using HookProps = QList<QPair<const char *, QObject *>>;
+
+static QQuickItem *hookMount(QQmlEngine *engine, const HookFile &h, QQuickItem *parent, QQmlContext *ctx,
+                             const HookProps &props) {
+    if (hookDisabled(h))
+        return nullptr;
+    QQmlComponent *c = hookComponent(engine, h);
+    if (!c || !c->isReady())
+        return nullptr;
+    hookArm(h);
+    QObject *obj = c->create(ctx ? ctx : engine->rootContext());
+    auto *item = qobject_cast<QQuickItem *>(obj);
+    if (!item) {
+        delete obj;
+        return nullptr;
+    }
+    item->setProperty("rmkitHook", h.path);
+    item->setProperty("rmkitHookMtime", h.mtime);
+    for (const auto &p : props)
+        item->setProperty(p.first, QVariant::fromValue(p.second));
+    item->setParentItem(parent);
+    return item;
+}
+
+// 菜单 / 侧栏这类"挂到某个容器里"的挂点: 容器里按文件逐个对账 (缺的补、旧的换、删了的摘)
+static QList<QQuickItem *> hookSyncInto(QQmlEngine *engine, const char *point, QQuickItem *row, QQuickItem *before,
+                                        QQmlContext *ctx, const HookProps &props) {
+    QList<QQuickItem *> added;
+    const QList<HookFile> hooks = listHooks(point);
+    QSet<QString> want;
+    for (const HookFile &h : hooks)
+        want.insert(h.path);
+    for (QQuickItem *c : row->childItems()) {
+        const QString p = c->property("rmkitHook").toString();
+        if (!p.isEmpty() && !want.contains(p))
+            c->deleteLater();
+    }
+    for (const HookFile &h : hooks) {
+        QQuickItem *have = nullptr;
+        for (QQuickItem *c : row->childItems())
+            if (c->property("rmkitHook").toString() == h.path) {
+                have = c;
+                break;
+            }
+        if (have && have->property("rmkitHookMtime").toLongLong() == h.mtime)
+            continue;
+        if (have)
+            have->deleteLater();
+        if (QQuickItem *it = hookMount(engine, h, row, ctx, props)) {
+            if (before)
+                it->stackBefore(before);
+            added.append(it);
+            flog("[hooks] %s ← %s\n", point, h.name.toUtf8().constData());
+        }
+    }
+    return added;
+}
+
+// document / root 这类"挂到某个宿主上, 宿主会换"的挂点: 记着上次挂在谁身上
+struct HookLive {
+    QPointer<QQuickItem> item;
+    QPointer<QQuickItem> host;
+    long long mtime = 0;
+};
+static QHash<QString, HookLive> g_hookLive; // key = 挂点 + 路径
+
+static void hookSyncOnHost(QQmlEngine *engine, const char *point, QQuickItem *host, QQmlContext *ctx,
+                           const HookProps &props, qreal z) {
+    const QList<HookFile> hooks = listHooks(point);
+    const QString prefix = QString::fromUtf8(point) + ":";
+    QSet<QString> want;
+    for (const HookFile &h : hooks)
+        want.insert(prefix + h.path);
+    for (auto it = g_hookLive.begin(); it != g_hookLive.end();) {
+        if (it.key().startsWith(prefix) && !want.contains(it.key())) {
+            if (it->item)
+                it->item->deleteLater();
+            it = g_hookLive.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    if (!host)
+        return;
+    for (const HookFile &h : hooks) {
+        HookLive &l = g_hookLive[prefix + h.path];
+        if (l.item && l.host == host && l.mtime == h.mtime)
+            continue;
+        if (l.item)
+            l.item->deleteLater();
+        l.item = hookMount(engine, h, host, ctx, props);
+        l.host = host;
+        l.mtime = h.mtime; // 编译错了也记下, 同一版别反复重试刷日志
+        if (l.item) {
+            l.item->setZ(z);
+            flog("[hooks] %s ← %s (宿主 %s)\n", point, h.name.toUtf8().constData(), host->metaObject()->className());
+        }
+    }
+}
+
+// 每秒给 document / root 挂载的组件递增 hookTick (它们自己的 Timer 不触发)
+static void hookTickAll() {
+    static int n = 0;
+    ++n;
+    for (const HookLive &l : std::as_const(g_hookLive))
+        if (l.item)
+            l.item->setProperty("hookTick", n);
+}
+
 // ─── glyph_selection_ai: 选区工具栏 AI 按钮 (原 glyph_selection_ai.qmd 的运行时版) ───
 // 选区工具栏 (SelectionContextualMenu) 在用户手写圈选时动态创建, 靠 2s 扫描捕获。
 // 找到后从 glyph_ai_button.qml 创建按钮, 显式传 tools + selectionRoot。
@@ -571,6 +823,11 @@ static void doInjectGlyphAI(QQmlEngine *engine) {
                     fprintf(stderr, "[impl] glyph: 未找到按钮容器, dump tools 子树:\n");
                     dumpSubtree(tools, 0, n);
                 }
+                continue;
+            }
+            if (hooksMode()) {
+                hookSyncInto(engine, "selection", row, firstBtn, findUsableContext(tools, engine),
+                             {{"tools", tools}, {"selectionRoot", selRoot}});
                 continue;
             }
             // 幂等
@@ -646,6 +903,20 @@ static void doInjectTextAI(QQmlEngine *engine) {
             }
             if (!row)
                 continue;
+            if (hooksMode()) {
+                QQmlContext *base = findUsableContext(tools, engine);
+                if (!g_clipCtx)
+                    g_clipCtx = new QQmlContext(base, QCoreApplication::instance());
+                refreshClipBridge();
+                QObject *c2 = nullptr;
+                for (QQuickItem *pp = menuRoot; pp && !c2; pp = pp->parentItem())
+                    c2 = pp->property("controller").value<QObject *>();
+                hookTextCopied(c2);
+                for (QQuickItem *it : hookSyncInto(engine, "textmenu", row, firstBtn, g_clipCtx,
+                                                   {{"tools", tools}, {"menuRoot", menuRoot}}))
+                    g_textBtns.append(QPointer<QQuickItem>(it));
+                continue;
+            }
             // 幂等
             bool has = false;
             for (QQuickItem *c : row->childItems())
@@ -767,6 +1038,20 @@ static void doInjectPinyin(QQmlEngine *engine) {
     }
 }
 
+// 侧栏里的"指南" = settingsButton 前最近的一个 SidebarItem。空间入口和 sidebar 挂点都排在它上面。
+static QQuickItem *sidebarGuide(QQuickItem *col) {
+    const auto kids = col->childItems();
+    for (int i = 0; i < kids.size(); i++) {
+        if (kids[i]->objectName().toUtf8() != "settingsButton")
+            continue;
+        for (int j = i - 1; j >= 0; j--)
+            if (QByteArray(kids[j]->metaObject()->className()).contains("SidebarItem"))
+                return kids[j];
+        break;
+    }
+    return nullptr;
+}
+
 // 幂等 + 静默: Sidebar 未实例化时静默返回(等下一轮), 已注入过就跳过。
 // 由 pw_inject 的 2s 重复定时器反复调用, 处理"开机时侧栏没建 / 导航后侧栏重建"。
 static void doInject(QQmlEngine *engine) {
@@ -795,18 +1080,33 @@ static void doInject(QQmlEngine *engine) {
                                                          : (enUI ? "Advanced" : "高级"));
         // 幂等: 已有 advancedItem 就不重复注入。系统设置里切了语言侧栏不重建, 等不到下次
         // 注入, 所以这里每轮 (2s) 顺手核对那个词, 变了就换 —— 面板内部本来就是实时的。
+        // 外壳地址带上 Space.qml 的 mtime: 空间在设备上自更新换了外壳, 下次点开就是新的, 不用重启 xochitl
+        QString panelUrlNow;
+        if (useSpace) {
+            struct stat pst;
+            panelUrlNow = QStringLiteral("file:///home/root/rmkit-cn/space/shell/Space.qml");
+            if (hooksMode() && stat("/home/root/rmkit-cn/space/shell/Space.qml", &pst) == 0)
+                panelUrlNow += QStringLiteral("?v=%1").arg((long long)pst.st_mtime);
+        }
         for (QQuickItem *c : col->childItems())
             if (c->objectName().toUtf8() == "advancedItem") {
                 if (c->property("label").toString() != label)
                     c->setProperty("label", label);
+                if (useSpace && hooksMode() && c->property("panelUrl").toString() != panelUrlNow)
+                    c->setProperty("panelUrl", panelUrlNow);
+                if (hooksMode())
+                    hookSyncInto(engine, "sidebar", col, sidebarGuide(col), findUsableContext(c, engine), {});
                 if (!g_clipSingleton)
                     findUsableContext(c, engine);
                 if (g_clipSingleton && c->property("rmkitClip").value<QObject *>() != g_clipSingleton)
                     c->setProperty("rmkitClip", QVariant::fromValue(g_clipSingleton));
                 return;
             }
-        const char *panelUrl = useSpace ? "file:///home/root/rmkit-cn/space/shell/Space.qml"
-                                        : "file:///home/root/rmkit-cn/bin/adv_panel.qml";
+        const QByteArray panelUrl = useSpace ? panelUrlNow.toUtf8() : QByteArray("file:///home/root/rmkit-cn/bin/adv_panel.qml");
+        // 自更新留着的上一版外壳: 新外壳加载出错 (QML 写坏了) 时退回它, 用户至少还打得开空间
+        const QByteArray prevUrl = (useSpace && hooksMode() && access("/home/root/rmkit-cn/space/shell.prev/Space.qml", F_OK) == 0)
+                                       ? QByteArray("file:///home/root/rmkit-cn/space/shell.prev/Space.qml")
+                                       : QByteArray();
         // 开发模式 (~/.local/share/rmkit-cn/space/.dev): 每次点击都带时间戳重新读 QML, 改外壳不用重启 xochitl
         const bool devMode = useSpace && access("/home/root/.local/share/rmkit-cn/space/.dev", F_OK) == 0;
         fprintf(stderr, "[impl] 侧栏就绪, 注入%s...\n", useSpace ? "空间" : "高级");
@@ -823,8 +1123,9 @@ static void doInject(QQmlEngine *engine) {
             "  Layout.preferredWidth: 414\n"
             "  Layout.preferredHeight: 112\n"
             // 注入时就异步预编译面板 (Component.Asynchronous), 点击时直接用缓存, 首开不卡
-            "  property var panelComp: Qt.createComponent(\n"
-            "      \"") + panelUrl + QByteArray("\", Component.Asynchronous)\n"
+            "  property string panelUrl: \"") + panelUrl + QByteArray("\"\n"
+            "  property string prevUrl: \"") + prevUrl + QByteArray("\"\n"
+            "  property var panelComp: Qt.createComponent(panelUrl, Component.Asynchronous)\n"
             "  color: mouse.pressed ? \"#dddddd\" : \"transparent\"\n"
             "  Row { x:32; y:32; spacing:16\n"
             "    Image { width:48; height:48; fillMode: Image.PreserveAspectFit\n"
@@ -842,11 +1143,19 @@ static void doInject(QQmlEngine *engine) {
             "        r = p;\n"
             "        if (('' + p).indexOf('MainView') === 0) { host = p; break; }\n"
             "      }\n"
-            "      var c = ") + (devMode ? QByteArray("Qt.createComponent(\"") + panelUrl + "?t=\" + Date.now())"
+            "      var c = ") + (devMode ? QByteArray("Qt.createComponent(\"") + panelUrl + (panelUrl.contains('?') ? "&" : "?") + "t=\" + Date.now())"
                                         : QByteArray("advItem.panelComp")) + QByteArray(";\n"
+            "      var triedPrev = false;\n"
             "      var mk = function() {\n"
             "        if (c.status === Component.Ready) c.createObject(host ? host : r, { rmkitClip: advItem.rmkitClip });\n"
-            "        else if (c.status === Component.Error) console.log(\"[advpanel] ERR: \" + c.errorString());\n"
+            "        else if (c.status === Component.Error) {\n"
+            "          console.log(\"[advpanel] ERR: \" + c.errorString());\n"
+            "          if (!triedPrev && advItem.prevUrl !== \"\") {\n"
+            "            triedPrev = true;\n"
+            "            c = Qt.createComponent(advItem.prevUrl);\n"
+            "            if (c.status === Component.Loading) c.statusChanged.connect(mk); else mk();\n"
+            "          }\n"
+            "        }\n"
             "      };\n"
             "      if (c.status === Component.Loading) c.statusChanged.connect(mk); else mk();\n"
             "    }\n"
@@ -864,22 +1173,11 @@ static void doInject(QQmlEngine *engine) {
             continue;
         }
         item->setParentItem(col); // 加进 ColumnLayout, 先落到末尾
-        // 重排: 移到"指南"上面 —— 指南 = settingsButton 前最近的一个 SidebarItem
-        const auto kids = col->childItems();
-        QQuickItem *guide = nullptr;
-        for (int i = 0; i < kids.size(); i++) {
-            if (kids[i]->objectName().toUtf8() == "settingsButton") {
-                for (int j = i - 1; j >= 0; j--) {
-                    if (QByteArray(kids[j]->metaObject()->className()).contains("SidebarItem")) {
-                        guide = kids[j];
-                        break;
-                    }
-                }
-                break;
-            }
-        }
+        QQuickItem *guide = sidebarGuide(col);
         if (guide)
             item->stackBefore(guide);
+        if (hooksMode())
+            hookSyncInto(engine, "sidebar", col, guide, findUsableContext(item, engine), {});
         fprintf(stderr, "[impl] %s 注入完成 (%s)\n", useSpace ? "空间" : "高级", guide ? "已排到指南上面" : "留末尾");
         return; // 本轮成功
     }
@@ -1111,7 +1409,10 @@ static void hookClipboardDump();
 static void doInjectDocAddons(QQmlEngine *engine) {
     QQuickItem *dv = nullptr;
     bool looked = false;
+    const bool hm = hooksMode();
     for (docAddon &a : g_docAddons) {
+        if (hm && !a.flag)
+            continue; // 有 hooks/ 时贴纸面板由挂点目录提供, 这里只剩开发用的 docdev
         struct stat st;
         if ((a.flag && access(a.flag, F_OK) != 0) || stat(a.path, &st) != 0) {
             if (a.item)
@@ -1168,6 +1469,48 @@ static void doInjectDocAddons(QQmlEngine *engine) {
     }
 }
 
+// document 挂点: 当前打开的笔记 (有 sceneController 的 DocumentView)
+static void doHookDocument(QQmlEngine *engine) {
+    if (!hooksMode())
+        return;
+    QQuickItem *dv = nullptr;
+    if (!listHooks("document").isEmpty()) {
+        for (QWindow *w : QGuiApplication::topLevelWindows()) {
+            auto *qw = qobject_cast<QQuickWindow *>(w);
+            if (!qw || !qw->contentItem())
+                continue;
+            QList<QQuickItem *> views;
+            findAllByClass(qw->contentItem(), "DocumentView_", views);
+            for (QQuickItem *v : views)
+                if (v->property("sceneController").value<QObject *>()) {
+                    dv = v;
+                    break;
+                }
+            if (dv)
+                break;
+        }
+    }
+    HookProps props{{"docView", dv}};
+    if (g_clipSingleton)
+        props.append({"clip", g_clipSingleton});
+    hookSyncOnHost(engine, "document", dv, dv ? findUsableContext(dv, engine) : nullptr, props, 10000);
+}
+
+// root 挂点: 主窗口最顶层, 开机就挂 (文件库桥这类不依赖任何界面的常驻活)
+static void doHookRoot(QQmlEngine *engine) {
+    if (!hooksMode())
+        return;
+    for (QWindow *w : QGuiApplication::topLevelWindows()) {
+        auto *qw = qobject_cast<QQuickWindow *>(w);
+        if (!qw || !qw->contentItem() || qw->contentItem()->width() <= 0)
+            continue;
+        QQuickItem *host = qw->contentItem();
+        QQmlContext *ctx = QQmlEngine::contextForObject(host);
+        hookSyncOnHost(engine, "root", host, ctx, {{"host", host}}, 9000);
+        return;
+    }
+}
+
 // 开发诊断: 系统剪贴板每变一次, 记下格式/大小/开头字节 (只在 .docdev 存在时挂, 只挂一次)
 static void hookClipboardDump() {
     static bool hooked = false;
@@ -1200,6 +1543,7 @@ static void runInjectPass() {
     // **必须永远执行** —— 它没注入的话 g_pinyinItem 为空, C++ 侧的焦点处理
     // 全部跳过, QML 收不到任何通知 → 打不出中文。
     doInjectPinyin(g_engine);
+    doHookRoot(g_engine);
     // 以下是昂贵的全树扫描 (4 次遍历, 剪枝后仍可达 41ms 阻塞 GUI 主线程)。
     // ★ 打字期间一律跳过 —— 焦点事件会触发扫描, 而打字时候选框显隐本身就在
     // 制造焦点变化, 等于边打边扫, 这是卡顿的直接来源。
@@ -1227,6 +1571,7 @@ static void runInjectPass() {
     doInjectGlyphAI(g_engine);
     doInjectTextAI(g_engine);
     doInjectDocAddons(g_engine);
+    doHookDocument(g_engine);
     clock_gettime(CLOCK_MONOTONIC, &t1);
     long us = (t1.tv_sec - t0.tv_sec) * 1000000L + (t1.tv_nsec - t0.tv_nsec) / 1000;
     static long worst = 0, calls = 0;
@@ -1250,7 +1595,12 @@ extern "C" __attribute__((visibility("default"))) void pw_inject(void *enginePtr
         [engine]() {
             fprintf(stderr, "[impl] 注入: 事件驱动 + 5s 兜底扫描\n");
             g_engine = engine;
+            hookCheckCrashes();
             installInputFilter();
+            QTimer *ht = new QTimer(QCoreApplication::instance());
+            ht->setInterval(1000);
+            QObject::connect(ht, &QTimer::timeout, []() { hookTickAll(); });
+            ht->start();
             QTimer *t = new QTimer(QCoreApplication::instance());
             t->setInterval(1000); // 1s: 平衡响应 (语言列表注入延迟) 与全树扫描 CPU
             QObject::connect(t, &QTimer::timeout, [t, engine]() {

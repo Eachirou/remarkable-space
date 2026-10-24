@@ -83,7 +83,14 @@ type Manifest struct {
 	// Stickers 贴纸包: 应用目录里放贴纸包的子目录 (下面每个子目录是一个包)。这种条目只为了走
 	// 商店的下载/升级/删除, 不出现在应用格子里; 装好后由安装器把包挂进贴纸目录。
 	Stickers string `json:"stickers,omitempty"`
+	// Hooks 挂进 xochitl 界面的组件: 挂点 → 应用目录里的 .qml。挂点见 HookPoints。
+	// 这些组件跑在 xochitl 进程里, 写坏了会拖垮整个界面, 所以只有商店签名的专属包能声明
+	// (安装时验 .integrity), 开发模式 (.dev) 例外。注入库按文件熔断, 见 base/intercept/qml-inject。
+	Hooks map[string][]string `json:"hooks,omitempty"`
 }
+
+// HookPoints 注入库开放的挂点 (base/intercept/qml-inject/qml_inject_impl.cpp 的「通用挂载点」一节)
+var HookPoints = map[string]bool{"sidebar": true, "document": true, "selection": true, "textmenu": true, "root": true}
 
 // Install 描述"应用包之外还得装点别的"。
 //
@@ -135,8 +142,18 @@ func (m *Manifest) Validate() error {
 	if m.Stickers != "" && !isRelativeInside(m.Stickers) {
 		return fmt.Errorf("stickers 必须是应用目录内的相对路径: %q", m.Stickers)
 	}
-	if m.Entry == "" && m.Launch == nil && m.Module == nil && m.Stickers == "" {
-		return errors.New("entry (界面 QML)、module (编译模块)、launch (外部启动) 与 stickers (贴纸包) 至少要有一个")
+	for pt, files := range m.Hooks {
+		if !HookPoints[pt] {
+			return fmt.Errorf("hooks 里的挂点 %q 不认识 (sidebar/document/selection/textmenu/root)", pt)
+		}
+		for _, f := range files {
+			if !isRelativeInside(f) || filepath.Ext(f) != ".qml" {
+				return fmt.Errorf("hooks.%s 必须是应用目录内的 .qml: %q", pt, f)
+			}
+		}
+	}
+	if m.Entry == "" && m.Launch == nil && m.Module == nil && m.Stickers == "" && len(m.Hooks) == 0 {
+		return errors.New("entry (界面 QML)、module (编译模块)、launch (外部启动) 、stickers (贴纸包) 与 hooks (挂载组件) 至少要有一个")
 	}
 	if m.Module != nil {
 		if !moduleURIRe.MatchString(m.Module.URI) {

@@ -287,3 +287,37 @@ func TestInstallStickerPacks(t *testing.T) {
 		t.Error("卸载不该动自带包")
 	}
 }
+
+func TestInstallHooks(t *testing.T) {
+	tmp := t.TempDir()
+	r := &Registry{BuiltinDir: filepath.Join(tmp, "b"), UserDir: filepath.Join(tmp, "space", "apps"), DataDir: filepath.Join(tmp, "d"), Arch: "aarch64"}
+	files := map[string]string{
+		"manifest.json":      `{"id":"ai","name":"AI","version":"1.0","entry":"main.qml","hooks":{"selection":["hooks/AiButton.qml"]}}`,
+		"main.qml":           "import QtQuick\nItem {}\n",
+		"hooks/AiButton.qml": "import QtQuick\nItem {}\n",
+	}
+	// 没有商店签名、也不是开发模式: 拒装
+	if _, err := r.InstallZip(makeZip(t, files), nil, nil); err == nil {
+		t.Fatal("没签名的挂载应用应被拒")
+	}
+	// 开发模式放行, 链接建在 hooks/selection/ai-AiButton.qml
+	_ = os.WriteFile(filepath.Join(tmp, "space", ".dev"), nil, 0o644)
+	if _, err := r.InstallZip(makeZip(t, files), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(r.HookDir(), "selection", "ai-AiButton.qml")
+	if tg, err := os.Readlink(link); err != nil || tg != filepath.Join(r.UserDir, "ai", "hooks", "AiButton.qml") {
+		t.Fatalf("链接不对: %q %v", tg, err)
+	}
+	if err := r.Uninstall("ai", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(link); err == nil {
+		t.Error("卸载后挂载链接应删掉")
+	}
+	// 不认识的挂点
+	bad := map[string]string{"manifest.json": `{"id":"x","name":"x","version":"1","hooks":{"toolbar":["a.qml"]}}`, "a.qml": ""}
+	if _, err := r.InstallZip(makeZip(t, bad), nil, nil); err == nil {
+		t.Error("不认识的挂点应被拒")
+	}
+}

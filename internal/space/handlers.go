@@ -116,6 +116,41 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /space/store", h.store)
 	mux.HandleFunc("GET /space/device", h.device)
 	mux.HandleFunc("GET /space/recent", h.recent)
+	mux.HandleFunc("GET /space/hooks/disabled", h.hooksDisabled)
+}
+
+// hooksDisabled 注入库熔断停用的挂载组件 (挂上后 xochitl 连续两次很快退出)。外壳拿它提示用户:
+// 哪个应用的什么被停用了, 更新或重装这个应用就会再试 (文件变了 = 新的熔断记录)。
+func (h *Handler) hooksDisabled(w http.ResponseWriter, r *http.Request) {
+	type item struct {
+		File string `json:"file"`
+		App  string `json:"app,omitempty"`  // 应用 id; 空 = 空间自带的
+		Name string `json:"name,omitempty"` // 应用显示名
+	}
+	out := []item{}
+	stateDir := filepath.Join(filepath.Dir(h.Reg.UserDir), "hooks-state")
+	ents, _ := os.ReadDir(stateDir)
+	for _, e := range ents {
+		if !strings.HasPrefix(e.Name(), "disabled-") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(stateDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		file, _, _ := strings.Cut(string(b), "\n")
+		it := item{File: file}
+		// 应用的挂载组件是 hooks/<挂点>/<应用>-<文件> 的链接, 跟过去就是应用目录
+		if t, err := os.Readlink(file); err == nil && strings.HasPrefix(t, h.Reg.UserDir+string(filepath.Separator)) {
+			id, _, _ := strings.Cut(strings.TrimPrefix(t, h.Reg.UserDir+string(filepath.Separator)), string(filepath.Separator))
+			it.App = id
+			if a, ok := h.Reg.Get(id); ok {
+				it.Name = a.Name
+			}
+		}
+		out = append(out, it)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"disabled": out})
 }
 
 var dataKeyRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)

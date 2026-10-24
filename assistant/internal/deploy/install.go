@@ -188,7 +188,7 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	// 仍落在 /home/root/rmkit-cn/space —— 这个路径硬编码在注入库里 (qml_inject_impl.cpp),
 	// 改了要重编两个架构的 .so, 不值当。
 	for _, n := range b.Names() {
-		if strings.HasPrefix(n, "space/shell/") || strings.HasPrefix(n, "space/kit/") || strings.HasPrefix(n, "space/apps/") {
+		if strings.HasPrefix(n, "space/shell/") || strings.HasPrefix(n, "space/kit/") || strings.HasPrefix(n, "space/apps/") || strings.HasPrefix(n, "space/hooks/") {
 			mode := int64(0o644)
 			if strings.Contains(n, "/bin/") {
 				mode = 0o755
@@ -280,6 +280,11 @@ rm /tmp/%[1]s /tmp/xochitl-xovi
 echo '  ✓ xovi '`+i18n.T("部署完成", "deployed"), path.Base(p.xoviTar)), nil); err != nil {
 			return fmt.Errorf(i18n.T("部署 xovi 失败: %w", "failed to deploy xovi: %w"), err)
 		}
+	}
+
+	// 挂载点目录整个由安装包管: tar 只覆盖不删, 先清掉, 免得旧版留下的挂载文件继续挂在笔记里
+	if err := c.RunLogged(ctx, "rm -rf /home/root/rmkit-cn/space/hooks", nil); err != nil {
+		return err
 	}
 
 	// install.sh 543-566: 单次 tar 流式传输

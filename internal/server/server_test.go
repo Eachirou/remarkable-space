@@ -39,7 +39,7 @@ func newTestServer(t *testing.T) (*Server, http.Handler, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.lib.Queue.Next(context.Background(), 0) // 默认算「空间」开着; 测拦截的用例自己 Close
+	srv.lib.Queue.Next(context.Background(), 0, true) // 默认算「空间」开着; 测拦截的用例自己 Close
 	return srv, srv.Routes(), root
 }
 
@@ -152,7 +152,7 @@ func fakeShell(t *testing.T, srv *Server, ok bool) {
 	t.Cleanup(cancel)
 	go func() {
 		for ctx.Err() == nil {
-			for _, j := range srv.lib.Queue.Next(ctx, 200*time.Millisecond) {
+			for _, j := range srv.lib.Queue.Next(ctx, 200*time.Millisecond, true) {
 				srv.lib.Queue.Done(xolib.Result{Op: j.Op, ID: j.ID, OK: ok})
 			}
 		}
@@ -197,7 +197,7 @@ func TestUploadDocumentLoaded(t *testing.T) {
 // 外壳没来回报 (比如刚好在这几秒里关了空间): 文件照样写进去, 只是 loaded=false, 下次打开补上
 func TestUploadDocumentNotLoadedYet(t *testing.T) {
 	srv, h, _ := newTestServer(t)
-	srv.lib.Queue.Next(context.Background(), 0) // 算开着, 但没人取活
+	srv.lib.Queue.Next(context.Background(), 0, true) // 算开着, 但没人取活
 	prev := LoadWait
 	LoadWait = 50 * time.Millisecond
 	t.Cleanup(func() { LoadWait = prev })

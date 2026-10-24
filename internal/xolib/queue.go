@@ -86,17 +86,22 @@ func (q *Queue) Enqueue(j Job) {
 
 // Next 给外壳取活: 有能做的就立刻全部拿走, 没有就最多等 wait。拿走即出队 —— 外壳做完回报,
 // 失败的由 Done 延后重排。
-func (q *Queue) Next(ctx context.Context, wait time.Duration) []Job {
+//
+// presence: 这个长连接算不算「空间开着」。外壳的算; 注入库常驻顶层的文件库桥 (hooks/root/library.qml)
+// 一直挂着, 不算 —— 否则扫码上传永远开着 (它只该在用户打开空间时开)。
+func (q *Queue) Next(ctx context.Context, wait time.Duration, presence bool) []Job {
 	q.mu.Lock()
-	q.closed = false
-	q.lastSeen = q.now()
-	q.polling++
-	defer func() {
-		q.mu.Lock()
-		q.polling--
+	if presence {
+		q.closed = false
 		q.lastSeen = q.now()
-		q.mu.Unlock()
-	}()
+		q.polling++
+		defer func() {
+			q.mu.Lock()
+			q.polling--
+			q.lastSeen = q.now()
+			q.mu.Unlock()
+		}()
+	}
 	deadline := q.now().Add(wait)
 	for {
 		now := q.now()

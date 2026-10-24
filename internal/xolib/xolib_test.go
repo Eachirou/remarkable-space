@@ -57,7 +57,7 @@ func TestRejectsOtherTypes(t *testing.T) {
 func TestNextWaitsAndWakes(t *testing.T) {
 	q := NewQueue("")
 	got := make(chan []Job, 1)
-	go func() { got <- q.Next(context.Background(), 5*time.Second) }()
+	go func() { got <- q.Next(context.Background(), 5*time.Second, true) }()
 	time.Sleep(50 * time.Millisecond)
 	if !q.Active() {
 		t.Fatal("挂着长连接时应算开着")
@@ -79,7 +79,7 @@ func TestNextWaitsAndWakes(t *testing.T) {
 func TestNextTimeout(t *testing.T) {
 	q := NewQueue("")
 	t0 := time.Now()
-	if jobs := q.Next(context.Background(), 100*time.Millisecond); jobs != nil {
+	if jobs := q.Next(context.Background(), 100*time.Millisecond, true); jobs != nil {
 		t.Fatal(jobs)
 	}
 	if time.Since(t0) < 90*time.Millisecond {
@@ -90,14 +90,14 @@ func TestNextTimeout(t *testing.T) {
 func TestFailedJobRetriesLater(t *testing.T) {
 	q := NewQueue("")
 	q.Enqueue(Job{Op: OpLoad, ID: "a"})
-	q.Next(context.Background(), 0)
+	q.Next(context.Background(), 0, true)
 	q.Done(Result{Op: OpLoad, ID: "a", OK: false, Error: "找不到文件库"})
 	// 失败的活不能立刻再给出去 (否则外壳和服务端空转)
-	if jobs := q.Next(context.Background(), 50*time.Millisecond); jobs != nil {
+	if jobs := q.Next(context.Background(), 50*time.Millisecond, true); jobs != nil {
 		t.Fatal("失败后立刻又给出去了", jobs)
 	}
 	q.now = func() time.Time { return time.Now().Add(RetryDelay + time.Second) }
-	if jobs := q.Next(context.Background(), 0); len(jobs) != 1 || !jobs[0].NotBefore.IsZero() {
+	if jobs := q.Next(context.Background(), 0, true); len(jobs) != 1 || !jobs[0].NotBefore.IsZero() {
 		t.Fatal("过了重试时间应能取到", jobs)
 	}
 }
@@ -122,7 +122,7 @@ func TestActiveAndBye(t *testing.T) {
 	if q.Active() {
 		t.Fatal("没来过应算关着")
 	}
-	q.Next(context.Background(), 0)
+	q.Next(context.Background(), 0, true)
 	if !q.Active() {
 		t.Fatal("刚取过应算开着")
 	}
@@ -130,7 +130,7 @@ func TestActiveAndBye(t *testing.T) {
 	if q.Active() {
 		t.Fatal("说了关就是关")
 	}
-	q.Next(context.Background(), 0)
+	q.Next(context.Background(), 0, true)
 	if !q.Active() {
 		t.Fatal("重新打开空间应恢复")
 	}
@@ -145,7 +145,7 @@ func TestPendingSurvivesRestart(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "pending.json")
 	NewQueue(f).Enqueue(Job{Op: OpLoad, ID: "a"})
 	q2 := NewQueue(f)
-	if jobs := q2.Next(context.Background(), 0); len(jobs) != 1 || jobs[0].ID != "a" {
+	if jobs := q2.Next(context.Background(), 0, true); len(jobs) != 1 || jobs[0].ID != "a" {
 		t.Fatal(jobs)
 	}
 	if NewQueue(f).Pending() != 0 {
@@ -237,7 +237,7 @@ func TestImporterModeStagesDocument(t *testing.T) {
 	if ents, _ := os.ReadDir(dir); len(ents) != 0 {
 		t.Fatal("导入器模式不该写数据目录", ents)
 	}
-	jobs := l.Queue.Next(context.Background(), 0)
+	jobs := l.Queue.Next(context.Background(), 0, true)
 	if len(jobs) != 1 || jobs[0].Op != OpImport || jobs[0].Parent != "p1" {
 		t.Fatal("应排一条 import", jobs)
 	}
@@ -251,7 +251,7 @@ func TestImporterModeStagesDocument(t *testing.T) {
 	// 失败按原样 (带路径) 排回
 	l.Queue.Done(Result{Op: OpImport, ID: e.ID, OK: false})
 	l.Queue.now = func() time.Time { return time.Now().Add(RetryDelay + time.Second) }
-	if again := l.Queue.Next(context.Background(), 0); len(again) != 1 || again[0].Path != want {
+	if again := l.Queue.Next(context.Background(), 0, true); len(again) != 1 || again[0].Path != want {
 		t.Fatal("失败的 import 应带路径排回", again)
 	}
 }
@@ -265,7 +265,7 @@ func TestSwitchToImporterConvertsStuckLoads(t *testing.T) {
 	doc, _ := l.ImportDocument(strings.NewReader("%PDF"), "旧文档", "pdf", "")
 	folder, _ := l.CreateFolder("文件夹", "")
 	l.SetImporter(true)
-	jobs := l.Queue.Next(context.Background(), 0)
+	jobs := l.Queue.Next(context.Background(), 0, true)
 	if len(jobs) != 1 || jobs[0].Op != OpImport || jobs[0].ID != doc.ID {
 		t.Fatal("只应剩文档的 import", jobs)
 	}
@@ -280,10 +280,10 @@ func TestSwitchToImporterConvertsStuckLoads(t *testing.T) {
 	}
 	// 导入器模式下失败的 load 不再排回
 	l.Queue.Enqueue(Job{Op: OpLoad, ID: "x"})
-	l.Queue.Next(context.Background(), 0)
+	l.Queue.Next(context.Background(), 0, true)
 	l.Queue.Done(Result{Op: OpLoad, ID: "x", OK: false})
 	l.Queue.now = func() time.Time { return time.Now().Add(RetryDelay + time.Second) }
-	if j := l.Queue.Next(context.Background(), 0); j != nil {
+	if j := l.Queue.Next(context.Background(), 0, true); j != nil {
 		t.Fatal("导入器模式下 load 失败不该重试", j)
 	}
 }
@@ -295,7 +295,7 @@ func TestImporterModeCreatesViaShell(t *testing.T) {
 	l.SetImporter(true)
 	go func() {
 		for i := 0; i < 2; i++ {
-			jobs := l.Queue.Next(context.Background(), time.Second)
+			jobs := l.Queue.Next(context.Background(), time.Second, true)
 			for _, j := range jobs {
 				switch j.Op {
 				case OpFolder:
@@ -317,5 +317,18 @@ func TestImporterModeCreatesViaShell(t *testing.T) {
 	}
 	if ents, _ := os.ReadDir(dir); len(ents) != 1 {
 		t.Fatal("导入器模式不该自己写文件", ents)
+	}
+}
+
+// 常驻文件库桥的长连接不算「空间开着」, 外壳的算
+func TestBridgeNotPresence(t *testing.T) {
+	q := NewQueue("")
+	q.Next(context.Background(), 0, false)
+	if q.Active() {
+		t.Error("文件库桥取活不该让空间算作开着")
+	}
+	q.Next(context.Background(), 0, true)
+	if !q.Active() {
+		t.Error("外壳取活应算开着")
 	}
 }

@@ -128,7 +128,7 @@ func main() {
 		}
 		// 空间: 外壳/共享组件/内置应用整树 + 后端二进制 + 静态页 + 矢量底图。
 		// 装在设备上的落点见 internal/rmkit.NewPlan。
-		for _, d := range []string{"shell", "kit", "apps"} {
+		for _, d := range []string{"shell", "kit", "apps", "hooks"} {
 			root := filepath.Join(*spaceRepo, d)
 			err := filepath.WalkDir(root, func(p string, e os.DirEntry, err error) error {
 				if err != nil || e.IsDir() {
