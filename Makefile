@@ -38,6 +38,6 @@ update-zip: aarch64 armv7
 	rm -rf dist/update && mkdir -p dist/update/bin
 	cp dist/space-server-aarch64 dist/space-server-armv7 dist/update/bin/
 	cp -R shell kit apps hooks themes static dist/update/
-	python3 -c 'import json,os;json.dump({"id":"space","name":"空间","name_en":"Space","version":"$(VERSION)","kind":"space","min_shell":3,"category":"system","testers":True,"notes":os.environ.get("NOTES",""),"notes_en":os.environ.get("NOTES_EN","")},open("dist/update/manifest.json","w"),ensure_ascii=False,indent=2)'
+	python3 -c 'import json,os;json.dump({"id":"space","name":"空间","name_en":"Space","version":"$(VERSION)","kind":"space","min_shell":3,"category":"system","notes":os.environ.get("NOTES",""),"notes_en":os.environ.get("NOTES_EN","")},open("dist/update/manifest.json","w"),ensure_ascii=False,indent=2)'
 	rm -f dist/space-$(VERSION).zip && cd dist/update && zip -q -X -r ../space-$(VERSION).zip . -x '*.DS_Store'
 	@ls -l dist/space-$(VERSION).zip

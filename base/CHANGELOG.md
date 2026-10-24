@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Paper Pro / Move 双槽砖**: xochitl 的 drop-in 不再 `After=home.mount` / `ConditionPathExists=/home/...` —— 原厂 `xochitl-service-override.conf` 有 `JobTimeoutSec=60s` + `OnFailure=emergency.target`, /home (加密盘, 开机 TEE 解锁 + 两遍 fsck) 超过 60 s 没挂上, xochitl 的启动任务排队超时 → emergency → 重启, 三次切槽; OTA 钩子把同样配置复制进新槽, 两槽同死 (2026-10-24 rmpp 受控复现实锤)。改为 `ExecStartPre` 里最多等 /home 25 s, 新增 `rmkit-cn-reenable.service` (aarch64) 在 /home 挂好后注入未生效时重启一次 xochitl。已装 v1.0.x 的设备可在商店装「启动安全补丁」先堵上。
+- 注入库: 开放 sidebar / document / selection / textmenu / root 五个挂载点 (`hooks/<挂点>/*.qml`, mtime 热重载, 按文件熔断); 外壳按真实路径加载并在加载失败时退回上一版。
+
 ## [1.2.1] - 2026-09-12
 
 ### Added
