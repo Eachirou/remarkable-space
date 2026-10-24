@@ -19,5 +19,8 @@
   "confirm_wallpaper": "Wallpaper: ",
   "confirm_restart": "The interface will restart",
   "cancel": "Cancel",
-  "confirm": "Apply"
+  "confirm": "Apply",
+  "tab_theme": "Theme",
+  "theme_hint": "Change how Space looks: colors, outlines and the home page. Tap one to switch, no restart needed.",
+  "theme_more": "More themes in the store"
 }

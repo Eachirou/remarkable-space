@@ -6,6 +6,7 @@
 // 才能安全操作 QML 对象树。
 
 #include <cstdarg>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -1081,12 +1082,20 @@ static void doInject(QQmlEngine *engine) {
         // 幂等: 已有 advancedItem 就不重复注入。系统设置里切了语言侧栏不重建, 等不到下次
         // 注入, 所以这里每轮 (2s) 顺手核对那个词, 变了就换 —— 面板内部本来就是实时的。
         // 外壳地址带上 Space.qml 的 mtime: 空间在设备上自更新换了外壳, 下次点开就是新的, 不用重启 xochitl
+        // 自更新把外壳放在 rel/<版本>/shell, shell 是指过去的链接: 按真实路径加载, 外壳里相对引入的
+        // ../kit 也跟着落到同版本目录 —— 引擎按地址缓存组件, 同一路径的新文件这一轮 xochitl 里看不到。
         QString panelUrlNow;
         if (useSpace) {
             struct stat pst;
             panelUrlNow = QStringLiteral("file:///home/root/rmkit-cn/space/shell/Space.qml");
-            if (hooksMode() && stat("/home/root/rmkit-cn/space/shell/Space.qml", &pst) == 0)
-                panelUrlNow += QStringLiteral("?v=%1").arg((long long)pst.st_mtime);
+            if (hooksMode()) {
+                if (char *rp = realpath("/home/root/rmkit-cn/space/shell/Space.qml", nullptr)) {
+                    panelUrlNow = QStringLiteral("file://") + QString::fromUtf8(rp);
+                    free(rp);
+                }
+                if (stat("/home/root/rmkit-cn/space/shell/Space.qml", &pst) == 0)
+                    panelUrlNow += QStringLiteral("?v=%1").arg((long long)pst.st_mtime);
+            }
         }
         for (QQuickItem *c : col->childItems())
             if (c->objectName().toUtf8() == "advancedItem") {
@@ -1104,9 +1113,12 @@ static void doInject(QQmlEngine *engine) {
             }
         const QByteArray panelUrl = useSpace ? panelUrlNow.toUtf8() : QByteArray("file:///home/root/rmkit-cn/bin/adv_panel.qml");
         // 自更新留着的上一版外壳: 新外壳加载出错 (QML 写坏了) 时退回它, 用户至少还打得开空间
-        const QByteArray prevUrl = (useSpace && hooksMode() && access("/home/root/rmkit-cn/space/shell.prev/Space.qml", F_OK) == 0)
-                                       ? QByteArray("file:///home/root/rmkit-cn/space/shell.prev/Space.qml")
-                                       : QByteArray();
+        QByteArray prevUrl;
+        if (useSpace && hooksMode())
+            if (char *rp = realpath("/home/root/rmkit-cn/space/shell.prev/Space.qml", nullptr)) {
+                prevUrl = QByteArray("file://") + rp;
+                free(rp);
+            }
         // 开发模式 (~/.local/share/rmkit-cn/space/.dev): 每次点击都带时间戳重新读 QML, 改外壳不用重启 xochitl
         const bool devMode = useSpace && access("/home/root/.local/share/rmkit-cn/space/.dev", F_OK) == 0;
         fprintf(stderr, "[impl] 侧栏就绪, 注入%s...\n", useSpace ? "空间" : "高级");

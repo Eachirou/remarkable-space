@@ -39,7 +39,9 @@ ssh $SSHOPT "$D" "mkdir -p /home/root/rmkit-cn/space /home/root/remarkable-space
 # 会一直留着 —— 用户从商店装了新版、再删掉, 内置那份又冒出来, 看着就是"删不掉",
 # 再删一次还会收到"内置应用随 rmkit-cn 一起管理"。
 # 用户自己装的应用在 ~/.local/share/.../apps, 不在这里, 清空伤不到。
-tar -C "$HERE" -cf - shell kit apps hooks | ssh $SSHOPT "$D" "rm -rf /home/root/rmkit-cn/space/apps /home/root/rmkit-cn/space/hooks && tar -C /home/root/rmkit-cn/space -xf -"
+# shell/kit 可能是设备上自更新留下的链接 (指向 rel/<版本>/), 连同 rel/ 与 .prev 一起清掉, 装回真目录
+S=/home/root/rmkit-cn/space
+tar -C "$HERE" -cf - shell kit apps hooks themes | ssh $SSHOPT "$D" "rm -rf $S/apps $S/hooks $S/themes $S/shell $S/kit $S/rel $S/shell.prev $S/kit.prev && tar -C $S -xf -"
 
 echo "→ 推后端与静态页"
 tar -C "$HERE" -cf - static | ssh $SSHOPT "$D" "tar -C /home/root/remarkable-space -xf -"

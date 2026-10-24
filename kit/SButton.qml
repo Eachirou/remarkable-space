@@ -5,16 +5,17 @@ Rectangle {
     id: btn
     property string text: ""
     property bool primary: false
+    property var th: null          // 外壳传 space.th (主题); 不传就是默认样子
     property real ui: 1            // 字号/尺寸缩放 (外壳传 space.fontScale)
     signal clicked()
 
     implicitWidth: Math.max(Math.round(160 * ui), label.implicitWidth + Math.round(48 * ui))
     implicitHeight: Math.round(64 * ui)
     radius: 8
-    color: !btn.enabled ? "#eeeeee"
-         : btn.primary ? (mouse.pressed ? "#262626" : "#000000")
-         : (mouse.pressed ? "#eeeeee" : "transparent")
-    border.color: btn.primary ? "transparent" : "#1A1A1A"
+    color: !btn.enabled ? (th ? th.press : "#eeeeee")
+         : btn.primary ? (mouse.pressed ? (th ? th.text2 : "#262626") : (th ? th.primary : "#000000"))
+         : (mouse.pressed ? (th ? th.press : "#eeeeee") : "transparent")
+    border.color: btn.primary ? "transparent" : (th ? th.text : "#1A1A1A")
     border.width: btn.primary ? 0 : 1
 
     Text {
@@ -22,7 +23,7 @@ Rectangle {
         anchors.centerIn: parent
         text: btn.text
         font.pixelSize: Math.round(24 * btn.ui)
-        color: !btn.enabled ? "#26251F" : (btn.primary ? "#ffffff" : "#111111")
+        color: !btn.enabled ? (th ? th.text3 : "#26251F") : (btn.primary ? (th ? th.primaryText : "#ffffff") : (th ? th.text : "#111111"))
     }
     MouseArea {
         id: mouse

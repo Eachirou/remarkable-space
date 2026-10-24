@@ -8,13 +8,14 @@
 import QtQuick
 import QtQuick.Layouts
 import device.ui.controls
-import "file:///home/root/rmkit-cn/space/kit" as Kit
+// kit 按相对路径引入: 自更新后外壳从 rel/<版本>/shell 加载, ../kit 正好是同版本的 kit
+import "../kit" as Kit
 
 Rectangle {
     id: space
     objectName: "_rmkitSpace"
     anchors.fill: parent
-    color: "white"
+    color: space.th.bg
     visible: true
     z: 99999
 
@@ -30,7 +31,7 @@ Rectangle {
     // 2: 文件库桥 (/space/library/*: 热导入、建文件夹/笔记本, 外壳调 requestLoadEntry)。
     //    用到它的应用 (如手写画布 lib/ink) 在 manifest 里写 min_shell: 2
     readonly property int shellVersion: 3
-    readonly property string kitDir: "file:///home/root/rmkit-cn/space/kit"
+    readonly property string kitDir: String(Qt.resolvedUrl("../kit")).replace(/\/$/, "")   // 同上, 跟外壳同版本
     property string baseUrl: "http://127.0.0.1:8080"
     // ─── 尺寸基准: 不写死任何机型 ───
     // 以 Paper Pro Move 竖屏短边 954px 为 1.0; Paper Pro (1620x2160) 竖屏约 1.7。横屏时短边不变, 版式靠宽度自适应。
@@ -176,11 +177,42 @@ Rectangle {
     }
 
     function heroWidgetEnabled() { return space.heroChoice === "" }
+    // 封面: 用户自己设的 > 主题自带的 > 默认山水
     function heroImageUrl() {
         if (space.heroChoice !== "" && space.heroChoice !== "none")
             return space.baseUrl + "/hero/" + encodeURIComponent(space.heroChoice)
+        if (space.th.hero) return space.th.hero
         return space.kitDir + "/images/hero-default.jpg"
     }
+
+    // ─── 主题 (GET /space/theme, 见 internal/space/theme.go) ────────────
+    // 内置值就是默认主题 (= v1.0 的样子): 后台没起来或主题坏了照样画得出来。
+    // 墨水屏不做深色主题: 没写颜色的 Text 默认黑字, 主题只能在浅底上换。
+    readonly property var thDefault: ({
+        bg: "white", card: "white", fill: "#f0f0f0", press: "#eeeeee",
+        line: "#B4AFA6", lineSoft: "#C4BFB6", lineFaint: "#E2DED6",
+        text: "#000000", text2: "#262626", textBody: "#1A1A18", text3: "#26251F", textNote: "#1F1E1B",
+        primary: "#000000", primaryText: "white",
+        radius: 12, border: 1, hero: "", icons: ({}), slots: ({}), id: "default"
+    })
+    property var th: thDefault
+    function loadTheme() {
+        request("GET", baseUrl + "/space/theme", null, function (st, r) {
+            if (st !== 200 || !r) return
+            var t = Object.assign({}, space.thDefault)
+            var c = r.colors || {}
+            for (var k in c) if (t[k] !== undefined && typeof c[k] === "string") t[k] = c[k]
+            if (typeof r.radius === "number") t.radius = r.radius
+            if (typeof r.border === "number") t.border = r.border
+            t.hero = r.hero || ""
+            t.icons = r.icons || {}
+            t.slots = r.slots || {}
+            t.id = r.id || "default"
+            space.th = t
+        })
+    }
+    // kit 图标: 主题换了的用主题的
+    function icon(name) { return (space.th.icons && space.th.icons[name]) || (space.kitDir + "/icons/" + name + ".svg") }
     property var apps: []
     property string listError: ""
     property var storeApps: []
@@ -252,6 +284,10 @@ Rectangle {
         readonly property real fontScale: space.fs        // 字号缩放基准
         readonly property real screenWidth: space.width
         readonly property real screenHeight: space.height
+        readonly property var theme: space.th                 // 当前主题的颜色/圆角/描边 (键见 thDefault)
+        function icon(name) { return space.icon(name) }       // kit 图标 (主题换了的用主题的)
+        function reloadTheme() { space.loadTheme() }          // 个性化里换了主题后叫一下
+        function openStore() { space.closeApp(); space.tab = "discover" }   // 退出应用, 打开商店页
         property string appId: ""
         property string appDir: ""       // 应用目录 (绝对路径)
         property string dataDir: ""      // 应用私有数据目录 (卸载不删)
@@ -836,7 +872,7 @@ Rectangle {
     Timer { id: toastTimer; interval: 4000; repeat: false; onTriggered: space.toastText = "" }
     Timer { interval: 15000; running: space.visible; repeat: true; onTriggered: space.now = new Date() }
 
-    Component.onCompleted: { reload(); loadShellCfg(); loadTimezones(); loadDevice(); hideApploadEntry(); libStart() }
+    Component.onCompleted: { loadTheme(); reload(); loadShellCfg(); loadTimezones(); loadDevice(); hideApploadEntry(); libStart() }
     onVisibleChanged: { if (visible) { hideApploadEntry(); libStart() } else libStop() }
     Component.onDestruction: libStop()
 
@@ -1081,7 +1117,7 @@ Rectangle {
             anchors.verticalCenter: pageTitle.verticalCenter
             width: space.fpx(34); height: width
             sourceSize.width: width; sourceSize.height: width
-            source: space.kitDir + "/icons/caret-right.svg"
+            source: space.icon("caret-right")
             rotation: 180
             fillMode: Image.PreserveAspectFit
             MouseArea { anchors.fill: parent; anchors.margins: -20; onClicked: space.close() }
@@ -1118,7 +1154,7 @@ Rectangle {
         anchors.leftMargin: space.margin
         anchors.rightMargin: space.margin
         height: toastLabel.implicitHeight + 24
-        color: "#000000"
+        color: space.th.primary
         radius: 8
         Text {
             id: toastLabel
@@ -1126,7 +1162,7 @@ Rectangle {
             anchors.margins: 12
             text: space.toastText
             font.pixelSize: space.fpx(24)
-            color: "white"
+            color: space.th.primaryText
             wrapMode: Text.WordWrap
         }
     }
@@ -1155,14 +1191,24 @@ Rectangle {
                 width: parent.width
                 spacing: space.vpx(24)
 
+                // 主题替换的「hero」区域 (themes/README.md): 根 Item 带 property var space, 自己给 implicitHeight
+                Loader {
+                    Layout.fillWidth: true
+                    active: !!space.th.slots.hero
+                    visible: active
+                    source: space.th.slots.hero || ""
+                    Layout.preferredHeight: item ? item.implicitHeight : 0
+                    onLoaded: item.space = space
+                }
                 // 顶部大卡: 日期 + 时间; 装了 hero 小组件 (如天气) 则由它整卡接管
                 Rectangle {
+                    visible: !space.th.slots.hero
                     Layout.fillWidth: true
                     Layout.preferredHeight: space.vpx(562)   // 副标题省下的高度匀给插图
-                    radius: 12
-                    border.color: "#B4AFA6"
-                    border.width: 1
-                    color: "white"
+                    radius: space.th.radius
+                    border.color: space.th.line
+                    border.width: space.th.border
+                    color: space.th.card
                     clip: true
                     Item {
                         anchors.fill: parent
@@ -1189,11 +1235,13 @@ Rectangle {
                             id: heroCornerCut
                             Canvas {
                                 property bool atRight: false
+                                property color fill: space.th.card
+                                onFillChanged: requestPaint()
                                 width: 14; height: 14
                                 onPaint: {
                                     var ctx = getContext("2d")
                                     ctx.reset()
-                                    ctx.fillStyle = "white"
+                                    ctx.fillStyle = fill
                                     ctx.beginPath()
                                     if (atRight) {
                                         ctx.moveTo(width, 0); ctx.lineTo(width, height); ctx.lineTo(0, height)
@@ -1218,8 +1266,8 @@ Rectangle {
                         // 卡片自己的细描边被画盖住了, 补回来 —— 否则上半截有框下半截没有
                         Rectangle {
                             anchors.fill: parent
-                            color: "transparent"; radius: 12
-                            border.color: "#B4AFA6"; border.width: 1
+                            color: "transparent"; radius: space.th.radius
+                            border.color: space.th.line; border.width: space.th.border
                         }
                         Column {
                             anchors.left: parent.left
@@ -1227,9 +1275,9 @@ Rectangle {
                             anchors.top: parent.top
                             anchors.topMargin: space.vpx(40)
                             spacing: 8
-                            Text { text: space.dateLine(); font.pixelSize: space.fpx(26); color: "#262626" }
+                            Text { text: space.dateLine(); font.pixelSize: space.fpx(26); color: space.th.text2 }
                             Text { text: Qt.formatTime(space.localNow(), "HH:mm"); font.pixelSize: space.fpx(88); font.weight: Font.Light }
-                            Text { text: space.st("hero_quiet"); font.pixelSize: space.fpx(22); color: "#26251F" }
+                            Text { text: space.st("hero_quiet"); font.pixelSize: space.fpx(22); color: space.th.text3 }
                         }
                     }
                     Item {
@@ -1245,7 +1293,17 @@ Rectangle {
                 // ── 今日计划 / 正在进行: 左右两张卡 (照概念图) ────────────────
                 // 左卡交给声明了 widget_slot: "plan" 的应用; 没装就显示引导。
                 // 右卡是外壳自带: 最近在读 (/space/recent, 读 xochitl 元数据) + 其余半宽小组件。
+                // 主题替换的「widgets」区域 (themes/README.md): 根 Item 带 property var space, 自己给 implicitHeight
+                Loader {
+                    Layout.fillWidth: true
+                    active: !!space.th.slots.widgets
+                    visible: active
+                    source: space.th.slots.widgets || ""
+                    Layout.preferredHeight: item ? item.implicitHeight : 0
+                    onLoaded: item.space = space
+                }
                 GridLayout {
+                    visible: !space.th.slots.widgets
                     Layout.fillWidth: true
                     columns: 2
                     columnSpacing: space.px(24)
@@ -1254,17 +1312,17 @@ Rectangle {
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: space.vpx(350)
-                        radius: 12; border.color: "#B4AFA6"; border.width: 1; color: "white"; clip: true
+                        radius: space.th.radius; border.color: space.th.line; border.width: space.th.border; color: space.th.card; clip: true
                         readonly property var planApp: space.slotWidgetApp("plan")
 
                         Column {
                             anchors.fill: parent; anchors.margins: space.px(22); spacing: space.vpx(12)
                             visible: parent.planApp === null
-                            Text { text: space.st("plan_today"); font.pixelSize: space.fpx(28); font.weight: Font.Medium; color: "#000000" }
+                            Text { text: space.st("plan_today"); font.pixelSize: space.fpx(28); font.weight: Font.Medium; color: space.th.text }
                             Text {
                                 width: parent.width
                                 text: space.st("plan_empty")
-                                font.pixelSize: space.fpx(22); color: "#1F1E1B"; wrapMode: Text.WordWrap
+                                font.pixelSize: space.fpx(22); color: space.th.textNote; wrapMode: Text.WordWrap
                             }
                         }
                         Item {
@@ -1285,13 +1343,13 @@ Rectangle {
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: space.vpx(350)
-                        radius: 12; border.color: "#B4AFA6"; border.width: 1; color: "white"; clip: true
+                        radius: space.th.radius; border.color: space.th.line; border.width: space.th.border; color: space.th.card; clip: true
                         readonly property bool hasRecent: space.recentDoc !== null
                         readonly property bool hasHalf: space.plainWidgetApps().length > 0
 
                         Column {
                             anchors.fill: parent; anchors.margins: space.px(22); spacing: space.vpx(10)
-                            Text { text: space.st("ongoing"); font.pixelSize: space.fpx(28); font.weight: Font.Medium; color: "#000000" }
+                            Text { text: space.st("ongoing"); font.pixelSize: space.fpx(28); font.weight: Font.Medium; color: space.th.text }
 
                             Item {
                                 width: parent.width
@@ -1302,7 +1360,7 @@ Rectangle {
                                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                                     width: space.fpx(44); height: width
                                     sourceSize.width: width; sourceSize.height: width
-                                    source: space.kitDir + "/icons/book-open.svg"
+                                    source: space.icon("book-open")
                                     fillMode: Image.PreserveAspectFit
                                 }
                                 Column {
@@ -1313,21 +1371,21 @@ Rectangle {
                                     Text {
                                         width: parent.width
                                         text: space.recentDoc ? space.recentDoc.name : ""
-                                        font.pixelSize: space.fpx(25); color: "#000000"; elide: Text.ElideRight
+                                        font.pixelSize: space.fpx(25); color: space.th.text; elide: Text.ElideRight
                                     }
                                     Text {
                                         text: space.recentDoc && space.recentDoc.pages > 0
                                               ? space.st("reading_progress", { pct: space.recentDoc.percent })
                                               : (space.recentDoc ? space.st("reading_page", { page: space.recentDoc.page }) : "")
-                                        font.pixelSize: space.fpx(21); color: "#1F1E1B"
+                                        font.pixelSize: space.fpx(21); color: space.th.textNote
                                     }
                                     Rectangle {
-                                        width: parent.width; height: 4; radius: 2; color: "#C4BFB6"
+                                        width: parent.width; height: 4; radius: 2; color: space.th.lineSoft
                                         visible: !!space.recentDoc && space.recentDoc.pages > 0
                                         Rectangle {
                                             anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
                                             width: Math.max(4, parent.width * (space.recentDoc ? space.recentDoc.percent : 0) / 100)
-                                            radius: 2; color: "#000000"
+                                            radius: 2; color: space.th.text
                                         }
                                     }
                                 }
@@ -1335,7 +1393,7 @@ Rectangle {
                             }
 
                             Rectangle {
-                                width: parent.width; height: 1; color: "#C4BFB6"
+                                width: parent.width; height: 1; color: space.th.lineSoft
                                 visible: parent.parent.hasRecent && parent.parent.hasHalf
                             }
 
@@ -1354,13 +1412,14 @@ Rectangle {
                 }
 
                 RowLayout {
+                    visible: !space.th.slots.apps
                     Layout.fillWidth: true
                     Text { text: space.st("my_apps"); font.pixelSize: space.fpx(32); font.weight: Font.Medium }
                     Item { Layout.fillWidth: true }
                     Text {
                         text: space.st("all_apps")
                         font.pixelSize: space.fpx(24)
-                        color: "#262626"
+                        color: space.th.text2
                         MouseArea { anchors.fill: parent; anchors.margins: -12; onClicked: space.tab = "apps" }
                     }
                 }
@@ -1376,12 +1435,13 @@ Rectangle {
                     visible: space.listError === "" && space.apps.length === 0
                     text: space.st("apps_empty")
                     font.pixelSize: space.fpx(24)
-                    color: "#262626"
+                    color: space.th.text2
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
                 GridLayout {
                     id: homeGrid
+                    visible: !space.th.slots.apps
                     Layout.fillWidth: true
                     columns: space.cols(width, 200)
                     rowSpacing: space.vpx(24)
@@ -1389,6 +1449,7 @@ Rectangle {
                     Repeater {
                         model: space.homeApps()
                         delegate: Kit.STile {
+                            th: space.th
                             required property var modelData
                             Layout.fillWidth: true
                             Layout.preferredHeight: space.vpx(170)
@@ -1399,6 +1460,15 @@ Rectangle {
                             onClicked: space.open(modelData)
                         }
                     }
+                }
+                // 主题替换的「apps」区域 (themes/README.md): 根 Item 带 property var space, 自己给 implicitHeight
+                Loader {
+                    Layout.fillWidth: true
+                    active: !!space.th.slots.apps
+                    visible: active
+                    source: space.th.slots.apps || ""
+                    Layout.preferredHeight: item ? item.implicitHeight : 0
+                    onLoaded: item.space = space
                 }
             }
         }
@@ -1419,6 +1489,7 @@ Rectangle {
                 Repeater {
                     model: space.userApps()
                     delegate: Kit.STile {
+                        th: space.th
                         required property var modelData
                         Layout.fillWidth: true
                         Layout.preferredHeight: space.vpx(220)
@@ -1448,30 +1519,30 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: space.vpx(150)
                     Layout.bottomMargin: space.vpx(24)
-                    radius: 12
-                    color: "#f0f0f0"
+                    radius: space.th.radius
+                    color: space.th.fill
                     Column {
                         anchors.centerIn: parent
                         spacing: 8
                         Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("hero_tagline_1"); font.pixelSize: space.fpx(34); font.weight: Font.Medium }
-                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("hero_tagline_2"); font.pixelSize: space.fpx(24); color: "#1A1A18" }
+                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("hero_tagline_2"); font.pixelSize: space.fpx(24); color: space.th.textBody }
                     }
                 }
                 Text {
                     visible: !space.storeLoaded
                     text: space.st("store_loading")
-                    font.pixelSize: space.fpx(24); color: "#1A1A18"
+                    font.pixelSize: space.fpx(24); color: space.th.textBody
                 }
                 Text {
                     visible: space.storeError !== ""
                     Layout.fillWidth: true
                     text: space.storeError + "\n" + space.st("store_offline")
-                    font.pixelSize: space.fpx(24); color: "#1A1A18"; wrapMode: Text.WordWrap
+                    font.pixelSize: space.fpx(24); color: space.th.textBody; wrapMode: Text.WordWrap
                 }
                 Text {
                     visible: space.storeLoaded && space.storeError === "" && space.storeApps.length === 0
                     text: space.st("store_empty")
-                    font.pixelSize: space.fpx(24); color: "#1A1A18"
+                    font.pixelSize: space.fpx(24); color: space.th.textBody
                 }
                 Repeater {
                     model: space.storeApps
@@ -1485,8 +1556,8 @@ Rectangle {
                             anchors.fill: parent
                             spacing: space.px(20)
                             Rectangle {
-                                Layout.preferredWidth: space.fpx(72); Layout.preferredHeight: space.fpx(72); radius: 12
-                                color: "#f0f0f0"
+                                Layout.preferredWidth: space.fpx(72); Layout.preferredHeight: space.fpx(72); radius: space.th.radius
+                                color: space.th.fill
                                 Text { anchors.centerIn: parent; text: (storeRow.modelData.name || "?").charAt(0); font.pixelSize: space.fpx(32) }
                             }
                             ColumnLayout {
@@ -1498,11 +1569,12 @@ Rectangle {
                                           + (storeRow.modelData.locked === true
                                              ? "\u3000" + space.st("need_purchase") + (storeRow.modelData.price ? " " + storeRow.modelData.price : "")
                                              : "")
-                                    font.pixelSize: space.fpx(22); color: "#26251F"; elide: Text.ElideRight; Layout.fillWidth: true
+                                    font.pixelSize: space.fpx(22); color: space.th.text3; elide: Text.ElideRight; Layout.fillWidth: true
                                 }
                             }
                             // 装过的才给删除按钮; 内置应用不在商店里, 不用担心误删
                             Kit.SButton {
+                                th: space.th
                                 ui: space.fs
                                 visible: storeRow.installed !== ""
                                 text: space.st("act_delete")
@@ -1512,6 +1584,7 @@ Rectangle {
                                     function () { space.uninstallApp(storeRow.modelData) })
                             }
                             Kit.SButton {
+                                th: space.th
                                 ui: space.fs
                                 readonly property bool locked: storeRow.modelData.locked === true
                                 // 线上比本机新才算有更新 (本机更新或一样 = 已安装, 不让点, 免得降级)
@@ -1528,7 +1601,7 @@ Rectangle {
                                 }
                             }
                         }
-                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: "#C4BFB6" }
+                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: space.th.lineSoft }
                     }
                 }
             }
@@ -1548,6 +1621,7 @@ Rectangle {
                 Repeater {
                     model: space.settingsApps()
                     delegate: Kit.SRow {
+                        th: space.th
                         required property var modelData
                         Layout.fillWidth: true
                         ui: space.fs
@@ -1557,19 +1631,21 @@ Rectangle {
                     }
                 }
                 Kit.SRow {
+                    th: space.th
                     // 能读到系统语言时空间直接跟系统走, 这一项就没意义了
                     visible: space.langSystem === ""
                     Layout.fillWidth: true
                     ui: space.fs
-                    iconSource: space.kitDir + "/icons/translate.svg"
+                    iconSource: space.icon("translate")
                     text: space.st("set_language")
                     detail: space.lang === "zh-CN" ? "\u4e2d\u6587\uff08\u7b80\u4f53\uff09" : "English"
                     onClicked: space.chooseLang(space.lang === "zh-CN" ? "en" : "zh-CN")
                 }
                 Kit.SRow {
+                    th: space.th
                     Layout.fillWidth: true
                     ui: space.fs
-                    iconSource: space.kitDir + "/icons/sun.svg"
+                    iconSource: space.icon("sun")
                     text: space.st("set_screenmode")
                     detail: space.screenModeLabel(space.screenMode)
                     onClicked: space.screenModeOpen = !space.screenModeOpen
@@ -1581,7 +1657,7 @@ Rectangle {
                         required property string modelData
                         Layout.fillWidth: true
                         implicitHeight: space.fpx(96)
-                        Rectangle { anchors.fill: parent; color: smMouse.pressed ? "#eeeeee" : "transparent" }
+                        Rectangle { anchors.fill: parent; color: smMouse.pressed ? space.th.press : "transparent" }
                         Column {
                             anchors.left: parent.left; anchors.leftMargin: space.fpx(72)
                             anchors.right: smCheck.left; anchors.rightMargin: space.fpx(16)
@@ -1591,7 +1667,7 @@ Rectangle {
                             Text {
                                 width: parent.width
                                 text: space.st("screenmode_" + modelData + "_hint")
-                                font.pixelSize: space.fpx(20); color: "#26251F"
+                                font.pixelSize: space.fpx(20); color: space.th.text3
                                 elide: Text.ElideRight
                             }
                         }
@@ -1601,10 +1677,10 @@ Rectangle {
                             anchors.verticalCenter: parent.verticalCenter
                             width: space.fpx(28); height: width
                             sourceSize.width: width; sourceSize.height: height
-                            source: space.kitDir + "/icons/check.svg"
+                            source: space.icon("check")
                             opacity: modelData === space.screenMode ? 1 : 0
                         }
-                        Rectangle { anchors.left: parent.left; anchors.leftMargin: space.fpx(72); anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: "#E2DED6" }
+                        Rectangle { anchors.left: parent.left; anchors.leftMargin: space.fpx(72); anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: space.th.lineFaint }
                         MouseArea {
                             id: smMouse
                             anchors.fill: parent
@@ -1613,9 +1689,10 @@ Rectangle {
                     }
                 }
                 Kit.SRow {
+                    th: space.th
                     Layout.fillWidth: true
                     ui: space.fs
-                    iconSource: space.kitDir + "/icons/clock.svg"
+                    iconSource: space.icon("clock")
                     text: space.st("set_timezone")
                     detail: space.tzLabel(space.tzName) + "\u3000" + space.tzOffsetText(space.tzOffset)
                     onClicked: {
@@ -1633,7 +1710,7 @@ Rectangle {
                     text: space.st("tz_hint")
                     wrapMode: Text.WordWrap
                     font.pixelSize: space.fpx(20)
-                    color: "#26251F"
+                    color: space.th.text3
                 }
                 Repeater {
                     model: space.tzOpen ? space.tzList : []
@@ -1641,7 +1718,7 @@ Rectangle {
                         required property var modelData
                         Layout.fillWidth: true
                         implicitHeight: space.fpx(76)
-                        Rectangle { anchors.fill: parent; color: tzMouse.pressed ? "#eeeeee" : "transparent" }
+                        Rectangle { anchors.fill: parent; color: tzMouse.pressed ? space.th.press : "transparent" }
                         Text {
                             anchors.left: parent.left; anchors.leftMargin: space.fpx(72)
                             anchors.right: tzOff.left; anchors.rightMargin: space.fpx(16)
@@ -1656,7 +1733,7 @@ Rectangle {
                             anchors.verticalCenter: parent.verticalCenter
                             text: space.tzOffsetText(modelData.offset)
                             font.pixelSize: space.fpx(22)
-                            color: "#26251F"
+                            color: space.th.text3
                         }
                         Image {
                             id: tzCheck
@@ -1664,18 +1741,19 @@ Rectangle {
                             anchors.verticalCenter: parent.verticalCenter
                             width: space.fpx(28); height: width
                             sourceSize.width: width; sourceSize.height: height
-                            source: space.kitDir + "/icons/check.svg"
+                            source: space.icon("check")
                             opacity: modelData.name === space.tzName ? 1 : 0
                         }
-                        Rectangle { anchors.left: parent.left; anchors.leftMargin: space.fpx(72); anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: "#E2DED6" }
+                        Rectangle { anchors.left: parent.left; anchors.leftMargin: space.fpx(72); anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: space.th.lineFaint }
                         MouseArea { id: tzMouse; anchors.fill: parent; onClicked: space.chooseTimezone(modelData.name) }
                     }
                 }
                 // 关于空间: 版本号; 商店有新版本时可以点, 在设备上自更新 (internal/space/selfupdate.go)
                 Kit.SRow {
+                    th: space.th
                     Layout.fillWidth: true
                     ui: space.fs
-                    iconSource: space.kitDir + "/icons/squares-four.svg"
+                    iconSource: space.icon("squares-four")
                     text: space.st("about")
                     detail: space.updDetail()
                     interactive: space.updCanStart()
@@ -1693,8 +1771,8 @@ Rectangle {
                         sourceSize.width: 600; sourceSize.height: 600
                         fillMode: Image.PreserveAspectFit
                     }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("about_xhs"); font.pixelSize: space.fpx(24); color: "#000000" }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("about_xhs_id"); font.pixelSize: space.fpx(20); color: "#000000" }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("about_xhs"); font.pixelSize: space.fpx(24); color: space.th.text }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("about_xhs_id"); font.pixelSize: space.fpx(20); color: space.th.text }
                 }
             }
         }
@@ -1723,8 +1801,8 @@ Rectangle {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         height: space.vpx(120)
-        color: "white"
-        Rectangle { anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right; height: 1; color: "#B4AFA6" }
+        color: space.th.bg
+        Rectangle { anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right; height: 1; color: space.th.line }
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: space.margin
@@ -1759,12 +1837,12 @@ Rectangle {
                             text: tabItem.modelData.label
                             font.pixelSize: space.fpx(22)
                             font.weight: tabItem.active ? Font.Medium : Font.Normal
-                            color: tabItem.active ? "#000000" : "#26251F"
+                            color: tabItem.active ? space.th.text : space.th.text3
                         }
                         Rectangle {
                             anchors.horizontalCenter: parent.horizontalCenter
                             width: 28; height: 3
-                            color: tabItem.active ? "#000000" : "transparent"
+                            color: tabItem.active ? space.th.text : "transparent"
                         }
                     }
                     MouseArea {
@@ -1801,8 +1879,8 @@ Rectangle {
             anchors.centerIn: parent
             width: Math.min(parent.width - space.px(160), space.px(900))
             height: confirmCol.implicitHeight + space.vpx(96)
-            color: "white"
-            radius: 12
+            color: space.th.card
+            radius: space.th.radius
             ColumnLayout {
                 id: confirmCol
                 anchors.centerIn: parent
@@ -1819,11 +1897,13 @@ Rectangle {
                     Layout.alignment: Qt.AlignRight
                     spacing: 24
                     Kit.SButton {
+                        th: space.th
                         ui: space.fs; text: space.st("cancel")
                         visible: !space.askNotice
                         onClicked: { if (space.askText !== "") space.askDone(false); else space.confirmApp = null }
                     }
                     Kit.SButton {
+                        th: space.th
                         ui: space.fs; text: space.askNotice ? space.st("got_it") : space.st("ok"); primary: true
                         onClicked: { if (space.askText !== "") space.askDone(true); else space.launch(space.confirmApp) }
                     }

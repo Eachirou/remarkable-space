@@ -8,13 +8,14 @@ Item {
     property string text: ""
     property string detail: ""
     property bool showArrow: true
+    property var th: null          // 外壳传 space.th (主题); 不传就是默认样子
     // 纯展示的行 (比如版本号): 不接点击, 也不给按下的灰底 —— 有反馈却没反应最让人困惑
     property bool interactive: true
     property real ui: 1            // 字号/尺寸缩放 (外壳传 space.fontScale)
     signal clicked()
 
     implicitHeight: Math.round(96 * ui)
-    Rectangle { anchors.fill: parent; color: (row.interactive && mouse.pressed) ? "#eeeeee" : "transparent" }
+    Rectangle { anchors.fill: parent; color: (row.interactive && mouse.pressed) ? (th ? th.press : "#eeeeee") : "transparent" }
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: 16
@@ -39,19 +40,19 @@ Item {
             visible: row.detail !== ""
             text: row.detail
             font.pixelSize: Math.round(22 * row.ui)
-            color: "#26251F"
+            color: row.th ? row.th.text3 : "#26251F"
         }
         Image {
             visible: row.showArrow && row.interactive
             Layout.preferredWidth: 24
             Layout.preferredHeight: 24
-            source: "file:///home/root/rmkit-cn/space/kit/icons/caret-right.svg"
+            source: Qt.resolvedUrl("icons/caret-right.svg")
             fillMode: Image.PreserveAspectFit
             sourceSize.width: 24
             sourceSize.height: 24
             opacity: 0.6
         }
     }
-    Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: "#C4BFB6" }
+    Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: row.th ? row.th.lineSoft : "#C4BFB6" }
     MouseArea { id: mouse; anchors.fill: parent; enabled: row.interactive; onClicked: row.clicked() }
 }

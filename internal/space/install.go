@@ -65,6 +65,12 @@ func (r *Registry) InstallZip(zr *zip.Reader, hdr http.Header, sup *Supervisor) 
 			_ = os.RemoveAll(filepath.Join(r.ModuleDir, name))
 		}
 	}
+	if m.Theme != "" {
+		if err := r.linkTheme(final, m); err != nil {
+			_ = os.RemoveAll(final)
+			return App{}, err
+		}
+	}
 	if len(m.Hooks) > 0 {
 		if err := r.linkHooks(final, m); err != nil {
 			_ = os.RemoveAll(final)
@@ -195,6 +201,7 @@ func (r *Registry) Uninstall(id string, sup *Supervisor) error {
 	}
 	r.unlinkStickers(dir)
 	r.unlinkHooks(dir)
+	r.unlinkTheme(dir)
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}

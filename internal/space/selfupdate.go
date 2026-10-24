@@ -32,8 +32,13 @@ import (
 // UpdateID 商店索引里空间自己那一项的 id
 const UpdateID = "space"
 
-// 自更新换掉的部分: 空间目录下的四个 + 后台目录下的两个
-var updateSpaceParts = []string{"shell", "kit", "apps", "hooks"}
+// 自更新换掉的部分。shell/kit 按版本放 rel/<版本>/ 下、用链接切换 (见 swapVersioned);
+// 其余整目录改名换, 旧的留 .prev。
+var (
+	updateLinked     = []string{"shell", "kit"}
+	updateSpaceParts = []string{"apps", "hooks", "themes"}
+	versionDirSafeRe = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+)
 
 type updateState struct {
 	Phase string `json:"phase"` // "" / downloading / verifying / testing / switching / restarting / error
@@ -217,8 +222,11 @@ func (h *Handler) runUpdate(url, sha, version string) error {
 	if err != nil {
 		return fmt.Errorf("新版本自检没通过: %v %s", err, strings.TrimSpace(string(out)))
 	}
-	// 4. 换: 旧的改名 .prev, 新的放进去
+	// 4. 换: 外壳与组件切链接到 rel/<新版本>/; 其余旧的改名 .prev, 新的放进去
 	setUpd(func(s *updateState) { s.Phase = "switching" })
+	if err := h.swapVersioned(stage, version); err != nil {
+		return err
+	}
 	type part struct{ cur, next string }
 	var parts []part
 	for _, p := range updateSpaceParts {
@@ -249,6 +257,65 @@ func (h *Handler) runUpdate(url, sha, version string) error {
 	return h.startGuard()
 }
 
+// swapVersioned 外壳 shell/ 与组件 kit/ 放进 rel/<版本>/, 再把 shell、kit 两个链接原子地指过去,
+// shell.prev / kit.prev 指着上一版。为什么不像别的目录那样直接改名换: xochitl 一次运行里按地址缓存
+// 编译好的 QML, 同一路径换了内容它看不见 —— 新外壳配旧 kit 组件会直接加载失败。注入库按真实路径
+// 加载外壳 (rel/<版本>/shell/Space.qml), 外壳相对引入 ../kit, 每个版本地址都不一样。
+func (h *Handler) swapVersioned(stage, version string) error {
+	root := h.spaceRoot()
+	ver := versionDirSafeRe.ReplaceAllString(strings.TrimPrefix(version, "v"), "_")
+	dst := filepath.Join(root, "rel", ver)
+	_ = os.RemoveAll(dst)
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	for _, p := range updateLinked {
+		if err := os.Rename(filepath.Join(stage, p), filepath.Join(dst, p)); err != nil {
+			return fmt.Errorf("放 %s 失败: %w", p, err)
+		}
+	}
+	keep := map[string]bool{ver: true}
+	for _, p := range updateLinked {
+		cur := filepath.Join(root, p)
+		// 助手装的是真目录: 先挪进 rel/<当前版本>/, 当作上一版
+		if st, err := os.Lstat(cur); err == nil && st.Mode()&os.ModeSymlink == 0 {
+			old := versionDirSafeRe.ReplaceAllString(strings.TrimPrefix(h.SpaceVersion(), "v"), "_")
+			if old == "" || old == ver {
+				old = "base"
+			}
+			od := filepath.Join(root, "rel", old)
+			_ = os.MkdirAll(od, 0o755)
+			_ = os.RemoveAll(filepath.Join(od, p))
+			if err := os.Rename(cur, filepath.Join(od, p)); err != nil {
+				return fmt.Errorf("挪旧的 %s 失败: %w", p, err)
+			}
+			_ = os.Symlink(filepath.Join(od, p), cur)
+		}
+		prevTarget, _ := os.Readlink(cur)
+		if prevTarget != "" {
+			keep[filepath.Base(filepath.Dir(prevTarget))] = true
+			_ = os.Remove(cur + ".prev")
+			_ = os.Symlink(prevTarget, cur+".prev")
+		}
+		tmp := cur + ".new"
+		_ = os.Remove(tmp)
+		if err := os.Symlink(filepath.Join(dst, p), tmp); err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, cur); err != nil { // rename 覆盖链接是原子的
+			return fmt.Errorf("切 %s 失败: %w", p, err)
+		}
+	}
+	// 只留当前和上一版
+	ents, _ := os.ReadDir(filepath.Join(root, "rel"))
+	for _, e := range ents {
+		if !keep[e.Name()] {
+			_ = os.RemoveAll(filepath.Join(root, "rel", e.Name()))
+		}
+	}
+	return nil
+}
+
 func (h *Handler) startGuard() error {
 	sd, sr, vf := serverDir(), h.spaceRoot(), h.versionFile()
 	var paths []string
@@ -256,6 +323,10 @@ func (h *Handler) startGuard() error {
 		paths = append(paths, filepath.Join(sr, p))
 	}
 	paths = append(paths, filepath.Join(sd, "static"), filepath.Join(sd, "space-server"))
+	var linked []string
+	for _, p := range updateLinked {
+		linked = append(linked, filepath.Join(sr, p))
+	}
 	script := `#!/bin/sh
 # 空间自更新的看门狗 (space-server 写的, 每次更新覆盖)。不随 space-server 退出: systemd-run 起的独立单元。
 systemctl restart remarkable-space.service
@@ -266,6 +337,9 @@ while [ $i -lt 60 ]; do
 done
 for p in ` + strings.Join(paths, " ") + `; do
   if [ -e "$p.prev" ]; then rm -rf "$p.failed"; mv "$p" "$p.failed"; mv "$p.prev" "$p"; fi
+done
+for p in ` + strings.Join(linked, " ") + `; do
+  if [ -L "$p.prev" ]; then ln -sfn "$(readlink "$p.prev")" "$p"; fi
 done
 [ -e ` + vf + `.prev ] && mv ` + vf + `.prev ` + vf + `
 echo rollback > ` + sd + `/.update-result

@@ -1,0 +1,15 @@
+{
+  "id": "default",
+  "name": "默认",
+  "name_en": "Default",
+  "version": "1.0.0",
+  "min_shell": 3,
+  "colors": {
+    "bg": "#FFFFFF", "card": "#FFFFFF", "fill": "#F0F0F0", "press": "#EEEEEE",
+    "line": "#B4AFA6", "lineSoft": "#C4BFB6", "lineFaint": "#E2DED6",
+    "text": "#000000", "text2": "#262626", "textBody": "#1A1A18", "text3": "#26251F", "textNote": "#1F1E1B",
+    "primary": "#000000", "primaryText": "#FFFFFF"
+  },
+  "radius": 12,
+  "border": 1
+}

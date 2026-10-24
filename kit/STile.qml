@@ -7,14 +7,15 @@ Rectangle {
     property url iconSource
     property string label: ""
     property bool dimmed: false
+    property var th: null          // 外壳传 space.th (主题); 不传就是默认样子
     property int iconSize: 48
     property int labelSize: 22
     signal clicked()
 
-    color: mouse.pressed ? "#eeeeee" : "white"
-    border.color: "#B4AFA6"
-    border.width: 1
-    radius: 10
+    color: mouse.pressed ? (th ? th.press : "#eeeeee") : (th ? th.card : "white")
+    border.color: th ? th.line : "#B4AFA6"
+    border.width: th ? th.border : 1
+    radius: th ? Math.max(0, th.radius - 2) : 10
     opacity: dimmed ? 0.4 : 1
 
     ColumnLayout {

@@ -1,4 +1,4 @@
-// 个性化 — 「空间」内置设置项: 字体 / 休眠壁纸 / 空间插图
+// 个性化 — 「空间」内置设置项: 主题 / 字体 / 休眠壁纸 / 空间插图
 //
 // 三样都是"换个样子"的事, 原来字体与壁纸上下堆在一张长页里, 插图又单独藏在空间设置
 // 的二级页 —— 同一类事分在两处。改成三个页签并到这里。
@@ -30,7 +30,30 @@ Item {
     //   其它    用户自己传的文件名
     property string _rmhHero: ""
     ListModel { id: _rmhHeroModel }
-    property string sect: "font"          // font / screen / hero
+    property string sect: "theme"         // theme / font / screen / hero
+
+    // ─── 主题 (internal/space/theme.go) ───
+    // 点一个就换 (存在后台, 外壳马上重读); 商店里的主题装好后自动出现在这里。
+    property string _rmhTheme: ""
+    ListModel { id: _rmhThemeModel }
+    function refreshThemes() {
+        space.get("/space/themes", function (st, r) {
+            if (st !== 200 || !r) return
+            _rmhThemeModel.clear()
+            root._rmhTheme = r.active || "default"
+            for (var i = 0; i < (r.themes || []).length; ++i) {
+                var t = r.themes[i]
+                _rmhThemeModel.append({ tid: t.id, tname: (space.lang === "en" && t.name_en) ? t.name_en : t.name, tpreview: t.preview || "" })
+            }
+        })
+    }
+    function setTheme(id) {
+        root._rmhTheme = id
+        space.request("PUT", space.baseUrl + "/space/theme", { id: id }, function (st) {
+            if (st === 200) space.reloadTheme()
+            else root.refreshThemes()
+        })
+    }
 
     function refreshHero() {
         _rmhHeroModel.clear()
@@ -61,7 +84,7 @@ Item {
         })
     }
 
-    Component.onCompleted: { refreshFonts(); refreshScreens(); refreshHero() }
+    Component.onCompleted: { refreshThemes(); refreshFonts(); refreshScreens(); refreshHero() }
 
     // 有变更时右上角出space.tr("apply") (放在外壳标题那一行的右侧)
     IconButton {
@@ -94,12 +117,12 @@ Item {
                 Layout.bottomMargin: 8
                 spacing: 0
                 Repeater {
-                    model: [{ k: "font", t: space.tr("tab_font") }, { k: "screen", t: space.tr("tab_wallpaper") },
-                            { k: "hero", t: space.tr("tab_hero") }]
+                    model: [{ k: "theme", t: space.tr("tab_theme") }, { k: "font", t: space.tr("tab_font") },
+                            { k: "screen", t: space.tr("tab_wallpaper") }, { k: "hero", t: space.tr("tab_hero") }]
                     delegate: Rectangle {
                         required property var modelData
                         readonly property bool on: root.sect === modelData.k
-                        width: Math.round((_rmhPersCol.width - 2) / 3)
+                        width: Math.round((_rmhPersCol.width - 2) / 4)
                         height: 68
                         color: on ? "#262626" : "white"
                         border.color: "#B4AFA6"
@@ -114,6 +137,80 @@ Item {
                         MouseArea { anchors.fill: parent; onClicked: root.sect = parent.modelData.k }
                     }
                 }
+            }
+
+            // ─── 主题 ────────────────────────────────────
+            RowLayout {
+                visible: root.sect === "theme"
+                Layout.fillWidth: true
+                Text { text: space.tr("tab_theme"); font.pixelSize: 32; font.weight: Font.Medium }
+                Item { Layout.fillWidth: true }
+                IconButton {
+                    iconSource: "qrc:/ark/icons/restore"
+                    title: space.tr("refresh")
+                    onClicked: root.refreshThemes()
+                }
+            }
+            Text {
+                visible: root.sect === "theme"
+                Layout.fillWidth: true
+                text: space.tr("theme_hint")
+                font.pixelSize: 22
+                color: "#4A4A46"
+                wrapMode: Text.WordWrap
+            }
+            Repeater {
+                model: _rmhThemeModel
+                delegate: Rectangle {
+                    id: _rmhThemeCell
+                    required property string tid
+                    required property string tname
+                    required property string tpreview
+                    visible: root.sect === "theme"
+                    readonly property bool sel: root._rmhTheme === tid
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: tpreview !== "" ? 72 + Math.round(width / 2) : 88
+                    radius: 8
+                    color: "white"
+                    border.color: sel ? "#262626" : "#C4BFB6"
+                    border.width: sel ? 3 : 1
+                    clip: true
+                    Text {
+                        anchors.top: parent.top; anchors.topMargin: 24
+                        anchors.left: parent.left; anchors.leftMargin: 20
+                        text: _rmhThemeCell.tname
+                        font.pixelSize: 26
+                        font.weight: _rmhThemeCell.sel ? Font.Medium : Font.Normal
+                    }
+                    Text {
+                        visible: _rmhThemeCell.sel
+                        anchors.top: parent.top; anchors.topMargin: 28
+                        anchors.right: parent.right; anchors.rightMargin: 20
+                        text: space.tr("active")
+                        font.pixelSize: 22
+                        color: "#262626"
+                    }
+                    Image {
+                        anchors.left: parent.left; anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.leftMargin: 1; anchors.rightMargin: 1; anchors.bottomMargin: 1
+                        height: Math.round(width / 2)
+                        source: _rmhThemeCell.tpreview
+                        sourceSize.width: width
+                        fillMode: Image.PreserveAspectCrop
+                        visible: _rmhThemeCell.tpreview !== "" && status === Image.Ready
+                    }
+                    MouseArea { anchors.fill: parent; onClicked: root.setTheme(_rmhThemeCell.tid) }
+                }
+            }
+            Text {
+                visible: root.sect === "theme"
+                Layout.fillWidth: true
+                Layout.topMargin: 8
+                text: space.tr("theme_more")
+                font.pixelSize: 24
+                font.underline: true
+                MouseArea { anchors.fill: parent; anchors.margins: -12; onClicked: space.openStore() }
             }
 
             // ─── 字体 ────────────────────────────────────
@@ -344,7 +441,7 @@ Item {
                         index === 0 ? space.tr("hero_auto") : (index === 1 ? space.tr("hero_builtin") : rowKey)
                     readonly property string rowPreview:
                         index === 0 ? ""
-                        : (index === 1 ? root.space.kitDir + "/images/hero-default.jpg"
+                        : (index === 1 ? ((root.space.theme && root.space.theme.hero) || root.space.kitDir + "/images/hero-default.jpg")
                            : root.space.baseUrl + "/hero/" + encodeURIComponent(rowKey))
                     readonly property bool sel: root._rmhHero === rowKey
 

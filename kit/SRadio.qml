@@ -6,6 +6,7 @@ Item {
     id: radio
     property string text: ""
     property bool checked: false
+    property var th: null          // 外壳传 space.th (主题); 不传就是默认样子
     signal clicked()
 
     implicitWidth: row.implicitWidth
@@ -21,13 +22,13 @@ Item {
             Layout.alignment: Qt.AlignVCenter
             radius: 14
             border.width: 2
-            border.color: "black"
-            color: "white"
+            border.color: radio.th ? radio.th.text : "black"
+            color: radio.th ? radio.th.card : "white"
             Rectangle {
                 anchors.centerIn: parent
                 width: 16; height: 16
                 radius: 8
-                color: "black"
+                color: radio.th ? radio.th.text : "black"
                 visible: radio.checked
             }
         }

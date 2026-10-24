@@ -87,6 +87,8 @@ type Manifest struct {
 	// 这些组件跑在 xochitl 进程里, 写坏了会拖垮整个界面, 所以只有商店签名的专属包能声明
 	// (安装时验 .integrity), 开发模式 (.dev) 例外。注入库按文件熔断, 见 base/intercept/qml-inject。
 	Hooks map[string][]string `json:"hooks,omitempty"`
+	// Theme 主题包: 应用目录里放主题的子目录 (里面一个 theme.json)。装好后链进用户主题目录, 见 theme.go。
+	Theme string `json:"theme,omitempty"`
 }
 
 // HookPoints 注入库开放的挂点 (base/intercept/qml-inject/qml_inject_impl.cpp 的「通用挂载点」一节)
@@ -139,6 +141,9 @@ func (m *Manifest) Validate() error {
 	if strings.TrimSpace(m.Version) == "" {
 		return errors.New("version 不能为空")
 	}
+	if m.Theme != "" && !isRelativeInside(m.Theme) && m.Theme != "." {
+		return fmt.Errorf("theme 必须是应用目录内的相对路径: %q", m.Theme)
+	}
 	if m.Stickers != "" && !isRelativeInside(m.Stickers) {
 		return fmt.Errorf("stickers 必须是应用目录内的相对路径: %q", m.Stickers)
 	}
@@ -152,8 +157,8 @@ func (m *Manifest) Validate() error {
 			}
 		}
 	}
-	if m.Entry == "" && m.Launch == nil && m.Module == nil && m.Stickers == "" && len(m.Hooks) == 0 {
-		return errors.New("entry (界面 QML)、module (编译模块)、launch (外部启动) 、stickers (贴纸包) 与 hooks (挂载组件) 至少要有一个")
+	if m.Entry == "" && m.Launch == nil && m.Module == nil && m.Stickers == "" && len(m.Hooks) == 0 && m.Theme == "" {
+		return errors.New("entry (界面 QML)、module (编译模块)、launch (外部启动) 、stickers (贴纸包)、hooks (挂载组件) 与 theme (主题) 至少要有一个")
 	}
 	if m.Module != nil {
 		if !moduleURIRe.MatchString(m.Module.URI) {
