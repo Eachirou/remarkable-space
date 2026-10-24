@@ -590,10 +590,11 @@ Rectangle {
         })
     }
 
+    function hasUi(a) { return !!(a.entryUrl || a.launch || (a.module && (a.module.main || a.module.widget)) || a.widgetUrl) }
     function filterApps(pred) {
         var out = []
-        // 贴纸包只是走商店装的内容, 不是应用, 哪儿都不列
-        for (var i = 0; i < apps.length; i++) if (!apps[i].stickers && pred(apps[i])) out.push(apps[i])
+        // 纯内容条目 (只有贴纸包 / 只有挂载组件, 没有界面也没有启动入口) 不是应用, 哪儿都不列
+        for (var i = 0; i < apps.length; i++) if (space.hasUi(apps[i]) && pred(apps[i])) out.push(apps[i])
         return out
     }
     // 应用有没有首页小组件 —— 明文发布看 widgetUrl, 编译发布看 module.widget。
