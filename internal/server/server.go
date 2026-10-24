@@ -3,15 +3,11 @@ package server
 import (
 	"runtime"
 
-	"bufio"
-	"bytes"
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/boangs/remarkable-space/internal/space"
 	"image/png"
 	"io"
 	"log"
@@ -22,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/boangs/remarkable-space/internal/space"
+
 	"github.com/boangs/remarkable-space/internal/qr"
 	"github.com/boangs/remarkable-space/internal/xolib"
 )
@@ -29,8 +27,6 @@ import (
 const (
 	UploadPort     = 8080
 	MaxUploadBytes = 200 << 20 // 200 MiB
-	AIConfigPath   = "/home/root/.local/share/rmkit-cn/ai_config.json"
-	AIChatTimeout  = 90 * time.Second
 )
 
 // LoadWait 上传后等外壳把文件通知进文件库的时间。外壳开着时通常 1 秒内就回报;
@@ -176,14 +172,9 @@ func (s *Server) Routes() http.Handler {
 		s.space.Mount(mux)
 	}
 
-	mux.HandleFunc("GET /ai-config", s.getAIConfig)
-	mux.HandleFunc("PUT /ai-config", s.putAIConfig)
-	mux.HandleFunc("POST /ai-chat", s.aiChat)
-	mux.HandleFunc("POST /ai-page-chat", s.aiPageChat)
-	mux.HandleFunc("POST /ai-glyph-chat", s.aiGlyphChat)
-	mux.HandleFunc("POST /ai-glyph-paste", s.aiGlyphPaste)
-	mux.HandleFunc("POST /ai-glyph-handwrite", s.aiGlyphHandwrite)
-	mux.HandleFunc("POST /ai-glyph-tap", s.aiGlyphTap)
+	// AI 已拆成商店应用 (后台 127.0.0.1:9190); 扫码页 (手机填 Key) 仍调这里, 转发过去
+	mux.HandleFunc("GET /ai-config", s.aiConfigProxy)
+	mux.HandleFunc("PUT /ai-config", s.aiConfigProxy)
 
 	mux.HandleFunc("POST /apply", s.applyAll)
 
@@ -623,324 +614,12 @@ func (s *Server) uploadDocument(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---- AI 配置 ----
-
-type aiConfig struct {
-	Kind  string `json:"kind"`
-	URL   string `json:"url"`
-	Key   string `json:"key"`
-	Model string `json:"model"`
-	// Thinking 控制 OpenAI 兼容协议下的 `enable_thinking` 字段 (Qwen3 等 hybrid thinking 模型).
-	// nil = 用模型默认 (不发字段); true/false = 显式开/关. 其它后端 (Anthropic / 非 thinking 模型) 忽略.
-	Thinking *bool `json:"enable_thinking,omitempty"`
-}
-
-func defaultAIConfig() aiConfig {
-	return aiConfig{Kind: "openai", URL: "https://api.openai.com/v1", Model: "gpt-4o-mini"}
-}
-
-func (s *Server) getAIConfig(w http.ResponseWriter, r *http.Request) {
-	cfg := defaultAIConfig()
-	data, err := os.ReadFile(AIConfigPath)
-	if err == nil {
-		var disk aiConfig
-		if json.Unmarshal(data, &disk) == nil {
-			cfg = disk
-		}
-	}
-	writeJSON(w, http.StatusOK, cfg)
-}
-
-// ---- AI 调用 ----
-
-func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Prompt string `json:"prompt"`
-	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 256<<10)).Decode(&in); err != nil {
-		httpError(w, http.StatusBadRequest, "JSON 解析失败: "+err.Error())
-		return
-	}
-	in.Prompt = strings.TrimSpace(in.Prompt)
-	if in.Prompt == "" {
-		httpError(w, http.StatusBadRequest, "prompt 不能为空")
-		return
-	}
-
-	cfg := defaultAIConfig()
-	if data, err := os.ReadFile(AIConfigPath); err == nil {
-		var disk aiConfig
-		if json.Unmarshal(data, &disk) == nil {
-			cfg = disk
-		}
-	}
-	if cfg.Key == "" {
-		httpError(w, http.StatusBadRequest, "未配置 API Key, 请先在「高级 → AI 设置」填写")
-		return
-	}
-
-	text, err := callAI(cfg, in.Prompt)
-	if err != nil {
-		httpError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"text": text})
-}
-
-func callAI(cfg aiConfig, prompt string) (string, error) {
-	base := strings.TrimRight(cfg.URL, "/")
-	client := &http.Client{Timeout: AIChatTimeout}
-	if cfg.Kind == "anthropic" {
-		return callAnthropic(client, base, cfg.Key, cfg.Model, prompt)
-	}
-	return callOpenAI(client, base, cfg.Key, cfg.Model, prompt, cfg.Thinking)
-}
-
-func callOpenAI(client *http.Client, base, key, model, prompt string, thinking *bool) (string, error) {
-	payload := map[string]any{
-		"model":       model,
-		"max_tokens":  8192,
-		"temperature": 0.7,
-		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-	}
-	if thinking != nil {
-		payload["enable_thinking"] = *thinking
-	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", base+"/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("请求 AI 失败: %w", err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("AI HTTP %d: %s", resp.StatusCode, snippet(raw))
-	}
-	var r struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(raw, &r); err != nil || len(r.Choices) == 0 {
-		return "", fmt.Errorf("AI 响应解析失败: %s", snippet(raw))
-	}
-	return strings.TrimSpace(r.Choices[0].Message.Content), nil
-}
-
-func callAnthropic(client *http.Client, base, key, model, prompt string) (string, error) {
-	body, _ := json.Marshal(map[string]any{
-		"model":      model,
-		"max_tokens": 8192,
-		"messages":   []map[string]string{{"role": "user", "content": prompt}},
-	})
-	req, _ := http.NewRequest("POST", base+"/messages", bytes.NewReader(body))
-	req.Header.Set("x-api-key", key)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("请求 AI 失败: %w", err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("AI HTTP %d: %s", resp.StatusCode, snippet(raw))
-	}
-	var r struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(raw, &r); err != nil {
-		return "", fmt.Errorf("AI 响应解析失败: %s", snippet(raw))
-	}
-	var sb strings.Builder
-	for _, c := range r.Content {
-		if c.Type == "text" {
-			sb.WriteString(c.Text)
-		}
-	}
-	out := strings.TrimSpace(sb.String())
-	if out == "" {
-		return "", fmt.Errorf("AI 响应为空: %s", snippet(raw))
-	}
-	return out, nil
-}
-
-// callAIStream 流式调用 AI, 每个文本 delta 通过 onChunk 回调.
-// ctx 取消时立即终止. 失败返回 error, 成功且未取消时返回 nil.
-func callAIStream(ctx context.Context, cfg aiConfig, prompt string, onChunk func(string)) error {
-	base := strings.TrimRight(cfg.URL, "/")
-	client := &http.Client{} // 不设 Timeout: 流式期间连接一直保持
-	if cfg.Kind == "anthropic" {
-		return callAnthropicStream(ctx, client, base, cfg.Key, cfg.Model, prompt, onChunk)
-	}
-	return callOpenAIStream(ctx, client, base, cfg.Key, cfg.Model, prompt, cfg.Thinking, onChunk)
-}
-
-func callOpenAIStream(ctx context.Context, client *http.Client, base, key, model, prompt string, thinking *bool, onChunk func(string)) error {
-	payload := map[string]any{
-		"model":       model,
-		"max_tokens":  8192,
-		"temperature": 0.7,
-		"stream":      true,
-		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-	}
-	if thinking != nil {
-		payload["enable_thinking"] = *thinking
-	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(ctx, "POST", base+"/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("请求 AI 失败: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-		return fmt.Errorf("AI HTTP %d: %s", resp.StatusCode, snippet(raw))
-	}
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" || data == "[DONE]" {
-			if data == "[DONE]" {
-				return nil
-			}
-			continue
-		}
-		var ev struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-			} `json:"choices"`
-		}
-		if json.Unmarshal([]byte(data), &ev) != nil {
-			continue
-		}
-		for _, c := range ev.Choices {
-			if c.Delta.Content != "" {
-				onChunk(c.Delta.Content)
-			}
-		}
-	}
-	return scanner.Err()
-}
-
-func callAnthropicStream(ctx context.Context, client *http.Client, base, key, model, prompt string, onChunk func(string)) error {
-	body, _ := json.Marshal(map[string]any{
-		"model":      model,
-		"max_tokens": 8192,
-		"stream":     true,
-		"messages":   []map[string]string{{"role": "user", "content": prompt}},
-	})
-	req, _ := http.NewRequestWithContext(ctx, "POST", base+"/messages", bytes.NewReader(body))
-	req.Header.Set("x-api-key", key)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("请求 AI 失败: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-		return fmt.Errorf("AI HTTP %d: %s", resp.StatusCode, snippet(raw))
-	}
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" {
-			continue
-		}
-		var ev struct {
-			Type  string `json:"type"`
-			Delta struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"delta"`
-		}
-		if json.Unmarshal([]byte(data), &ev) != nil {
-			continue
-		}
-		if ev.Type == "content_block_delta" && ev.Delta.Type == "text_delta" && ev.Delta.Text != "" {
-			onChunk(ev.Delta.Text)
-		}
-	}
-	return scanner.Err()
-}
-
 func snippet(b []byte) string {
 	s := strings.TrimSpace(string(b))
 	if len(s) > 200 {
 		s = s[:200] + "…"
 	}
 	return s
-}
-
-func (s *Server) putAIConfig(w http.ResponseWriter, r *http.Request) {
-	var in aiConfig
-	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in); err != nil {
-		httpError(w, http.StatusBadRequest, "JSON 解析失败: "+err.Error())
-		return
-	}
-	in.Kind = strings.TrimSpace(in.Kind)
-	in.URL = strings.TrimSpace(in.URL)
-	in.Model = strings.TrimSpace(in.Model)
-	if in.Kind != "openai" && in.Kind != "anthropic" {
-		httpError(w, http.StatusBadRequest, "kind 必须是 openai 或 anthropic")
-		return
-	}
-	if in.URL == "" {
-		httpError(w, http.StatusBadRequest, "url 不能为空")
-		return
-	}
-	// Key 为空时, 保留磁盘上原有 key (避免回填表单时把 key 清空)
-	if in.Key == "" {
-		if data, err := os.ReadFile(AIConfigPath); err == nil {
-			var disk aiConfig
-			if json.Unmarshal(data, &disk) == nil {
-				in.Key = disk.Key
-			}
-		}
-	}
-	if err := os.MkdirAll(filepath.Dir(AIConfigPath), 0o755); err != nil {
-		httpError(w, http.StatusInternalServerError, "创建目录失败: "+err.Error())
-		return
-	}
-	body, _ := json.MarshalIndent(in, "", "  ")
-	tmp := AIConfigPath + ".tmp"
-	if err := os.WriteFile(tmp, body, 0o600); err != nil {
-		httpError(w, http.StatusInternalServerError, "写入失败: "+err.Error())
-		return
-	}
-	if err := os.Rename(tmp, AIConfigPath); err != nil {
-		os.Remove(tmp)
-		httpError(w, http.StatusInternalServerError, "保存失败: "+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, in)
 }
 
 // screenshotPNG 把当前屏幕抓成 PNG (只在本机/USB 网段可达的 8080 上, 用来核对面板排版)。
@@ -957,3 +636,25 @@ func (s *Server) screenshotPNG(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	_ = png.Encode(w, img)
 }
+
+// aiConfigProxy 把扫码页的 /ai-config 转给「AI」应用的后台。没装 AI (后台连不上) 时说清楚去哪装。
+func (s *Server) aiConfigProxy(w http.ResponseWriter, r *http.Request) {
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, aiAppURL+"/ai-config", r.Body)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		httpError(w, http.StatusServiceUnavailable, "请先在商店安装「AI」")
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, io.LimitReader(resp.Body, 1<<20))
+}
+
+// aiAppURL 「AI」应用后台 (它的 manifest.service.port)
+const aiAppURL = "http://127.0.0.1:9190"
