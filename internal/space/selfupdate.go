@@ -79,8 +79,25 @@ func (h *Handler) SpaceVersion() string {
 
 var verNumRe = regexp.MustCompile(`\d+`)
 
-// VersionCmp 比较 v1.0.12 / 1.1.0 这类版本号 (只看数字段)
+// VersionCmp 比较 v1.0.12 / 1.1.0 / v1.1.0-beta.2 这类版本号。
+// 主体只看数字段; 带 "-" 预发布后缀的低于同号正式版 (semver), 两个都带后缀时再比后缀的数字段。
+// 以前整串抽数字, v1.1.0-beta.2 被当成 [1,1,0,2] 比 v1.1.0 还高, 装过 beta 的机器看不到正式版 (2026-10-24)。
 func VersionCmp(a, b string) int {
+	ma, pa, _ := strings.Cut(a, "-")
+	mb, pb, _ := strings.Cut(b, "-")
+	if c := numCmp(ma, mb); c != 0 {
+		return c
+	}
+	switch {
+	case pa == "" && pb != "":
+		return 1
+	case pa != "" && pb == "":
+		return -1
+	}
+	return numCmp(pa, pb)
+}
+
+func numCmp(a, b string) int {
 	x, y := verNumRe.FindAllString(a, -1), verNumRe.FindAllString(b, -1)
 	for i := 0; i < len(x) || i < len(y); i++ {
 		var p, q int
