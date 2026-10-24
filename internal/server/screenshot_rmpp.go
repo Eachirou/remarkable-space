@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -74,68 +75,88 @@ func rmppScreenshot() (image.Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read maps: %w", err)
 	}
-	// 帧缓冲在最后一块 card0 映射之后的匿名映射里。通常紧挨着, 但 xochitl 重启后实测中间
-	// 会先夹一块 1.6 MB 的小匿名映射 (2026-10-24 rmppm), 所以往后看几块, 取第一块放得下一帧的;
-	// 碰到有文件名的映射就停 (已经离开 card0 那一片了)。
-	// 尺寸窗口原本写死 6MB~8MB, 实测某次固件/旋转后这块映射变成 8,146,944 字节, 刚好卡在
-	// 窗口外 → 找不到帧缓冲 → AI 截图降级成纯文字。尺寸只需保证放得下一帧, 上界放宽即可。
-	var anonStart uint64
-	lines := strings.Split(string(maps), "\n")
-	last := -1
-	for i, line := range lines {
-		if strings.Contains(line, "/dev/dri/card0") {
-			last = i
-		}
+	// 帧缓冲是 glibc 大块 malloc 出来的 mmap (大小 ≈ 一帧 + 一页), 紧跟在**某一条** card0 映射之后
+	// (card0 有几十条 rw-s 映射, 散在 maps 里, 帧缓冲通常在其中一条的下一行; xochitl 重启后实测中间也可能
+	// 先夹一块小映射)。别只看最后一条 card0 之后: 那边排的是 8 MB 线程栈和 954 宽的窗口表面 (大小也像一帧,
+	// 按它截出来是歪的, 2026-10-24 rmppm)。所以对每条 card0 向后看 6 行收候选, 按离 card0 的距离排序,
+	// 近的先试, 每个都跑帧指针搜索, 搜到合法块头的才算。尺寸上界放宽到 64 MB: 实测某次固件/旋转后是 8,146,944。
+	type cand struct {
+		start, size uint64
+		dist        int
 	}
-	for i := last + 1; last >= 0 && i < len(lines) && i <= last+6; i++ {
-		parts := strings.Fields(lines[i])
-		if len(parts) != 5 { // 匿名映射没有 pathname 字段
-			break
-		}
-		rng := strings.Split(parts[0], "-")
-		if len(rng) != 2 {
+	var cands []cand
+	lines := strings.Split(string(maps), "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, "/dev/dri/card0") {
 			continue
 		}
-		s, _ := strconv.ParseUint(rng[0], 16, 64)
-		e, _ := strconv.ParseUint(rng[1], 16, 64)
-		if sz := e - s; sz >= frameSize && sz < 64<<20 {
-			anonStart = s
-			break
+		for d := 1; d <= 6 && i+d < len(lines); d++ {
+			parts := strings.Fields(lines[i+d])
+			if len(parts) != 5 || !strings.HasPrefix(parts[1], "rw") { // 有文件名 / 保护页: 离开这一片
+				break
+			}
+			rng := strings.Split(parts[0], "-")
+			if len(rng) != 2 {
+				continue
+			}
+			s, _ := strconv.ParseUint(rng[0], 16, 64)
+			e, _ := strconv.ParseUint(rng[1], 16, 64)
+			if sz := e - s; sz >= frameSize && sz < 64<<20 {
+				cands = append(cands, cand{s, sz, d})
+			}
 		}
 	}
-	if anonStart == 0 {
+	if len(cands) == 0 {
 		return nil, fmt.Errorf("no framebuffer anonymous mapping found after card0 (需 >= %d 字节)", frameSize)
 	}
+	// 同一距离里取地址高的 (原来的写法是"最后一个匹配的赢", 几个月没出过错; 低地址那些是后分配的窗口表面)
+	sort.SliceStable(cands, func(i, j int) bool {
+		if cands[i].dist != cands[j].dist {
+			return cands[i].dist < cands[j].dist
+		}
+		return cands[i].start > cands[j].start
+	})
 
-	// Ghostwriter 帧指针搜索算法
 	f, err := os.Open(fmt.Sprintf("/proc/%d/mem", pid))
 	if err != nil {
 		return nil, fmt.Errorf("open mem: %w", err)
 	}
 	defer f.Close()
 
-	var offset, length uint64 = 0, 2
+	// Ghostwriter 帧指针搜索: 沿 glibc 块头链 (+8 处的 length) 往后走, 找第一块 ≥ 一帧的
+	findFrame := func(anonStart uint64) (int64, error) {
+		var offset, length uint64 = 0, 2
+		for i := 0; i < 50; i++ {
+			offset += length - 2
+			if _, err := f.Seek(int64(anonStart+offset+8), io.SeekStart); err != nil {
+				return 0, fmt.Errorf("seek at iter %d: %w", i, err)
+			}
+			var hdr [8]byte
+			if _, err := io.ReadFull(f, hdr[:]); err != nil {
+				return 0, fmt.Errorf("read hdr at iter %d offset %d: %w", i, offset, err)
+			}
+			length = uint64(binary.LittleEndian.Uint32(hdr[:4]))
+			if length < 2 {
+				return 0, fmt.Errorf("invalid length %d at offset %d", length, offset)
+			}
+			if length >= frameSize {
+				return int64(anonStart + offset), nil
+			}
+		}
+		return 0, fmt.Errorf("frame pointer not found")
+	}
 	var frameOff int64
-	for i := 0; i < 50; i++ {
-		offset += length - 2
-		if _, err := f.Seek(int64(anonStart+offset+8), io.SeekStart); err != nil {
-			return nil, fmt.Errorf("seek at iter %d: %w", i, err)
-		}
-		var hdr [8]byte
-		if _, err := io.ReadFull(f, hdr[:]); err != nil {
-			return nil, fmt.Errorf("read hdr at iter %d offset %d: %w", i, offset, err)
-		}
-		length = uint64(binary.LittleEndian.Uint32(hdr[:4]))
-		if length < 2 {
-			return nil, fmt.Errorf("invalid length %d at offset %d", length, offset)
-		}
-		if length >= frameSize {
-			frameOff = int64(anonStart + offset)
+	var lastErr error
+	for _, c := range cands {
+		off, err := findFrame(c.start)
+		if err == nil {
+			frameOff = off
 			break
 		}
+		lastErr = fmt.Errorf("候选 0x%x (%d 字节): %w", c.start, c.size, err)
 	}
 	if frameOff == 0 {
-		return nil, fmt.Errorf("frame pointer not found (anonStart=0x%x)", anonStart)
+		return nil, fmt.Errorf("%d 个候选都不是帧缓冲, 最后一个: %v", len(cands), lastErr)
 	}
 
 	// 读帧缓冲
