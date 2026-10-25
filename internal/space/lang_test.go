@@ -18,7 +18,13 @@ func TestNormalizeLang(t *testing.T) {
 		"en_US.UTF-8": "en",
 		"en-GB":       "en",
 		"":            "en",
-		"de_DE":       "en", // 还没有德语词典
+		"de_DE":       "de",
+		"de_CH.UTF-8": "de",
+		"de-AT":       "de",
+		"fr_FR":       "fr",
+		"fr-CA":       "fr",
+		"fr":          "fr",
+		"pt_BR":       "en", // no Portuguese dictionary yet: falls back to English
 		"gibberish":   "en",
 	}
 	for in, want := range cases {

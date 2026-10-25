@@ -28,6 +28,19 @@ const ShellVersion = 3
 // ManifestName 是应用目录里清单文件的固定名字。
 const ManifestName = "manifest.json"
 
+// DisplayName picks the name to show for a UI language:
+// Names[lang] first, then NameEn (for any language other than zh-CN, which is what apps
+// from the upstream store ship), and finally Name. Reading a nil map is fine in Go.
+func (m *Manifest) DisplayName(lang string) string {
+	if n := m.Names[lang]; n != "" {
+		return n
+	}
+	if lang != "zh-CN" && m.NameEn != "" {
+		return m.NameEn
+	}
+	return m.Name
+}
+
 // Service 声明应用自带的后台进程。
 type Service struct {
 	Exec      string   `json:"exec"`                // 相对应用目录的可执行文件, 如 bin/music-server
@@ -65,6 +78,9 @@ type Manifest struct {
 	ID          string   `json:"id"`                    // 唯一标识: 小写字母/数字/-/_ , 1-32 位, 也是目录名
 	Name        string   `json:"name"`                  // 显示名 (中文)
 	NameEn      string   `json:"name_en,omitempty"`     // 英文名 (可选)
+	// Names holds display names per language code, e.g. {"fr": "Météo", "de": "Wetter"}.
+	// See DisplayName for the lookup order. Optional.
+	Names map[string]string `json:"names,omitempty"`
 	Version     string   `json:"version"`               // 语义化版本
 	Description string   `json:"description,omitempty"` // 一句话说明
 	Icon        string   `json:"icon,omitempty"`        // 图标: 相对路径 / 绝对路径 / qrc: 或 file: URL
