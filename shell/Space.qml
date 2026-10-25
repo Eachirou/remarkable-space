@@ -216,7 +216,7 @@ Rectangle {
     property var apps: []
     property string listError: ""
     property var storeApps: []
-    // 商店分三栏: apps 应用 / themes 主题与贴纸包 / system 空间本体与系统补丁 (索引里的 section 字段, 由应用仓库 pack.sh 按 manifest 推出)
+    // 商店分三栏: apps 应用 / themes 主题与贴纸包 / system 空间本体、系统补丁与 AI 等系统级应用 (索引里的 section 字段, 由应用仓库 pack.sh 按 manifest 推出)
     property string storeSection: "apps"
     readonly property var storeSections: ["apps", "themes", "system"]
     function storeSectionOf(a) {
@@ -558,7 +558,7 @@ Rectangle {
         request("GET", baseUrl + "/space/store" + (refresh ? "?refresh=1" : ""), null, function(st, r) {
             storeLoaded = true
             if (st !== 200 || !r) { storeError = (r && r.error) ? r.error : space.st("store_unreachable", { code: st }); storeApps = []; return }
-            storeApps = (r.apps || []).filter(function (a) { return a.id !== "space" })   // 空间自己的新版本走 /space/update, 在「系统补丁」栏置顶单独画
+            storeApps = (r.apps || []).filter(function (a) { return a.id !== "space" })   // 空间自己的新版本走 /space/update, 在「系统」栏置顶单独画
         })
     }
 
@@ -671,7 +671,7 @@ Rectangle {
         return filterApps(function(a) { return space.hasWidget(a) && a.widget_size !== "hero" && !a.error })
     }
     // space.st("app_fallback_name") = 非设置类 (设置类只出现在space.st("tab_settings")标签)
-    // 系统补丁 (category=system) 哪里都不列: 状态只在「商店 → 系统补丁」里看, 装过的点那一行打开
+    // 系统补丁 (category=system) 哪里都不列: 状态只在「商店 → 系统」里看, 装过的点那一行打开
     function isSetting(a) { return a.category === "settings" }
     function isSystem(a) { return a.category === "system" }
     function userApps() { return filterApps(function(a) { return !isSetting(a) && !isSystem(a) }) }
@@ -695,7 +695,7 @@ Rectangle {
         for (var i = 0; i < apps.length; i++) if (apps[i].id === id) { open(apps[i]); return }
         showToast(space.st("not_installed", { id: id }))
     }
-    // 商店「系统补丁」栏: 装过且带状态页的补丁, 点那一行打开 (它不在设置列表里)
+    // 商店「系统」栏: 装过且带状态页的补丁, 点那一行打开 (它不在设置列表里)
     function installedWithUi(id) {
         for (var i = 0; i < apps.length; i++) if (apps[i].id === id) return space.hasUi(apps[i]) ? apps[i] : null
         return null
@@ -1046,7 +1046,7 @@ Rectangle {
         if (tab === "discover" || tab === "settings") loadUpdate(false)
     }
 
-    // ─── 空间自更新 (商店 → 系统补丁 置顶一行; 设置 → 关于空间 只显示版本号) ───────
+    // ─── 空间自更新 (商店 → 系统 置顶一行; 设置 → 关于空间 只显示版本号) ───────
     // 后台 GET /space/update 给 当前版本 / 商店里的新版本 / 进行中的阶段; POST 开始。
     // 更新到最后后台会重启, 中间几秒请求失败是正常的, 轮询接着等。
     property var upd: null
@@ -1570,7 +1570,7 @@ Rectangle {
                         Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("hero_tagline_2"); font.pixelSize: space.fpx(24); color: space.th.textBody }
                     }
                 }
-                // 分栏: 应用 / 主题 / 系统补丁
+                // 分栏: 应用 / 主题 / 系统
                 Item {
                     Layout.fillWidth: true
                     Layout.preferredHeight: space.vpx(76)
@@ -1603,7 +1603,7 @@ Rectangle {
                     }
                     Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: space.th.lineSoft }
                 }
-                // 系统补丁栏置顶: 空间本体 (数据来自 /space/update, 不在商店列表里)
+                // 系统栏置顶: 空间本体 (数据来自 /space/update, 不在商店列表里)
                 Item {
                     visible: space.storeSection === "system" && !!space.upd
                     Layout.fillWidth: true
@@ -1869,7 +1869,7 @@ Rectangle {
                         MouseArea { id: tzMouse; anchors.fill: parent; onClicked: space.chooseTimezone(modelData.name) }
                     }
                 }
-                // 关于空间: 只显示版本号 (当前 + 商店里的最新); 更新本身在商店「系统补丁」栏, 有新版本时点这行跳过去
+                // 关于空间: 只显示版本号 (当前 + 商店里的最新); 更新本身在商店「系统」栏, 有新版本时点这行跳过去
                 Kit.SRow {
                     th: space.th
                     Layout.fillWidth: true
