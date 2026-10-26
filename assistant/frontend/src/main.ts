@@ -2,7 +2,7 @@ import './style.css'
 import { deviceArt } from './device'
 import {
   Connect, Disconnect, Probe, ChooseBundle, DownloadBundle, PlanSpace, RunSpace, UninstallSpace,
-  PlanAndroid, RunAndroid, UninstallAndroid, BootAndroid, ReturnToStock, ResetAndroidData, ChooseAPKs, InstallAPKs, Cancel, EmergencyRepair, ExportDiagnostics, OpenLogDir, LogDir, DetectProxy, Confirm, LoadPassword, ForgetPassword, DiagnoseAndroid, Version, RepairPanel, Release, SetLanguage,
+  PlanAndroid, RunAndroid, UninstallAndroid, BootAndroid, ReturnToStock, ResetAndroidData, ChooseAPKs, InstallAPKs, Cancel, EmergencyRepair, ExportDiagnostics, OpenLogDir, LogDir, DetectProxy, Confirm, LoadPassword, ForgetPassword, DiagnoseAndroid, Version, RepairPanel, Release, LatestVersion, SetLanguage,
 } from '../wailsjs/go/main/App'
 import { EventsOn, WindowSetTitle } from '../wailsjs/runtime/runtime'
 
@@ -196,7 +196,9 @@ const state = {
 // Android 包几个月才变一次, 不跟着每版重传, 单独记它放在哪个发布标签下 (androidTag)。
 // 自己的服务器 (boangs.com) 留作最后的后备: 旧版助手只认那里。
 type Source = 'cn' | 'github'
-type Release = { tag: string; cnBase: string; androidTag: string; androidVer: string }
+// spaceLatest: 安装包旁 space-version.txt 里的版本 —— 空间在设备上自更新, 发新版时安装包原地换新,
+// 助手不跟着发版; 读不到就用发布标签
+type Release = { tag: string; cnBase: string; androidTag: string; androidVer: string; spaceLatest?: string }
 let release: Release = { tag: '', cnBase: '', androidTag: '', androidVer: '' }
 const GITHUB = 'https://github.com/boangs/remarkable-space/releases/'
 const OWN_SERVER = 'https://boangs.com/space/'
@@ -209,6 +211,27 @@ function bundleURLs(a: Action): string[] {
   const order = state.source === 'github' ? [gh, cn] : [cn, gh]
   if (a === 'android') order.push(OWN_SERVER + name)
   return order.filter((u) => u !== '')
+}
+function versionURLs(): string[] {
+  return bundleURLs('space').map((u) => u.replace(/space-bundle\.zip$/, 'space-version.txt'))
+}
+// 比版本号 (和空间外壳 versionCmp 一致): 按数字逐段比, 带 "-" 预发布后缀的低于同号正式版; a 新返回正数。
+// 只比相不相等的话, 设备自更新到 v1.1.5 后助手会喊「可更新到 v1.1.0」, 一点就降级。
+function numCmp(a: string, b: string): number {
+  const x = a.match(/\d+/g) || [], y = b.match(/\d+/g) || []
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = parseInt(x[i] || '0', 10) - parseInt(y[i] || '0', 10)
+    if (d !== 0) return d
+  }
+  return 0
+}
+function versionCmp(a: string, b: string): number {
+  const pa = a.split('-'), pb = b.split('-')
+  const d = numCmp(pa[0], pb[0])
+  if (d !== 0) return d
+  if (pa.length === 1 && pb.length > 1) return 1
+  if (pa.length > 1 && pb.length === 1) return -1
+  return numCmp(pa.slice(1).join('-'), pb.slice(1).join('-'))
 }
 const COMPONENT: Record<Action, string> = { space: 'space', android: 'android-rmppm' }
 const approx = (a: Action) => a === 'space' ? t('approx_space') : t('approx_android')
@@ -324,11 +347,11 @@ function renderItem(i: Info, a: Action) {
   const ready = !!b && b.component === COMPONENT[a]
   const installed = isSpace ? i.spaceInstalled : i.androidInstalled
   const busy = state.busy ? 'disabled' : ''
-  // 设备上记的版本 vs 这一版助手配套的版本: 一样就是「已是最新」, 不再一律喊「更新」。
+  // 设备上记的版本 vs 线上最新版本: 不比它旧就是「已是最新」(设备自更新得比助手知道的还新也算)。
   // 设备上没记版本 (老版助手装的 Android) 就判断不了, 只给「重新安装」, 不说有更新
   const cur = isSpace ? (i.spaceVersion || '') : (i.androidVersion || '')
-  const latest = isSpace ? release.tag : release.androidVer
-  const upToDate = installed && cur !== '' && latest !== '' && cur === latest
+  const latest = isSpace ? (release.spaceLatest || release.tag) : release.androidVer
+  const upToDate = installed && cur !== '' && latest !== '' && versionCmp(cur, latest) >= 0
   const unknown = installed && (cur === '' || latest === '')
   const outdated = installed && !upToDate && !unknown
   const title = verbName(outdated ? t('update') : installed ? t('reinstall') : t('install'), label(a))
@@ -691,7 +714,11 @@ try {
   state.source = src === 'github' || (src === null && lang === 'en') ? 'github' : 'cn'
 } catch { /* 忽略 */ }
 applyLang(lang)
-Release().then((r) => { release = r as Release }).catch(() => { /* 开发版: 用默认 */ })
+Release().then(async (r) => {
+  release = r as Release
+  const v = await LatestVersion(versionURLs(), state.proxy)
+  if (v) { release.spaceLatest = v; render() }
+}).catch(() => { /* 开发版: 用默认 */ })
 render()
 LoadPassword('10.11.99.1').then((pw) => { if (pw) { state.password = pw; keepLog(render); appendLog(t('read_saved_pw')) } })
 LogDir().then((d) => appendLog(t('logdir', d)))

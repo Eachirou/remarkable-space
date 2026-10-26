@@ -30,6 +30,9 @@ LDFLAGS := -X main.version=$(VERSION) -X "main.buildTime=$(BUILD_TIME)" \
 
 # STORE_KEY 透给仓库根的 make。不自动编译的话很容易打进一个旧的、没有商店密钥的
 # 二进制 —— 装出来的设备取不到商店, 而且设备上看不出是这个原因。
+# 没给就读仓库根的 .store-key (和根 Makefile 一样): 以前这里透传的是空值, 盖掉了根 Makefile 的读取,
+# 不带参数打出的包没有商店密钥 (2026-10-26 差点发出去)。
+STORE_KEY ?= $(strip $(shell cat ../.store-key 2>/dev/null))
 bundle:
 	$(MAKE) -C .. all STORE_KEY=$(STORE_KEY)
 	mkdir -p dist

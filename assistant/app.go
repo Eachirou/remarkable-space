@@ -112,6 +112,32 @@ func (a *App) Release() ReleaseInfo {
 	return ReleaseInfo{Tag: releaseTag, CNBase: cnMirror, AndroidTag: androidTag, AndroidVer: androidVer}
 }
 
+// LatestVersion 读安装包旁边的 space-version.txt —— 空间能在设备上自更新, 发了新版就把安装包
+// 原地换成新版的, 这个文件跟着换; 助手据此显示「可更新到」, 不必为每个空间版本发新助手。
+// 多个地址按顺序试, 都读不到返回空 (前端退回用发布标签比)。
+func (a *App) LatestVersion(urls []string, proxy string) string {
+	client, err := netx.Client(proxy)
+	if err != nil {
+		return ""
+	}
+	client.Timeout = 8 * time.Second
+	for _, u := range urls {
+		resp, err := client.Get(u)
+		if err != nil {
+			continue
+		}
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
+		resp.Body.Close()
+		v := strings.TrimSpace(string(b))
+		if resp.StatusCode == 200 && validVersion.MatchString(v) {
+			return v
+		}
+	}
+	return ""
+}
+
+var validVersion = regexp.MustCompile(`^v\d+(\.\d+)*(-[0-9A-Za-z.]+)?$`)
+
 // LogDir 返回审计日志目录。
 func (a *App) LogDir() string { return a.logDir }
 
