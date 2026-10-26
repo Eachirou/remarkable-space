@@ -94,6 +94,12 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	if info.InAndroidMode {
 		return nil, errors.New(i18n.T("设备当前在 Android 模式, 请先回到 reMarkable 系统", "the device is in Android mode; return to the reMarkable system first"))
 	}
+	// 别的工具接管了 xochitl 的启动: 空间装上也不会出现, 还会和它抢端口、叠两套注入。
+	// 什么都不写直接停, 对方的机器保持原样, 用哪个由用户自己决定。
+	if info.ForeignLauncher != "" {
+		return nil, fmt.Errorf(i18n.T("检测到其他工具接管了系统界面的启动 (%s, 如 rmtool), 空间无法与它同时安装。设备未做任何改动; 如要使用空间, 请先用该工具自己的卸载功能卸载它",
+			"another tool has taken over how the system UI starts (%s, e.g. rmtool); Space cannot be installed alongside it. Nothing on the device was changed; to use Space, uninstall that tool with its own uninstaller first"), info.ForeignLauncher)
+	}
 	ar, err := archFor(info.Arch)
 	if err != nil {
 		return nil, err

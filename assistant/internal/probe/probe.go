@@ -45,6 +45,10 @@ type Info struct {
 	AndroidInstalled bool   `json:"androidInstalled"` // 本槽已有单槽 Android 组件
 	AndroidVersion   string `json:"androidVersion"`   // 装进去的 Android 安装包版本 (助手安装时写的; 老安装没有)
 	InitIsWrapper    bool   `json:"initIsWrapper"`
+
+	// ForeignLauncher: 别的工具 (如 rmtool) 在 xochitl.service.d 里换掉了 ExecStart 的 drop-in 文件名,
+	// 空格分隔。它们用自己的启动器拉 xochitl, 空间的注入进不去, 两套 xovi 并存还可能崩溃循环 → 拒装。
+	ForeignLauncher string `json:"foreignLauncher"`
 }
 
 // 单次往返拿齐所有字段, 每行 key=value。
@@ -72,6 +76,14 @@ echo androidver=$(cat /home/root/rmkit-cn/.android_version 2>/dev/null)
 [ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ] && systemctl is-active xochitl >/dev/null 2>&1 && echo xochitl=1
 [ -d /android ] && [ "$(cat /proc/1/comm 2>/dev/null)" != "systemd" ] && echo androidmode=1
 grep -q boot-android-mode /sbin/init 2>/dev/null && echo initwrap=1
+fl=""
+for f in /etc/systemd/system/xochitl.service.d/*.conf; do
+  [ -f "$f" ] || continue
+  n=${f##*/}
+  case "$n" in rmkit-cn.conf|zz-rmkit-cn.conf|zz-space.conf) continue ;; esac
+  grep -qE '^[[:space:]]*ExecStart=[^[:space:]]' "$f" 2>/dev/null && fl="$fl $n"
+done
+echo foreign=$fl
 [ -f /boot/fitImage.ahab-android ] && [ -x /usr/bin/rm-android-init-ss ] && echo android=1
 `
 
@@ -112,6 +124,7 @@ func Run(ctx context.Context, c *sshx.Client) (Info, error) {
 		AndroidInstalled: kv["android"] == "1",
 		AndroidVersion:   kv["androidver"],
 		InitIsWrapper:    kv["initwrap"] == "1",
+		ForeignLauncher:  kv["foreign"],
 	}
 	info.ModelKey, info.Model = classify(kv["dtmodel"], info.Resolution, info.Arch)
 	if info.Resolution == "" {
