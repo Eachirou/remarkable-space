@@ -78,9 +78,6 @@ type Manifest struct {
 	ID          string   `json:"id"`                    // 唯一标识: 小写字母/数字/-/_ , 1-32 位, 也是目录名
 	Name        string   `json:"name"`                  // 显示名 (中文)
 	NameEn      string   `json:"name_en,omitempty"`     // 英文名 (可选)
-	// Names holds display names per language code, e.g. {"fr": "Météo", "de": "Wetter"}.
-	// See DisplayName for the lookup order. Optional.
-	Names map[string]string `json:"names,omitempty"`
 	Version     string   `json:"version"`               // 语义化版本
 	Description string   `json:"description,omitempty"` // 一句话说明
 	Icon        string   `json:"icon,omitempty"`        // 图标: 相对路径 / 绝对路径 / qrc: 或 file: URL
@@ -105,6 +102,9 @@ type Manifest struct {
 	Hooks map[string][]string `json:"hooks,omitempty"`
 	// Theme 主题包: 应用目录里放主题的子目录 (里面一个 theme.json)。装好后链进用户主题目录, 见 theme.go。
 	Theme string `json:"theme,omitempty"`
+	// Names holds display names per language code, e.g. {"fr": "Météo", "de": "Wetter"}.
+	// See DisplayName for the lookup order. Optional.
+	Names map[string]string `json:"names,omitempty"`
 }
 
 // HookPoints 注入库开放的挂点 (base/intercept/qml-inject/qml_inject_impl.cpp 的「通用挂载点」一节)
