@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- 风: 图形取自 Feather Icons "wind" (MIT), 24 → 32 放大, 线宽折算后同其它两个 (2.6) -->
+  <g transform="scale(1.3333)" fill="none" stroke="#ffffff" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2"/>
+  </g>
+</svg>

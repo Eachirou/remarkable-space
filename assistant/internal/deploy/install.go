@@ -1,7 +1,7 @@
 // Package deploy 把「空间」连同它依赖的底座一次装到设备上。
 //
 // 装两样东西:
-//   - 底座: xovi、qmldiff 注入链与 hashtab、运行时注入 .so、中文汉化、输入法
+//   - 底座: xovi、qmldiff 注入链与 hashtab、运行时注入 .so、新增系统语言、输入法
 //     后端。源码在本仓库 base/ (原 rmkit-cn), 只在系统升级逼着改时才动, 它才是真会把设备弄砖的部分 ——
 //     hashtab 与固件对不上就是 qmldiff panic → xochitl crash → A/B 回滚。
 //   - 空间: 外壳/内置应用/后端 space-server。它走 Qt.createComponent 异步加载,
@@ -123,7 +123,8 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	// 两台实测都正常, 所以不再回落。HasLSE 仍然探测, 排查同类问题时有用。
 	// install.sh 375-394: 必备产物
 	for _, f := range []string{"space-dist/" + ar.spaceBin, "dist/" + p.imeBin, "dist/" + ar.imeHook, "dist/" + ar.qmdTool,
-		"vendor/extensions/xovi-message-broker-" + ar.ext + ".so", "dist/reMarkable_zh_CN.qm", "qmd/zh_CN.rcc"} {
+		"vendor/extensions/xovi-message-broker-" + ar.ext + ".so", "dist/reMarkable_zh_CN.qm", "dist/reMarkable_zh_TW.qm",
+		"dist/reMarkable_ja.qm", "dist/reMarkable_ko.qm", "qmd/zh_CN.rcc"} {
 		if !b.Has(f) {
 			return nil, fmt.Errorf(i18n.T("安装包缺必备产物 %s", "bundle is missing required file %s"), f)
 		}
@@ -221,7 +222,9 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 	// install.sh 481-487: static/
 	add(base+"/static/pinyin_interceptor.qmd", "qmd/pinyin_interceptor.qmd", 0o644)
 	add(base+"/static/zh_CN.rcc", "qmd/zh_CN.rcc", 0o644)
-	add(base+"/static/reMarkable_zh_CN.qm", "dist/reMarkable_zh_CN.qm", 0o644)
+	for _, lang := range []string{"zh_CN", "zh_TW", "ja", "ko"} {
+		add(base+"/static/reMarkable_"+lang+".qm", "dist/reMarkable_"+lang+".qm", 0o644)
+	}
 	// 空间后端 (space-server): 顶替已退役的 upload-server, 同样监听 8080, 路由逐条兼容。
 	// 它自己带上传/蓝牙/字体锁屏图/AI/截图/二维码, 外加空间的注册表与绿色安装。
 	add(spaceBase+"/space-server", "space-dist/"+ar.spaceBin, 0o755)
@@ -248,8 +251,10 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 		add("/home/root/xovi/extensions.d/librarian.so", "vendor/extensions/librarian-"+ar.ext+".so", 0o755)
 	}
 	add("/home/root/xovi/extensions.d/xovi-message-broker.so", "vendor/extensions/xovi-message-broker-"+ar.ext+".so", 0o755)
-	// install.sh 527-529: 中文 qm
-	add("/usr/share/remarkable/xochitl/translations/reMarkable_zh_CN.qm", "dist/reMarkable_zh_CN.qm", 0o644)
+	// install.sh 527-529: 新增的系统语言 qm
+	for _, lang := range []string{"zh_CN", "zh_TW", "ja", "ko"} {
+		add("/usr/share/remarkable/xochitl/translations/reMarkable_"+lang+".qm", "dist/reMarkable_"+lang+".qm", 0o644)
+	}
 	// install.sh 531-538: systemd 暂存 (设备端阶段 1 双写到 /etc)
 	for _, n := range b.Names() {
 		if strings.HasPrefix(n, "systemd/") {
@@ -267,7 +272,7 @@ func NewPlan(info probe.Info, b *bundle.Bundle) (*Plan, error) {
 // Run 执行计划。log 收到的每一行都同时进本地审计日志。
 func Run(ctx context.Context, c *sshx.Client, b *bundle.Bundle, p *Plan, log sshx.Logger) error {
 	if p.NeedXovi { // install.sh 186-213
-		log(i18n.T("设备无 xovi, 自动部署...", "No xovi on the device, deploying it..."))
+		log(i18n.T("设备无 xovi 或 xovi 不完整, 自动部署...", "xovi missing or incomplete on the device, deploying it..."))
 		for _, s := range []string{p.xoviTar, "vendor/xovi/xochitl-xovi"} {
 			rc, err := b.Open(s)
 			if err != nil {
@@ -280,9 +285,16 @@ func Run(ctx context.Context, c *sshx.Client, b *bundle.Bundle, p *Plan, log ssh
 			}
 		}
 		if err := c.RunLogged(ctx, fmt.Sprintf(`set -e
-cd /home/root
+# 设备上可能已有别的工具装的不完整 xovi: 先解到暂存目录, 再逐个 mv 覆盖 (rename 不改正在被映射的 .so),
+# 它自己的其他扩展不动
+S=/home/root/.xovi-staging
+rm -rf $S && mkdir -p $S && cd $S
 tar -xzf /tmp/%[1]s --no-same-owner --no-same-permissions
-cp /tmp/xochitl-xovi /home/root/xovi/xochitl-xovi
+cd $S/xovi
+find . -type d | while read d; do mkdir -p "/home/root/xovi/$d"; done
+find . ! -type d | while read f; do mv -f "$f" "/home/root/xovi/$f"; done
+cd /home/root && rm -rf $S
+cp /tmp/xochitl-xovi /home/root/xovi/xochitl-xovi.new && mv -f /home/root/xovi/xochitl-xovi.new /home/root/xovi/xochitl-xovi
 chmod +x /home/root/xovi/xochitl-xovi
 chown -R root:root /home/root/xovi
 rm /tmp/%[1]s /tmp/xochitl-xovi
@@ -379,12 +391,13 @@ echo '  ✓ xovi '`+i18n.T("部署完成", "deployed"), path.Base(p.xoviTar)), n
 
 	// rm-appload: KOReader 这类要 framebuffer 的程序靠它拿画布。装的是官方发布包,
 	// 版本和 sha256 锁在 third_party/fetch-appload.sh 里 —— 这东西对固件版本敏感,
-	// 旧版配新固件会让 xochitl 崩到切槽, 所以绝不能随便换。
-	if b.Has(apploadSrc) {
+	// 旧版配新固件会让 xochitl 崩到切槽, 所以绝不能随便换。扩展和 shim 都必须按架构选。
+	apploadDir := apploadDirForArch(p.Arch)
+	if b.Has(apploadDir + "/appload.so") {
 		for _, f := range []struct{ src, dst string }{
-			{apploadSrc, "/home/root/xovi/extensions.d/appload.so"},
-			{"third_party/appload/qtfb-shim.so", "/home/root/shims/qtfb-shim.so"},
-			{"third_party/appload/qtfb-shim-32bit.so", "/home/root/shims/qtfb-shim-32bit.so"},
+			{apploadDir + "/appload.so", "/home/root/xovi/extensions.d/appload.so"},
+			{apploadDir + "/qtfb-shim.so", "/home/root/shims/qtfb-shim.so"},
+			{apploadDir + "/qtfb-shim-32bit.so", "/home/root/shims/qtfb-shim-32bit.so"},
 		} {
 			data, err := b.ReadAll(f.src)
 			if err != nil {
@@ -468,8 +481,12 @@ rm -f /tmp/10-store-api.conf
 systemctl daemon-reload
 `
 
-// apploadSrc 是安装包里 appload 扩展的路径。
-const apploadSrc = "third_party/appload/appload.so"
+func apploadDirForArch(arch string) string {
+	if arch == "armv7l" {
+		return "third_party/appload/armv7"
+	}
+	return "third_party/appload/aarch64"
+}
 
 // apploadScript 把 appload 放进 xovi 的扩展目录, shim 放进 /home/root/shims。
 // 已启用的扩展都不带 .conf (xovi 按目录认), 所以只拷 .so 就是启用。

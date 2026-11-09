@@ -62,12 +62,14 @@ Rectangle {
     // 应用跑在 appHost 里自然继承, 所以应用侧不要再自己挂。
     property string screenMode: "ui"
     property var _screenModeItem: null
-    // 刷新档位 (从慢到快)。值存进外壳配置, 对应 xochitl 的 ScreenModeItem 波形:
+    // 刷新档位 (从慢到快)。值存进外壳配置, 对应 xochitl 的 ScreenModeItem 波形
+    // (枚举 Pen/Mono/Animation/UI/Content/Sleep/Overlay, 名字不代表效果, 以真机为准):
     //   content   高清: 灰阶、颜色最准, 最慢, 会闪
     //   ui        快刷 (默认)
-    //   animation 流畅: 再快一档, 灰阶和颜色更粗
-    //   mono      极速: 只有黑白两色, 最快; 照片、彩色图标会变成黑白
-    readonly property var screenModes: ["content", "ui", "animation", "mono"]
+    //   pen       流畅: 笔迹用的那档, 带彩色的快刷 (Overlay 实测同效果, 不另设)
+    //   mono      极速: 名叫 Mono 但 3.29 实测仍带一点颜色, 灰阶和颜色最粗
+    // Animation 实测只有黑白且刷得慢, 已去掉; 存过 animation 的配置读不进来, 回到默认快刷
+    readonly property var screenModes: ["content", "ui", "pen", "mono"]
     property bool screenModeOpen: false   // 设置页档位列表是否展开
     // 选档位: 必须放在外壳自己的函数里做 —— 收起列表会当场销毁被点的那一行,
     // 写在行的 onClicked 里的话, 收起之后的语句找不到 space, 配置没存上,
@@ -78,10 +80,10 @@ Rectangle {
         screenModeOpen = false
     }
     function screenModeEnum(m) {
-        return ({ content: "Content", animation: "Animation", mono: "Mono" })[m] || "UI"
+        return ({ content: "Content", mono: "Mono", pen: "Pen" })[m] || "UI"
     }
     function screenModeLabel(m) {
-        return space.st(({ content: "screenmode_hd", animation: "screenmode_anim", mono: "screenmode_mono" })[m] || "screenmode_fast")
+        return space.st(({ content: "screenmode_hd", pen: "screenmode_smooth", mono: "screenmode_turbo" })[m] || "screenmode_fast")
     }
     function applyScreenMode() {
         if (space._screenModeItem) { space._screenModeItem.destroy(); space._screenModeItem = null }
@@ -102,13 +104,15 @@ Rectangle {
             else space.applyScreenMode()
             if (st === 200 && r && r.hero !== undefined) space.heroChoice = r.hero
             if (st === 200 && r && r.timezone) space.tzPref = r.timezone
+            if (st === 200 && r) space.showAppLoad = r.showAppLoad === true
+            space.applyAppLoadEntryVisibility()
         })
         loadHeroList()
     }
     function saveShellCfg(cb) {
         request("PUT", baseUrl + "/space/apps/shell/data/config",
                 { screenMode: space.screenMode, hero: space.heroChoice, lang: space.langPref,
-                  timezone: space.tzPref }, cb || null)
+                  timezone: space.tzPref, showAppLoad: space.showAppLoad }, cb || null)
     }
 
     // 首页顶部那张大卡放什么:
@@ -123,8 +127,8 @@ Rectangle {
         })
     }
     // AppLoad 自己会往侧栏插一个入口。空间里已经能直接启动那些应用了
-    // (launch.type=appload 走 AppLoadLauncher.launchApplication), 侧栏再放一个
-    // 等于同一件事两个入口, 还把"从哪进"这件事搞乱。
+    // (launch.type=appload 走 AppLoadLauncher.launchApplication), 所以默认隐藏这个重复入口,
+    // 需要两个入口的用户可以在设置里打开。
     //
     // 它是 qmldiff 注入的, 带 objectName="openAppLoad" —— 这是唯一稳定的抓手:
     // id 在运行时拿不到, 按类型/位置找则会随固件改版漂移。
@@ -132,16 +136,17 @@ Rectangle {
     // 时机: 侧栏是懒加载的, 刚启动时还不存在。但用户是从侧栏点进空间的, 所以
     // 空间一显示就说明侧栏已经建好了 —— 在这里做最稳, 不用轮询也不用 Timer
     // (运行时注入的组件里 Timer 本来就不触发)。
-    property bool apploadEntryHidden: false
-    function hideApploadEntry() {
-        if (apploadEntryHidden) return
+    property bool showAppLoad: false
+    onShowAppLoadChanged: space.applyAppLoadEntryVisibility()
+    function toggleAppLoadEntry() {
+        showAppLoad = !showAppLoad
+        saveShellCfg()
+    }
+    function applyAppLoadEntryVisibility() {
         var root = space
         while (root.parent) root = root.parent
         var target = findByObjectName(root, "openAppLoad")
-        if (target) {
-            target.visible = false
-            apploadEntryHidden = true
-        }
+        if (target) target.visible = space.showAppLoad
     }
     function findByObjectName(node, name) {
         if (!node) return null
@@ -191,7 +196,7 @@ Rectangle {
     readonly property var thDefault: ({
         bg: "white", card: "white", fill: "#f0f0f0", press: "#eeeeee",
         line: "#B4AFA6", lineSoft: "#C4BFB6", lineFaint: "#E2DED6",
-        text: "#000000", text2: "#262626", textBody: "#1A1A18", text3: "#26251F", textNote: "#1F1E1B",
+        text: "#000000", text2: "#000000", textBody: "#000000", text3: "#000000", textNote: "#000000",
         primary: "#000000", primaryText: "white",
         radius: 12, border: 1, hero: "", icons: ({}), slots: ({}), id: "default"
     })
@@ -223,18 +228,37 @@ Rectangle {
         if (a.section) return a.section
         // 旧索引没有 section 时按已知字段兜底
         if (a.kind === "space" || a.category === "system") return "system"
-        if (a.id === "stickers" || String(a.id || "").indexOf("theme-") === 0) return "themes"
+        // 贴纸是常驻后台 + 挂进笔记界面的功能插件, 和 AI 同类; 主题栏只留改外观的 (主题包/字体)
+        if (a.id === "stickers") return "system"
+        if (String(a.id || "").indexOf("theme-") === 0) return "themes"
         return "apps"
+    }
+    // 主题栏里的专题目录: 条目多的时候收成一行 (目前是字体), 点进去再看列表
+    property string storeFolder: ""
+    function storeGroupOf(a) {
+        if (String(a.id || "").indexOf("font-") === 0 || a.hand_font) return "fonts"
+        return ""
+    }
+    function storeGroupName(g) { return space.st("store_group_" + g) }
+    function storeGroups() {
+        if (storeSection !== "themes") return []
+        var list = storeApps.filter(function (a) { return space.storeSectionOf(a) === "themes" })
+        var n = 0
+        for (var i = 0; i < list.length; i++) if (space.storeGroupOf(list[i]) === "fonts") n++
+        return n > 0 ? [{ id: "fonts", count: n }] : []
     }
     function storeList() {
         var sec = storeSection
-        return storeApps.filter(function (a) { return space.storeSectionOf(a) === sec })
+        var list = storeApps.filter(function (a) { return space.storeSectionOf(a) === sec })
+        if (sec !== "themes") return list
+        // 目录首页不铺开组内条目; 进了目录只显示该组
+        return list.filter(function (a) { return space.storeGroupOf(a) === space.storeFolder })
     }
     property var recentDoc: null      // 最近在读的文档 (/space/recent, 取自 xochitl 元数据)
     property string storeError: ""
     property bool storeLoaded: false
-    property int tzOffset: 60             // local zone offset in minutes, set by the backend; the device clock is UTC
-    property string tzName: "Europe/Berlin" // zone name decided by the backend (must match defaultTimezone in timezone.go)
+    property int tzOffset: 480            // 后端给的本地时区偏移 (分钟); 设备系统时区是 UTC
+    property string tzName: "Asia/Shanghai" // 后端最终定的时区名
     property string tzPref: ""            // 用户在设置里选的 (shell/config.json 的 timezone); 空 = 默认北京时间
     property var tzList: []               // 设置里可选的时区 (GET /space/timezones)
     property bool tzOpen: false           // 设置页时区列表是否展开
@@ -269,6 +293,9 @@ Rectangle {
     property bool chrome: true        // false = 应用全屏 (自己画导航)
     property string toastText: ""
     property string busyText: ""
+    // 商店正在装的应用 {id, name, text}: 进度只写在那一行的按钮上, 不盖全屏 —— 以前盖遮罩,
+    // Wi-Fi 连着却上不了网时要卡到下载超时, 空间退不出去也没法去设置里换网
+    property var installing: null
     property var confirmApp: null
     // 通用确认框。原来只为"重启进 Android"这类 launch.confirm 服务, 删应用也得问一句,
     // 所以拆出一条独立的: 文案 + 一个点space.st("ok")才跑的回调。
@@ -326,8 +353,11 @@ Rectangle {
         function svcGet(path, cb) { space.request("GET", serviceUrl + path, null, cb) }
         function svcPost(path, body, cb) { space.request("POST", serviceUrl + path, body, cb) }
         function localNow() { return space.localNow() }   // 按设备时区 (见 /space/apps 的 tzOffset) 的当前时间
-        // Current UI language (en / fr / de / zh-CN). Follows the reMarkable system setting; apps need not detect it.
+        // 当前界面语言 (zh-CN / en)。跟随 reMarkable 系统设置, 应用不用自己判断。
         readonly property string lang: space.lang
+        // Qt locale 名 (zh_CN / en_US 等), 给 toLocaleDateString / Qt.locale 用。
+        // 外壳根节点有同名函数, 这里暴露给应用和小组件。
+        function qtLocaleName() { return space.qtLocaleName() }
         // 查本应用 i18n/<lang>.json 的词条; 缺词回落 en, 再回落 key 本身。
         // 不要用 qsTr —— 注入进来的 QML 查不到 Qt 的翻译表 (已验证), tr 走自己的词典。
         function tr(key, args) { return space.tr(key, args) }
@@ -388,8 +418,11 @@ Rectangle {
 
     // 开机语言: 后端那套推断是异步的, 来不及赶上首帧, 这里同步猜一次。
     // 外壳就在 xochitl 进程里, /proc/self/maps 里映射着哪个 reMarkable_xx.qm 就是
-    // 系统当前的界面语言 (和后端 SystemLang 同一个办法); 读不到再认用户存的偏好,
-    // 都没有按中文。
+    // 系统当前的界面语言 (和后端 SystemLang 同一个办法)。但 /proc 文件报的大小是 0,
+    // XHR 按大小读回来是空的, 实际上这一步一直读不到 —— 所以再看上一次后端定下的语言
+    // (shell/lastlang.json, 每次定稿都记), 再没有才认用户存的偏好, 都没有按英文。
+    // 不能直接拿偏好: 系统语言优先于偏好, 偏好是 en 而系统是中文时, 后端回话前那一瞬
+    // 会先显示英文 (自更新后第一次打开, 后端正重启, 界面就停在了英文空白页, 2026-10-27)。
     function sysLangSync() {
         var x = new XMLHttpRequest()
         try {
@@ -404,6 +437,9 @@ Rectangle {
     readonly property string bootLang: {
         var l = sysLangSync()
         if (l) return l
+        var last = readJsonSync("file:///home/root/.local/share/rmkit-cn/space/data/shell/lastlang.json")
+        l = normLang(last && last.lang ? last.lang : "")
+        if (l) return l
         var cfg = readJsonSync("file:///home/root/.local/share/rmkit-cn/space/data/shell/config.json")
         l = normLang(cfg && cfg.lang ? cfg.lang : "")
         return l || "en"
@@ -412,7 +448,7 @@ Rectangle {
     property var shellDictEn: bootLang === "en" ? shellDict
                                                 : (readJsonSync(shellDir + "/i18n/en.json") || ({}))
 
-    // zh_CN / zh-Hans / zh → zh-CN; 认不出的回落 en。和后端 NormalizeLang 保持一致。
+    // 与原系统语言及我们新增的语言一致; 认不出的由调用方回退英文。
     function normLang(s) {
         if (!s) return ""
         s = ("" + s).trim()
@@ -420,10 +456,13 @@ Rectangle {
         if (cut > 0) s = s.substring(0, cut)
         s = s.replace(/_/g, "-")
         var low = s.toLowerCase()
+        if (low.indexOf("zh-hant") === 0 || low.indexOf("zh-tw") === 0 ||
+            low.indexOf("zh-hk") === 0 || low.indexOf("zh-mo") === 0) return "zh-TW"
         if (low.indexOf("zh") === 0) return "zh-CN"
-        if (low === "en" || low.indexOf("en-") === 0) return "en"
-        if (low === "fr" || low.indexOf("fr-") === 0) return "fr"
-        if (low === "de" || low.indexOf("de-") === 0) return "de"
+        var supported = ["en", "de", "fr", "es", "ja", "ko"]
+        for (var i = 0; i < supported.length; ++i) {
+            if (low === supported[i] || low.indexOf(supported[i] + "-") === 0) return supported[i]
+        }
         return ""
     }
 
@@ -432,20 +471,23 @@ Rectangle {
         lang = n || "en"
     }
 
-    // Language picker (only shown when the system language cannot be read).
-    // Keep in sync with SupportedLangs in internal/space/lang.go.
-    readonly property var chooseableLangs: ["en", "fr", "de", "zh-CN"]
+    readonly property var chooseableLangs: ["en", "de", "fr", "es", "zh-CN", "zh-TW", "ja", "ko"]
     function langNativeName(code) {
-        var names = { "en": "English", "fr": "Fran\u00e7ais", "de": "Deutsch", "zh-CN": "\u4e2d\u6587\uff08\u7b80\u4f53\uff09" }
+        var names = {
+            "en": "English", "de": "Deutsch", "fr": "Français", "es": "Español",
+            "zh-CN": "中文（简体）", "zh-TW": "中文（繁體）", "ja": "日本語", "ko": "한국어"
+        }
         return names[code] || code
     }
     function nextLang(code) {
         var i = chooseableLangs.indexOf(code)
-        return chooseableLangs[(i + 1) % chooseableLangs.length]   // unknown code (-1) -> first entry
+        return chooseableLangs[(i + 1) % chooseableLangs.length]
     }
-    // Qt locale used to format dates in the home card.
     function qtLocaleName() {
-        var m = { "zh-CN": "zh_CN", "fr": "fr_FR", "de": "de_DE" }
+        var m = {
+            "zh-CN": "zh_CN", "zh-TW": "zh_TW", "de": "de_DE", "fr": "fr_FR",
+            "es": "es_ES", "ja": "ja_JP", "ko": "ko_KR"
+        }
         return m[lang] || "en_US"
     }
 
@@ -460,12 +502,10 @@ Rectangle {
         if (current) loadDict(current)
     }
 
-    // 外壳自己的文案。args 传对象做占位替换: st("downloading", {name: "天气"})
+    // 外壳自己的文案。args 传对象做占位替换: st("deleted", {name: "天气"})
     // 词典里写 "正在下载 {name}…" / "Downloading {name}…" —— 占位符位置随语言走。
     // 查词: 先当前语言再 en 再 key 本身。args.n === 1 时先试 <key>_one ——
     // 英文单复数不同 ("1 album" / "2 albums"), 中文词典不用写 _one, 找不到就落回原 key。
-    // Which numbers use the "<key>_one" (singular) form? English and German: only 1.
-    // French: 0 and 1 ("0 album", "1 album", "2 albums").
     function isSingular(n) { return n === 1 || (lang === "fr" && n === 0) }
     function lookup(d, dEn, key, args) {
         if (args && isSingular(args.n)) {
@@ -549,8 +589,12 @@ Rectangle {
             langPref = r.langPref || ""
             langSystem = normLang(r.langSystem || "")
             setLang(r.lang || "en")
-            // bootLang 阶段已经同步读过一次了; 只有最终定的语言和开机猜的不一样才重读
-            if (lang !== bootLang) loadShellDict()
+            // bootLang 阶段已经同步读过一次了; 只有最终定的语言和开机猜的不一样才重读,
+            // 并记下这次的结果, 下次开机首帧就猜对 (单独一个文件, 不跟 config 抢着整份写)
+            if (lang !== bootLang) {
+                loadShellDict()
+                request("PUT", baseUrl + "/space/apps/shell/data/lastlang", { lang: lang }, null)
+            }
             console.warn("SPACE-LANG: boot=" + JSON.stringify(bootLang) + " system=" + JSON.stringify(langSystem) + " pref=" + JSON.stringify(langPref) + " ⇒ " + lang)
             apps = r.apps || []
             if (!space.upd && r.spaceVersion) space.upd = { current: r.spaceVersion }
@@ -577,6 +621,7 @@ Rectangle {
 
     function loadStore(refresh) {
         storeError = ""
+        if (!installing) resumeInstall()
         request("GET", baseUrl + "/space/store" + (refresh ? "?refresh=1" : ""), null, function(st, r) {
             storeLoaded = true
             if (st !== 200 || !r) { storeError = (r && r.error) ? r.error : space.st("store_unreachable", { code: st }); storeApps = []; return }
@@ -628,17 +673,35 @@ Rectangle {
     // 墨水屏不跑动画 —— 每次重绘都是实打实的屏幕刷新, 进度条滚起来既慢又闪, 给个百分比
     // 数字最省事; 轮询间隔 1.2 秒也是这个道理, 太密了屏幕一直在抖。
     function installFromStore(item) {
-        busyText = space.st("downloading", { name: item.name })
+        // 商店给不出下载地址 (服务端临时打不出这台设备的专属包, 2026-10-26 磁盘满过一次): 别把
+        // 后台的「需要 {"url": ...}」甩给用户, 说人话; 下拉刷新拿到新索引就能装
+        if (!item.zip) {
+            showToast(space.st("store_no_download", { name: item.name }))
+            return
+        }
+        if (installing) {
+            showToast(space.st("install_busy", { name: installing.name }))
+            return
+        }
+        installing = { id: item.id, name: item.name, text: space.st("btn_downloading") }
         request("POST", baseUrl + "/space/apps/install-url",
                 { url: item.zip, sha256: item.sha256 || "", id: item.id, name: item.name },
                 function (st, r) {
                     if (st !== 200 && st !== 202) {
-                        busyText = ""
+                        installing = null
                         showToast((r && r.error) ? r.error : space.st("install_failed_code", { code: st }))
                         return
                     }
                     installPoll.restart()
                 })
+    }
+    // 打开空间时接上没装完的那次 (装的途中退出过空间, 后台还在装)
+    function resumeInstall() {
+        request("GET", baseUrl + "/space/apps/install-progress", null, function (st, p) {
+            if (st !== 200 || !p || !p.phase || p.phase === "done" || p.phase === "error") return
+            installing = { id: p.id, name: p.name, text: space.st("btn_downloading") }
+            installPoll.restart()
+        })
     }
 
     Timer {
@@ -652,18 +715,17 @@ Rectangle {
             // 原来按阶段名逐个匹配, 新增一个阶段就会掉到下面的收尾逻辑里 ——
             // 进度框闪一下就没, 装完也不刷新列表, 看着像安装失败了。
             if (p.phase !== "done" && p.phase !== "error") {
-                if (p.phase === "installing") {
-                    space.busyText = space.st("installing", { name: p.name })
-                } else {
-                    // 服务器没给 Content-Length 时只报已下多少, 别显示一个假的百分比
-                    space.busyText = p.total > 0
-                            ? space.st("downloading_pct", { name: p.name, pct: Math.round(p.got * 100 / p.total) })
-                            : space.st("downloading_mb", { name: p.name, mb: (p.got / 1048576).toFixed(1) })
-                }
+                var t
+                if (p.phase === "installing") t = space.st("btn_installing")
+                // 服务器没给 Content-Length 时只报已下多少, 别显示一个假的百分比
+                else if (p.total > 0) t = Math.round(p.got * 100 / p.total) + "%"
+                else if (p.got > 0) t = (p.got / 1048576).toFixed(1) + " MB"
+                else t = space.st("btn_downloading")
+                space.installing = { id: p.id || (space.installing ? space.installing.id : ""), name: p.name, text: t }
                 return
             }
             installPoll.stop()
-            space.busyText = ""
+            space.installing = null
             if (p.phase === "error") { space.showToast(p.error || space.st("install_failed")); return }
             if (p.phase === "done") {
                 space.showToast(space.st("installed_toast", { name: p.name || space.st("app_fallback_name") }))
@@ -880,6 +942,14 @@ Rectangle {
                     space, "space_appload_launcher")
             } catch (e) { helper = null }
             if (helper) {
+                // 商店安装新应用后, AppLoad 还持有开机时的列表; 启动前重扫, 第一次点开也能识别
+                try {
+                    var library = Qt.createQmlObject(
+                        'import QtQuick;\nimport net.asivery.AppLoad;\nAppLoadLibrary { }',
+                        space, "space_appload_library")
+                    library.reloadList()
+                    library.destroy()
+                } catch (e) { console.warn("[space] AppLoad 列表刷新失败: " + e) }
                 space.visible = false
                 helper.go(l.id)
                 helper.destroy()
@@ -924,8 +994,8 @@ Rectangle {
     Timer { id: toastTimer; interval: 4000; repeat: false; onTriggered: space.toastText = "" }
     Timer { interval: 15000; running: space.visible; repeat: true; onTriggered: space.now = new Date() }
 
-    Component.onCompleted: { loadTheme(); reload(); loadShellCfg(); loadTimezones(); loadDevice(); hideApploadEntry(); libStart() }
-    onVisibleChanged: { if (visible) { hideApploadEntry(); libStart() } else libStop() }
+    Component.onCompleted: { loadTheme(); reload(); loadShellCfg(); loadTimezones(); loadDevice(); applyAppLoadEntryVisibility(); libStart() }
+    onVisibleChanged: { if (visible) { applyAppLoadEntryVisibility(); libStart() } else libStop() }
     Component.onDestruction: libStop()
 
     // ─── 文件库桥 (热导入) ──────────────────────────────────────────
@@ -1491,7 +1561,7 @@ Rectangle {
                     visible: space.listError !== ""
                     text: space.listError
                     font.pixelSize: space.fpx(24)
-                    color: "#a00000"
+                    color: "#000000"
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
@@ -1619,7 +1689,7 @@ Rectangle {
                                     width: parent.width - space.px(24); height: 3
                                     color: secItem.active ? space.th.text : "transparent"
                                 }
-                                MouseArea { anchors.fill: parent; onClicked: space.storeSection = secItem.modelData }
+                                MouseArea { anchors.fill: parent; onClicked: { space.storeFolder = ""; space.storeSection = secItem.modelData } }
                             }
                         }
                     }
@@ -1679,6 +1749,70 @@ Rectangle {
                     text: space.st("store_empty_" + space.storeSection)
                     font.pixelSize: space.fpx(24); color: space.th.textBody
                 }
+                // 专题目录行 (主题栏): 字体这类条目多, 收成一行, 点进去再看
+                Repeater {
+                    model: space.storeGroups()
+                    delegate: Item {
+                        id: folderRow
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: space.vpx(120)
+                        Rectangle { anchors.fill: parent; color: folderMouse.pressed ? space.th.press : "transparent" }
+                        MouseArea { id: folderMouse; anchors.fill: parent; onClicked: space.storeFolder = folderRow.modelData.id }
+                        RowLayout {
+                            anchors.fill: parent
+                            spacing: space.px(20)
+                            Rectangle {
+                                Layout.preferredWidth: space.fpx(72); Layout.preferredHeight: space.fpx(72); radius: space.th.radius
+                                color: space.th.fill
+                                Image {
+                                    anchors.centerIn: parent
+                                    width: space.fpx(40); height: width
+                                    source: space.icon("folder")
+                                    sourceSize.width: width; sourceSize.height: width
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 4
+                                Text {
+                                    text: space.storeGroupName(folderRow.modelData.id)
+                                    font.pixelSize: space.fpx(28); elide: Text.ElideRight; Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: space.st("store_group_note_" + folderRow.modelData.id, { n: folderRow.modelData.count })
+                                    font.pixelSize: space.fpx(22); color: space.th.text3; elide: Text.ElideRight; Layout.fillWidth: true
+                                }
+                            }
+                            Image {
+                                Layout.preferredWidth: space.fpx(28); Layout.preferredHeight: width
+                                source: space.icon("caret-right"); sourceSize.width: width; sourceSize.height: width
+                            }
+                        }
+                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: space.th.lineSoft }
+                    }
+                }
+                // 目录内: 顶部一行返回
+                Item {
+                    visible: space.storeSection === "themes" && space.storeFolder !== ""
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: space.vpx(88)
+                    Rectangle { anchors.fill: parent; color: backMouse.pressed ? space.th.press : "transparent" }
+                    MouseArea { id: backMouse; anchors.fill: parent; onClicked: space.storeFolder = "" }
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: space.px(12)
+                        Image {
+                            Layout.preferredWidth: space.fpx(26); Layout.preferredHeight: width
+                            source: space.icon("caret-right"); sourceSize.width: width; sourceSize.height: width
+                            rotation: 180
+                        }
+                        Text {
+                            text: space.storeGroupName(space.storeFolder)
+                            font.pixelSize: space.fpx(26); color: space.th.text3
+                        }
+                    }
+                }
                 Repeater {
                     model: space.storeList()
                     delegate: Item {
@@ -1733,11 +1867,13 @@ Rectangle {
                                 // 线上比本机新才算有更新 (本机更新或一样 = 已安装, 不让点, 免得降级)
                                 readonly property bool newer: storeRow.installed !== ""
                                     && space.versionCmp(storeRow.modelData.version, storeRow.installed) > 0
-                                enabled: locked || storeRow.installed === "" || newer
-                                text: locked ? space.st("act_buy")
+                                readonly property bool mine: !!space.installing && space.installing.id === storeRow.modelData.id
+                                enabled: !mine && (locked || storeRow.installed === "" || newer)
+                                text: mine ? space.installing.text
+                                      : locked ? space.st("act_buy")
                                       : (storeRow.installed === "" ? space.st("act_get")
                                          : (newer ? space.st("act_update") : space.st("act_installed")))
-                                primary: locked || storeRow.installed === ""
+                                primary: !mine && (locked || storeRow.installed === "")
                                 onClicked: {
                                     if (locked) space.buyPrompt(storeRow.modelData)
                                     else space.installFromStore(storeRow.modelData)
@@ -1781,7 +1917,7 @@ Rectangle {
                     ui: space.fs
                     iconSource: space.icon("translate")
                     text: space.st("set_language")
-                    detail: space.langNativeName(space.lang)
+                    detail: space.lang === "zh-CN" ? "\u4e2d\u6587\uff08\u7b80\u4f53\uff09" : space.langNativeName(space.lang)
                     onClicked: space.chooseLang(space.nextLang(space.lang))
                 }
                 Kit.SRow {
@@ -1891,6 +2027,15 @@ Rectangle {
                         MouseArea { id: tzMouse; anchors.fill: parent; onClicked: space.chooseTimezone(modelData.name) }
                     }
                 }
+                Kit.SRow {
+                    th: space.th
+                    Layout.fillWidth: true
+                    ui: space.fs
+                    iconSource: space.icon("squares-four")
+                    text: space.st("set_appload")
+                    detail: space.showAppLoad ? space.st("appload_shown") : space.st("appload_hidden")
+                    onClicked: space.toggleAppLoadEntry()
+                }
                 // 关于空间: 只显示版本号 (当前 + 商店里的最新); 更新本身在商店「系统」栏, 有新版本时点这行跳过去
                 Kit.SRow {
                     th: space.th
@@ -1931,7 +2076,7 @@ Rectangle {
             anchors.fill: parent
             text: space.st("app_load_failed") + "\n" + space.appError
             font.pixelSize: space.fpx(24)
-            color: "#a00000"
+            color: "#000000"
             wrapMode: Text.WrapAnywhere
         }
     }
@@ -1973,7 +2118,6 @@ Rectangle {
                             source: space.kitDir + "/icons/" + tabItem.modelData.icon + ".svg"
                             fillMode: Image.PreserveAspectFit
                             sourceSize.width: width; sourceSize.height: width
-                            opacity: tabItem.active ? 1 : 0.55
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter

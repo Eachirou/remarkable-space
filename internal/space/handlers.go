@@ -34,6 +34,8 @@ import (
 //	POST   /space/apps/{id}/service/stop    收掉后台
 //	GET    /space/apps/{id}/data/{key}      读应用数据 (JSON, 存在 dataDir/<key>.json; 纯 QML 应用的持久化)
 //	PUT    /space/apps/{id}/data/{key}      写应用数据 (body 是 JSON, ≤1MB)
+//	GET    /space/uploads                   扫码上传页上各应用登记的标签页 (uploads.go)
+//	POST   /space/apps/{id}/upload/{slot}   上传文件转给应用后台; GET 取列表, DELETE …/{name} 删一项
 //	GET    /space/recent                    最近在读的文档 (书名/页码/进度, 取自 xochitl 元数据)
 type Handler struct {
 	Reg *Registry
@@ -113,6 +115,12 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /space/apps/{id}/service/stop", h.serviceStop)
 	mux.HandleFunc("GET /space/apps/{id}/data/{key}", h.dataGet)
 	mux.HandleFunc("PUT /space/apps/{id}/data/{key}", h.dataPut)
+	mux.HandleFunc("GET /space/uploads", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, h.uploadSlots(r.URL.Query().Get("focus")))
+	})
+	mux.HandleFunc("POST /space/apps/{id}/upload/{slot}", h.uploadProxy)
+	mux.HandleFunc("GET /space/apps/{id}/upload/{slot}", h.uploadProxy)
+	mux.HandleFunc("DELETE /space/apps/{id}/upload/{slot}/{name}", h.uploadProxy)
 	mux.HandleFunc("GET /space/store", h.store)
 	mux.HandleFunc("GET /space/device", h.device)
 	mux.HandleFunc("GET /space/recent", h.recent)
@@ -237,9 +245,9 @@ func (h *Handler) store(w http.ResponseWriter, r *http.Request) {
 }
 
 // localizeIndex 按界面语言给商店索引里的应用名和简介定稿 (和 list 对已装应用的做法一致):
-// 英文界面下有 name_en / description_en 的条目换成英文, 没填的保持原文。缓存里存的是原始
-// 索引, 每次响应时再换 —— 用户切语言不用等缓存过期。解析不了就原样返回, 不能因为本地化
-// 把商店弄没了。
+// 优先取打包时从 i18n 语言文件生成的 names / descriptions, 老索引回退 name_en /
+// description_en。缓存里存原始索引, 每次响应时再换 —— 用户切语言不用等缓存过期。
+// 解析不了就原样返回, 不能因为本地化把商店弄没了。
 func localizeIndex(body []byte, lang string) []byte {
 	if lang == "zh-CN" {
 		return body
@@ -256,8 +264,15 @@ func localizeIndex(body []byte, lang string) []byte {
 			continue
 		}
 		for _, k := range []string{"name", "description"} {
-			if v, _ := a[k+"_en"].(string); v != "" {
-				a[k] = v
+			translated := ""
+			if values, ok := a[k+"s"].(map[string]any); ok {
+				translated, _ = values[lang].(string)
+			}
+			if translated == "" && lang != "zh-CN" {
+				translated, _ = a[k+"_en"].(string)
+			}
+			if translated != "" {
+				a[k] = translated
 				changed = true
 			}
 		}
@@ -364,13 +379,43 @@ func (h *Handler) AutoStart() {
 	}
 }
 
+// localizedAppText 与 QML 的 space.tr 使用同一份语言文件。旧应用没有对应词条时
+// 回退 manifest 的英文字段, 再回退原始字段, 不要求所有应用一次改完。
+func localizedAppText(a App, lang, key string) string {
+	if b, err := os.ReadFile(filepath.Join(a.Dir, "i18n", lang+".json")); err == nil {
+		var dict map[string]string
+		if json.Unmarshal(b, &dict) == nil && dict[key] != "" {
+			return dict[key]
+		}
+	}
+	if lang != "zh-CN" {
+		if key == "_app_name" && a.NameEn != "" {
+			return a.NameEn
+		}
+		if key == "_app_description" && a.DescriptionEn != "" {
+			return a.DescriptionEn
+		}
+	}
+	switch key {
+	case "_app_name":
+		return a.Name
+	case "_launch_confirm":
+		if a.Launch != nil {
+			return a.Launch.Confirm
+		}
+	}
+	return a.Description
+}
+
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	apps := h.Reg.List()
 	lang := h.CurrentLang()
 	for i := range apps {
-		// Settle the app name for the UI language, so the front end gets the name to show.
-		// An app with no translation keeps its original name - better than showing an id.
-		apps[i].Name = apps[i].DisplayName(lang)
+		apps[i].Name = localizedAppText(apps[i], lang, "_app_name")
+		apps[i].Description = localizedAppText(apps[i], lang, "_app_description")
+		if apps[i].Launch != nil && apps[i].Launch.Confirm != "" {
+			apps[i].Launch.Confirm = localizedAppText(apps[i], lang, "_launch_confirm")
+		}
 		if apps[i].Service != nil {
 			st := h.Sup.Status(apps[i].ID)
 			if st.Running {
@@ -444,7 +489,7 @@ func (h *Handler) installURL(w http.ResponseWriter, r *http.Request) {
 		Name   string `json:"name"` // 同上
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
-		fail(w, http.StatusBadRequest, "需要 {\"url\": ...}")
+		fail(w, http.StatusBadRequest, "暂时无法下载，请稍后刷新再试")
 		return
 	}
 	// 后台装, 立刻返回 —— 下载几 MB 在设备上要十几秒, 同步等的话界面只能干等, 连
