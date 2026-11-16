@@ -1,3 +1,5 @@
+//go:build linux
+
 package server
 
 // DRM dumb buffer 抓屏 (/dev/dri/card0): /screenshot 在 proc/mem 那条路失败时的退路。

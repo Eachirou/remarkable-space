@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -717,7 +716,7 @@ func (s *Server) launchAndroid(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cmd := exec.Command("/bin/sh", singleSlotAndroidLauncher)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		cmd.SysProcAttr = newSessionLeader()
 		if err := cmd.Start(); err != nil {
 			httpError(w, http.StatusInternalServerError, "启动单槽 Android 失败: "+err.Error())
 			return
@@ -731,7 +730,7 @@ func (s *Server) launchAndroid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cmd := exec.Command("/bin/sh", "-c", "sync; /usr/sbin/rootdev --switch && sleep 1 && reboot")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = newSessionLeader()
 	if err := cmd.Start(); err != nil {
 		httpError(w, http.StatusInternalServerError, "启动切换失败: "+err.Error())
 		return

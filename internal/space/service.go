@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -80,7 +79,7 @@ func (s *Supervisor) Start(app App) (ServiceStatus, error) {
 		"SPACE_PORT="+strconv.Itoa(app.Service.Port),
 		"SPACE_BASE_URL="+s.BaseURL,
 	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // 进程组: 收的时候连子进程一起
+	configureProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		logf.Close()
 		return ServiceStatus{}, err
@@ -146,14 +145,13 @@ func (s *Supervisor) Stop(id string) error {
 	if !ok || !p.alive() {
 		return nil
 	}
-	pgid := -p.cmd.Process.Pid
-	_ = syscall.Kill(pgid, syscall.SIGTERM)
+	_ = terminateProcess(p.cmd.Process, false)
 	select {
 	case <-p.done:
 		return nil
 	case <-time.After(3 * time.Second):
 	}
-	_ = syscall.Kill(pgid, syscall.SIGKILL)
+	_ = terminateProcess(p.cmd.Process, true)
 	select {
 	case <-p.done:
 	case <-time.After(2 * time.Second):
