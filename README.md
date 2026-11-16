@@ -82,6 +82,7 @@ base layer moved into this repository on 2026-10-20.
 | `cmd/space-server/` | Entry point for the Space server. |
 | `assistant/` | Desktop installer, updater, uninstaller, emergency-repair, and diagnostic tooling. |
 | `cmd/music-bridge/` | Optional computer-side WLAN bridge for the built-in Music remote. See [music-bridge.md](docs/music-bridge.md). |
+| `cmd/remarkable-sync/` | Computer-side exporter for reMarkable documents to an Obsidian vault. See [obsidian-sync.md](docs/obsidian-sync.md). |
 
 ## App model
 
