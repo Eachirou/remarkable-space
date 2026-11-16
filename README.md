@@ -93,6 +93,16 @@ base layer moved into this repository on 2026-10-20.
 - In development mode, the shell adds cache-busting revisions to local QML URLs. App resources should be built with
   `space.bust(url)` so changed assets are reloaded.
 
+### Focus and Play modes
+
+The shell includes a distraction boundary for game apps. It starts in **Focus** mode, where game apps are removed
+from Home and Apps and cannot be launched. **Play** mode provides a dedicated tab and a Games section in Discover.
+Switch modes from **Settings**; the selection is stored in the shell's app data and survives restarts.
+
+An optional schedule can switch the effective mode automatically using the device's selected Space timezone. Weekday
+and weekend play windows are configured in Settings. When scheduling is enabled, it takes precedence over the manual
+mode selection.
+
 ## Manifest example
 
 The manifest schema has not changed for localization. `name` and `version` are required; `name_en` and

@@ -105,6 +105,14 @@ Rectangle {
             if (st === 200 && r && r.hero !== undefined) space.heroChoice = r.hero
             if (st === 200 && r && r.timezone) space.tzPref = r.timezone
             if (st === 200 && r) space.showAppLoad = r.showAppLoad === true
+            if (st === 200 && r && (r.playMode === "focus" || r.playMode === "play")) space.playMode = r.playMode
+            if (st === 200 && r) {
+                space.playSchedule = r.playSchedule === true
+                if (timeMinutes(r.weekdayPlayStart) >= 0) space.weekdayPlayStart = r.weekdayPlayStart
+                if (timeMinutes(r.weekdayPlayEnd) >= 0) space.weekdayPlayEnd = r.weekdayPlayEnd
+                if (timeMinutes(r.weekendPlayStart) >= 0) space.weekendPlayStart = r.weekendPlayStart
+                if (timeMinutes(r.weekendPlayEnd) >= 0) space.weekendPlayEnd = r.weekendPlayEnd
+            }
             space.applyAppLoadEntryVisibility()
         })
         loadHeroList()
@@ -112,7 +120,10 @@ Rectangle {
     function saveShellCfg(cb) {
         request("PUT", baseUrl + "/space/apps/shell/data/config",
                 { screenMode: space.screenMode, hero: space.heroChoice, lang: space.langPref,
-                  timezone: space.tzPref, showAppLoad: space.showAppLoad }, cb || null)
+                  timezone: space.tzPref, showAppLoad: space.showAppLoad,
+                  playMode: space.playMode, playSchedule: space.playSchedule,
+                  weekdayPlayStart: space.weekdayPlayStart, weekdayPlayEnd: space.weekdayPlayEnd,
+                  weekendPlayStart: space.weekendPlayStart, weekendPlayEnd: space.weekendPlayEnd }, cb || null)
     }
 
     // 首页顶部那张大卡放什么:
@@ -223,8 +234,9 @@ Rectangle {
     property var storeApps: []
     // 商店分三栏: apps 应用 / themes 主题与贴纸包 / system 空间本体、系统补丁与 AI 等系统级应用 (索引里的 section 字段, 由应用仓库 pack.sh 按 manifest 推出)
     property string storeSection: "apps"
-    readonly property var storeSections: ["apps", "themes", "system"]
+    readonly property var storeSections: ["apps", "games", "themes", "system"]
     function storeSectionOf(a) {
+        if (a.category === "game") return "games"
         if (a.section) return a.section
         // 旧索引没有 section 时按已知字段兜底
         if (a.kind === "space" || a.category === "system") return "system"
@@ -250,6 +262,7 @@ Rectangle {
     function storeList() {
         var sec = storeSection
         var list = storeApps.filter(function (a) { return space.storeSectionOf(a) === sec })
+        if (sec === "games" && !space.playActive()) return []
         if (sec !== "themes") return list
         // 目录首页不铺开组内条目; 进了目录只显示该组
         return list.filter(function (a) { return space.storeGroupOf(a) === space.storeFolder })
@@ -262,6 +275,48 @@ Rectangle {
     property string tzPref: ""            // 用户在设置里选的 (shell/config.json 的 timezone); 空 = 默认北京时间
     property var tzList: []               // 设置里可选的时区 (GET /space/timezones)
     property bool tzOpen: false           // 设置页时区列表是否展开
+    property string playMode: "focus"
+    property bool playSchedule: false
+    property string weekdayPlayStart: "18:00"
+    property string weekdayPlayEnd: "22:00"
+    property string weekendPlayStart: "09:00"
+    property string weekendPlayEnd: "22:00"
+    function isPlayApp(a) { return a && (a.category === "game" || a.id === "plot") }
+    function timeMinutes(s) {
+        var m = String(s || "").match(/^([01]?[0-9]|2[0-3]):([0-5][0-9])$/)
+        return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : -1
+    }
+    function inPlayWindow(start, end) {
+        var a = timeMinutes(start), b = timeMinutes(end)
+        if (a < 0 || b < 0 || a === b) return false
+        var n = localNow()
+        var current = n.getHours() * 60 + n.getMinutes()
+        return a < b ? current >= a && current < b : current >= a || current < b
+    }
+    function playActive() {
+        if (!playSchedule) return playMode === "play"
+        var weekend = localNow().getDay() === 0 || localNow().getDay() === 6
+        return inPlayWindow(weekend ? weekendPlayStart : weekdayPlayStart,
+                            weekend ? weekendPlayEnd : weekdayPlayEnd)
+    }
+    function playModeLabel() { return playActive() ? space.st("mode_play") : space.st("mode_focus") }
+    function togglePlayMode() {
+        if (playSchedule) playSchedule = false
+        playMode = playMode === "play" ? "focus" : "play"
+        saveShellCfg()
+    }
+    function togglePlaySchedule() {
+        playSchedule = !playSchedule
+        saveShellCfg()
+    }
+    function setPlayTime(kind, value) {
+        if (timeMinutes(value) < 0) return
+        if (kind === "weekdayStart") weekdayPlayStart = value
+        else if (kind === "weekdayEnd") weekdayPlayEnd = value
+        else if (kind === "weekendStart") weekendPlayStart = value
+        else if (kind === "weekendEnd") weekendPlayEnd = value
+        saveShellCfg()
+    }
     function tzLabel(name) {
         for (var i = 0; i < tzList.length; i++)
             if (tzList[i].name === name) return lang === "zh-CN" ? tzList[i].zh : tzList[i].en
@@ -758,11 +813,14 @@ Rectangle {
     // 系统补丁 (category=system) 哪里都不列: 状态只在「商店 → 系统」里看, 装过的点那一行打开
     function isSetting(a) { return a.category === "settings" }
     function isSystem(a) { return a.category === "system" }
-    function userApps() { return filterApps(function(a) { return !isSetting(a) && !isSystem(a) }) }
+    function userApps() { return filterApps(function(a) { return !isSetting(a) && !isSystem(a) && (space.playActive() || !space.isPlayApp(a)) }) }
     function homeApps() {
-        var l = filterApps(function(a) { return !a.error && !isSetting(a) && !isSystem(a) })
+        var l = filterApps(function(a) { return !a.error && !isSetting(a) && !isSystem(a) && (space.playActive() || !space.isPlayApp(a)) })
         var n = homeGrid.columns * 2   // 首页只放两行, 其余在space.st("app_fallback_name")页
         return l.length > n ? l.slice(0, n) : l
+    }
+    function playApps() {
+        return filterApps(function(a) { return !a.error && space.isPlayApp(a) })
     }
     function settingsApps() { return filterApps(isSetting) }
     // 声明了 widget_slot 的小组件由外壳指定位置 (如 "plan" → 今日计划那张卡)
@@ -786,6 +844,10 @@ Rectangle {
     }
 
     function open(app) {
+        if (space.isPlayApp(app) && !space.playActive()) {
+            showToast(space.st("play_blocked"))
+            return
+        }
         if (app.error) { showToast(app.error); return }
         // 有界面就挂界面, 没有才当外部程序。界面有两种形态: 明文的 entryUrl,
         // 或编译发布的 module.main —— 后者包里没有 .qml, 判断时漏掉它就会被误当成
@@ -983,6 +1045,7 @@ Rectangle {
     function showToast(msg) { toastText = msg; toastTimer.restart() }
     function tabTitle() {
         if (tab === "apps") return space.st("tab_apps")
+        if (tab === "play") return space.st("tab_play")
         if (tab === "discover") return space.st("tab_store")
         if (tab === "settings") return space.st("tab_settings")
         return space.st("tab_home")
@@ -1638,6 +1701,57 @@ Rectangle {
             }
         }
 
+        // ── 娱乐区 ──
+        Flickable {
+            visible: space.current === null && space.tab === "play"
+            anchors.fill: parent
+            contentWidth: width
+            contentHeight: playCol.height + space.vpx(24)
+            clip: true
+            ColumnLayout {
+                id: playCol
+                width: parent.width
+                spacing: space.vpx(20)
+                Text {
+                    visible: !space.playActive()
+                    text: space.st("play_locked")
+                    font.pixelSize: space.fpx(28)
+                    color: space.th.textBody
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Text {
+                    visible: space.playActive() && space.playApps().length === 0
+                    text: space.st("play_empty")
+                    font.pixelSize: space.fpx(28)
+                    color: space.th.textBody
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                GridLayout {
+                    visible: space.playActive()
+                    Layout.fillWidth: true
+                    columns: space.cols(width, 270)
+                    rowSpacing: space.vpx(24)
+                    columnSpacing: space.px(24)
+                    Repeater {
+                        model: space.playApps()
+                        delegate: Kit.STile {
+                            th: space.th
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: space.vpx(220)
+                            iconSize: space.fpx(76)
+                            labelSize: space.fpx(28)
+                            iconSource: space.bust(modelData.iconUrl || "", modelData.rev)
+                            label: modelData.name
+                            onClicked: space.open(modelData)
+                        }
+                    }
+                }
+            }
+        }
+
         // ── 发现 (应用商店) ──
         Flickable {
             visible: space.current === null && space.tab === "discover"
@@ -1911,6 +2025,66 @@ Rectangle {
                 }
                 Kit.SRow {
                     th: space.th
+                    Layout.fillWidth: true
+                    ui: space.fs
+                    iconSource: space.icon("squares-four")
+                    text: space.st("set_play_mode")
+                    detail: space.playModeLabel()
+                    onClicked: space.togglePlayMode()
+                }
+                Kit.SRow {
+                    th: space.th
+                    Layout.fillWidth: true
+                    ui: space.fs
+                    iconSource: space.icon("clock")
+                    text: space.st("set_play_schedule")
+                    detail: space.playSchedule ? space.st("schedule_on") : space.st("schedule_off")
+                    onClicked: space.togglePlaySchedule()
+                }
+                ColumnLayout {
+                    visible: space.playSchedule
+                    Layout.fillWidth: true
+                    Layout.leftMargin: space.fpx(72)
+                    Layout.rightMargin: space.fpx(24)
+                    spacing: space.vpx(8)
+                    Text { text: space.st("schedule_weekday"); font.pixelSize: space.fpx(22); color: space.th.text3 }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        TextInput {
+                            id: weekdayStartInput
+                            Layout.fillWidth: true
+                            text: space.weekdayPlayStart
+                            font.pixelSize: space.fpx(24)
+                            onEditingFinished: space.setPlayTime("weekdayStart", text)
+                        }
+                        Text { text: "–"; font.pixelSize: space.fpx(24) }
+                        TextInput {
+                            Layout.fillWidth: true
+                            text: space.weekdayPlayEnd
+                            font.pixelSize: space.fpx(24)
+                            onEditingFinished: space.setPlayTime("weekdayEnd", text)
+                        }
+                    }
+                    Text { text: space.st("schedule_weekend"); font.pixelSize: space.fpx(22); color: space.th.text3 }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        TextInput {
+                            Layout.fillWidth: true
+                            text: space.weekendPlayStart
+                            font.pixelSize: space.fpx(24)
+                            onEditingFinished: space.setPlayTime("weekendStart", text)
+                        }
+                        Text { text: "–"; font.pixelSize: space.fpx(24) }
+                        TextInput {
+                            Layout.fillWidth: true
+                            text: space.weekendPlayEnd
+                            font.pixelSize: space.fpx(24)
+                            onEditingFinished: space.setPlayTime("weekendEnd", text)
+                        }
+                    }
+                }
+                Kit.SRow {
+                    th: space.th
                     // 能读到系统语言时空间直接跟系统走, 这一项就没意义了
                     visible: space.langSystem === ""
                     Layout.fillWidth: true
@@ -2100,6 +2274,7 @@ Rectangle {
                 model: [
                     { key: "home", label: space.st("tab_home"), icon: "house" },
                     { key: "apps", label: space.st("app_fallback_name"), icon: "squares-four" },
+                    { key: "play", label: space.st("tab_play"), icon: "squares-four" },
                     { key: "discover", label: space.st("tab_store"), icon: "compass" },
                     { key: "settings", label: space.st("tab_settings"), icon: "gear" }
                 ]
