@@ -39,10 +39,12 @@ open build/bin/space-assistant.app
 同一套内核，没有 GUI 的环境（CI、远程排障）用这个：
 
 ```sh
-make cli
+make cli                 # macOS / Windows
+make cli-linux           # Linux amd64
 dist/assistant-cli-darwin-arm64 -host 10.11.99.1 -password xxx probe
 dist/assistant-cli-darwin-arm64 ... -bundle dist/space-bundle.zip plan-rmkit   # 预览
 dist/assistant-cli-darwin-arm64 ... -bundle dist/space-bundle.zip run-rmkit    # 安装
+dist/assistant-cli-linux-amd64 -host remarkable.local -password xxx probe
 
 # 不连设备, 伪造探测结果算落点 —— 改完安装逻辑自查用
 dist/assistant-cli-darwin-arm64 -bundle dist/space-bundle.zip -arch armv7l -model rm2 plan-offline

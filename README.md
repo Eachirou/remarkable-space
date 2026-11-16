@@ -81,6 +81,7 @@ base layer moved into this repository on 2026-10-20.
 | `internal/space/` | Go implementation of the app registry, app installation/removal, background-service management, recently-read data, and weather-map rendering. |
 | `cmd/space-server/` | Entry point for the Space server. |
 | `assistant/` | Desktop installer, updater, uninstaller, emergency-repair, and diagnostic tooling. |
+| `cmd/music-bridge/` | Optional computer-side WLAN bridge for the built-in Music remote. See [music-bridge.md](docs/music-bridge.md). |
 
 ## App model
 

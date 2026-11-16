@@ -1,0 +1,12 @@
+{
+  "id": "music",
+  "name": "Musique",
+  "name_en": "Music",
+  "version": "0.1.0",
+  "description": "Contrôler un lecteur musical sur votre ordinateur par Wi-Fi",
+  "description_en": "Control a music player on your computer over Wi-Fi",
+  "icon": "icon.svg",
+  "entry": "main.qml",
+  "category": "tool",
+  "order": 30
+}

@@ -26,7 +26,7 @@ LDFLAGS := -X main.version=$(VERSION) -X "main.buildTime=$(BUILD_TIME)" \
 	-X main.releaseTag=$(RELEASE_TAG) -X main.cnMirror=$(CN_MIRROR) \
 	-X main.androidTag=$(ANDROID_TAG) -X main.androidVer=$(ANDROID_VER)
 
-.PHONY: bundle bundle-android build-mac build-win cli dev vet
+.PHONY: bundle bundle-android build-mac build-win cli cli-linux dev vet
 
 # STORE_KEY 透给仓库根的 make。不自动编译的话很容易打进一个旧的、没有商店密钥的
 # 二进制 —— 装出来的设备取不到商店, 而且设备上看不出是这个原因。
@@ -56,6 +56,10 @@ cli:
 	mkdir -p dist
 	GOOS=darwin GOARCH=arm64 go build -trimpath -o dist/assistant-cli-darwin-arm64 ./cmd/assistant-cli
 	GOOS=windows GOARCH=amd64 go build -trimpath -o dist/assistant-cli-windows-amd64.exe ./cmd/assistant-cli
+
+cli-linux:
+	mkdir -p dist
+	GOOS=linux GOARCH=amd64 go build -trimpath -o dist/assistant-cli-linux-amd64 ./cmd/assistant-cli
 
 dev:
 	$(WAILS) dev
