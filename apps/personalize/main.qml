@@ -529,7 +529,7 @@ Item {
                         visible: _rmhHeroCell.index >= 2
                         anchors.top: parent.top; anchors.topMargin: 6
                         anchors.right: parent.right; anchors.rightMargin: 10
-                        iconSource: "qrc:/ark/icons/trash"
+                        iconSource: "qrc:/ark/icons/trashcan"
                         title: space.tr("delete")
                         onClicked: root.deleteHero(_rmhHeroCell.rowKey)
                     }
@@ -648,7 +648,6 @@ Item {
             try {
                 var arr = JSON.parse(x.responseText)
                 var active = ""
-                _rmhScreensModel.append({ rowName: "" })
                 for (var i = 0; i < arr.length; i++) {
                     _rmhFontsModel.append({ rowName: arr[i].name })
                     if (arr[i].active) active = arr[i].name
@@ -669,6 +668,7 @@ Item {
             try {
                 var arr = JSON.parse(x.responseText)
                 var active = ""
+                _rmhScreensModel.append({ rowName: "" })
                 for (var i = 0; i < arr.length; i++) {
                     _rmhScreensModel.append({ rowName: arr[i].name })
                     if (arr[i].active) active = arr[i].name
@@ -678,42 +678,43 @@ Item {
                 root._rmhSelectAfterRefresh = ""
             } catch (e) {}
         }
-        function createContactPanel() {
-            if (root._rmhPanelName.trim() === "" && root._rmhPanelEmail.trim() === "" &&
-                    root._rmhPanelPhone.trim() === "" && root._rmhPanelMessage.trim() === "") {
-                root.message = space.tr("contact_panel_empty")
-                return
-            }
-            root._rmhPanelBusy = true
-            var x = new XMLHttpRequest()
-            x.onreadystatechange = function() {
-                if (x.readyState !== XMLHttpRequest.DONE) return
-                root._rmhPanelBusy = false
-                if (x.status !== 200) {
-                    root.message = space.tr("contact_panel_failed")
-                    return
-                }
-                try {
-                    var result = JSON.parse(x.responseText)
-                    root._rmhSelectAfterRefresh = result.name || ""
-                    root.refreshScreens()
-                    root.message = space.tr("contact_panel_created")
-                } catch (e) {
-                    root.message = space.tr("contact_panel_failed")
-                }
-            }
-            x.open("POST", root.space.baseUrl + "/screens/contact-panel")
-            x.setRequestHeader("Content-Type", "application/json")
-            x.send(JSON.stringify({
-                name: root._rmhPanelName,
-                email: root._rmhPanelEmail,
-                phone: root._rmhPanelPhone,
-                message: root._rmhPanelMessage,
-                background: root._rmhSelectedScreen
-            }))
-        }
         x.open("GET", root.space.baseUrl + "/screens")
         x.send()
+    }
+
+    function createContactPanel() {
+        if (root._rmhPanelName.trim() === "" && root._rmhPanelEmail.trim() === "" &&
+                root._rmhPanelPhone.trim() === "" && root._rmhPanelMessage.trim() === "") {
+            root.message = space.tr("contact_panel_empty")
+            return
+        }
+        root._rmhPanelBusy = true
+        var x = new XMLHttpRequest()
+        x.onreadystatechange = function() {
+            if (x.readyState !== XMLHttpRequest.DONE) return
+            root._rmhPanelBusy = false
+            if (x.status !== 200) {
+                root.message = space.tr("contact_panel_failed")
+                return
+            }
+            try {
+                var result = JSON.parse(x.responseText)
+                root._rmhSelectAfterRefresh = result.name || ""
+                root.refreshScreens()
+                root.message = space.tr("contact_panel_created")
+            } catch (e) {
+                root.message = space.tr("contact_panel_failed")
+            }
+        }
+        x.open("POST", root.space.baseUrl + "/screens/contact-panel")
+        x.setRequestHeader("Content-Type", "application/json")
+        x.send(JSON.stringify({
+            name: root._rmhPanelName,
+            email: root._rmhPanelEmail,
+            phone: root._rmhPanelPhone,
+            message: root._rmhPanelMessage,
+            background: root._rmhSelectedScreen
+        }))
     }
     function deleteFont(name) {
         var x = new XMLHttpRequest()
