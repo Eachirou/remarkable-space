@@ -1,6 +1,13 @@
 .DS_Store
 *.bak
 *.tmp
+*.sha256
+*.zip
+dist.tar
+*.gz
+base-payload-dev/
+appload/
+space-bundle-dev/
 dist/
 
 # 官方商店客户端标识, 只放本机 (Makefile 会读它)
