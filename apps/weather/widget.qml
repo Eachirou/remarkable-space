@@ -4,6 +4,7 @@ import QtQuick.Layouts
 Item {
     id: root
     property var space
+    anchors.fill: parent
     implicitHeight: 300
     property string location: "Paris"
     property var weather: ({})

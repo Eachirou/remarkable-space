@@ -75,12 +75,7 @@ Item {
     }
     function setHero(key) {
         root._rmhHero = key
-        // 只改 hero 这一项, 别把外壳的其它设置 (刷新效果) 覆盖掉
-        space.dataGet("shell", "config", function (st, r) {
-            var cfg = (st === 200 && r) ? r : ({})
-            cfg.hero = key
-            space.dataPut("shell", "config", cfg, null)
-        })
+        space.setHeroChoice(key)
     }
     function deleteHero(name) {
         space.request("DELETE", space.baseUrl + "/hero/" + encodeURIComponent(name),
@@ -93,19 +88,6 @@ Item {
     }
 
     Component.onCompleted: { refreshThemes(); refreshFonts(); refreshScreens(); refreshHero() }
-
-    // 有变更时右上角出space.tr("apply") (放在外壳标题那一行的右侧)
-    IconButton {
-        id: _rmhApply
-        visible: root._rmhDirty
-        z: 2
-        anchors.top: parent.top
-        anchors.topMargin: Math.round(8 * root.space.unit)
-        anchors.right: parent.right
-        iconSource: "qrc:/ark/icons/checkmark"
-        title: space.tr("apply")
-        onClicked: _rmhConfirmApply.visible = true
-    }
 
     Flickable {
         anchors.fill: parent
@@ -145,6 +127,16 @@ Item {
                         MouseArea { anchors.fill: parent; onClicked: root.sect = parent.modelData.k }
                     }
                 }
+            }
+
+            Kit.SButton {
+                visible: root._rmhDirty
+                Layout.fillWidth: true
+                text: space.tr("apply")
+                th: space.th
+                ui: space.fs
+                primary: true
+                onClicked: _rmhConfirmApply.visible = true
             }
 
             // ─── 主题 ────────────────────────────────────

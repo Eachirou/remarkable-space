@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/draw"
 	"image/png"
 	"io"
 	"mime/multipart"
@@ -146,7 +149,20 @@ func TestUploadScreenWrongFormat(t *testing.T) {
 
 func TestCreateContactPanel(t *testing.T) {
 	_, h, root := newTestServer(t)
-	body := strings.NewReader(`{"name":"Ervan Achirou","email":"ervan@example.com","phone":"+33 6 12 34 56 78","message":"If found, please contact me."}`)
+	background := image.NewRGBA(image.Rect(0, 0, panelWidth, panelHeight))
+	draw.Draw(background, background.Bounds(), &image.Uniform{C: color.Black}, image.Point{}, draw.Src)
+	backgroundFile, err := os.Create(filepath.Join(root, "screens", "background.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(backgroundFile, background); err != nil {
+		t.Fatal(err)
+	}
+	if err := backgroundFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	body := strings.NewReader(`{"name":"Ervan Achirou","email":"ervan@example.com","phone":"+33 6 12 34 56 78","message":"If found, please contact me.","background":"background.png"}`)
 	req := httptest.NewRequest("POST", "/screens/contact-panel", body)
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -169,6 +185,18 @@ func TestCreateContactPanel(t *testing.T) {
 	}
 	if got := img.Bounds().Size(); got.X != panelWidth || got.Y != panelHeight {
 		t.Fatalf("size=%v, want %dx%d", got, panelWidth, panelHeight)
+	}
+	for _, sample := range []struct {
+		point image.Point
+		want  color.RGBA
+	}{
+		{image.Pt(100, panelTop+20), color.RGBA{A: 255}},
+		{image.Pt(panelLeft+20, panelTop+20), color.RGBA{R: 255, G: 255, B: 255, A: 255}},
+		{image.Pt(300, panelTop-20), color.RGBA{A: 255}},
+	} {
+		if got := color.RGBAModel.Convert(img.At(sample.point.X, sample.point.Y)).(color.RGBA); got != sample.want {
+			t.Errorf("pixel at %v = %v, want %v", sample.point, got, sample.want)
+		}
 	}
 }
 

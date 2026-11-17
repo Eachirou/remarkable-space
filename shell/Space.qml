@@ -31,7 +31,8 @@ Rectangle {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: Math.max(140, space.vpx(180))
+        // Keep the close gesture at the screen edge so it does not swallow app controls.
+        height: Math.max(32, space.vpx(48))
         z: 20
         visible: space.current !== null
         property real startY: 0
@@ -439,6 +440,10 @@ Rectangle {
         // 应用数据: 存到 dataDir/<key>.json (纯 QML 应用的持久化); 小组件要传自己的 app.id
         function dataGet(id, key, cb) { space.request("GET", space.baseUrl + "/space/apps/" + id + "/data/" + key, null, cb) }
         function dataPut(id, key, obj, cb) { space.request("PUT", space.baseUrl + "/space/apps/" + id + "/data/" + key, obj, cb) }
+        function setHeroChoice(value) {
+            space.heroChoice = value
+            space.saveShellCfg()
+        }
     }
 
     // ─── 逻辑 ─────────────────────────────────────────────────────────
@@ -1429,7 +1434,7 @@ Rectangle {
                     clip: true
                     Item {
                         anchors.fill: parent
-                    visible: true
+                        visible: true
                         // 没装 hero 小组件 (比如天气被删掉了) 时的默认样子: 一幅山水垫底,
                         // 日期时间压在上面。素材是 2:1 的横幅, 贴着底边按原比例铺开 ——
                         // 上面留出的白正好垫文字, 两者不重叠, 所以不需要蒙版或渐隐。
@@ -1440,6 +1445,7 @@ Rectangle {
                             height: Math.min(parent.height, Math.round(parent.width / 2))
                             source: space.heroImageUrl()
                             fillMode: Image.PreserveAspectCrop
+                            z: 0
                             // 解码到实际显示尺寸, 别按原图 1200 宽解了再缩 —— 墨水屏上白费内存
                             sourceSize.width: width
                             visible: status === Image.Ready
@@ -1487,6 +1493,7 @@ Rectangle {
                             border.color: space.th.line; border.width: space.th.border
                         }
                         Column {
+                            z: 1
                             anchors.left: parent.left
                             anchors.leftMargin: space.px(32)
                             anchors.top: parent.top
@@ -1500,6 +1507,7 @@ Rectangle {
                     Item {
                         id: heroHost
                         anchors.fill: parent
+                        z: 2
                         property var wItem: null
                         property var heroApp: space.heroWidgetEnabled() ? space.heroWidgetApp() : null
                         onHeroAppChanged: space.mountWidget(heroHost, heroApp)

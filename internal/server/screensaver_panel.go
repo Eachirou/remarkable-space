@@ -12,12 +12,19 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 const (
-	panelWidth  = 1404
-	panelHeight = 1872
-	panelScale  = 6
+	panelWidth         = 1404
+	panelHeight        = 1872
+	panelScale         = 3
+	panelLeft          = 212
+	panelTop           = 1540
+	panelRight         = 1192
+	panelBottom        = 1800
+	panelMaxLineLength = 52
+	panelLineSpacing   = 36
 )
 
 type contactPanelRequest struct {
@@ -56,24 +63,31 @@ func (s *Server) createContactPanel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	panel := image.Rect(76, 1270, panelWidth-76, panelHeight-76)
+	panel := image.Rect(panelLeft, panelTop, panelRight, panelBottom)
 	draw.Draw(img, panel, &image.Uniform{C: color.White}, image.Point{}, draw.Src)
 	drawPanelBorder(img, panel)
 
 	lines := make([]string, 0, 8)
 	for _, value := range []string{req.Name, req.Email, req.Phone} {
 		if value = strings.TrimSpace(value); value != "" {
-			lines = append(lines, value)
+			lines = append(lines, wrapPanelText(normalizePanelText(value), panelMaxLineLength)...)
 		}
 	}
-	for _, line := range wrapPanelText(req.Message, 46) {
+	for _, line := range wrapPanelText(normalizePanelText(req.Message), panelMaxLineLength) {
 		lines = append(lines, line)
 	}
 	if len(lines) > 5 {
 		lines = lines[:5]
 	}
+	textHeight := 7 * panelScale
+	if len(lines) > 1 {
+		textHeight += (len(lines) - 1) * panelLineSpacing
+	}
+	startY := panel.Min.Y + (panel.Dy()-textHeight)/2
 	for i, line := range lines {
-		drawPanelText(img, 126, 1330+i*88, normalizePanelText(line), panelScale)
+		textWidth := (utf8.RuneCountInString(line)-1)*6*panelScale + 5*panelScale
+		x := panel.Min.X + (panel.Dx()-textWidth)/2
+		drawPanelText(img, x, startY+i*panelLineSpacing, line, panelScale)
 	}
 
 	name := "contact-panel.png"
@@ -112,10 +126,10 @@ func drawPNGBackground(dst *image.RGBA, path string) error {
 
 func drawPanelBorder(img *image.RGBA, r image.Rectangle) {
 	black := &image.Uniform{C: color.Black}
-	draw.Draw(img, image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+4), black, image.Point{}, draw.Src)
-	draw.Draw(img, image.Rect(r.Min.X, r.Max.Y-4, r.Max.X, r.Max.Y), black, image.Point{}, draw.Src)
-	draw.Draw(img, image.Rect(r.Min.X, r.Min.Y, r.Min.X+4, r.Max.Y), black, image.Point{}, draw.Src)
-	draw.Draw(img, image.Rect(r.Max.X-4, r.Min.Y, r.Max.X, r.Max.Y), black, image.Point{}, draw.Src)
+	draw.Draw(img, image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+2), black, image.Point{}, draw.Src)
+	draw.Draw(img, image.Rect(r.Min.X, r.Max.Y-2, r.Max.X, r.Max.Y), black, image.Point{}, draw.Src)
+	draw.Draw(img, image.Rect(r.Min.X, r.Min.Y, r.Min.X+2, r.Max.Y), black, image.Point{}, draw.Src)
+	draw.Draw(img, image.Rect(r.Max.X-2, r.Min.Y, r.Max.X, r.Max.Y), black, image.Point{}, draw.Src)
 }
 
 func wrapPanelText(value string, width int) []string {
@@ -128,9 +142,14 @@ func wrapPanelText(value string, width int) []string {
 		words := strings.Fields(paragraph)
 		line := ""
 		for _, word := range words {
-			if line != "" && len(line)+1+len(word) > width {
+			if line != "" && utf8.RuneCountInString(line)+1+utf8.RuneCountInString(word) > width {
 				result = append(result, line)
 				line = ""
+			}
+			for utf8.RuneCountInString(word) > width {
+				runes := []rune(word)
+				result = append(result, string(runes[:width]))
+				word = string(runes[width:])
 			}
 			if line != "" {
 				line += " "
@@ -158,7 +177,7 @@ func normalizePanelText(value string) string {
 	).Replace(value)
 	var out strings.Builder
 	for _, r := range strings.ToUpper(value) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune(" @._-+/(),:?!", r) {
+		if r <= unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune(" @._-+/(),:?!", r)) {
 			out.WriteRune(r)
 		} else {
 			out.WriteRune('?')
