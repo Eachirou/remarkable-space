@@ -5,6 +5,7 @@
 import QtQuick
 import QtQuick.Layouts
 import device.ui.controls
+import "../../kit" as Kit
 
 Item {
     id: root
