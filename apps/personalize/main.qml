@@ -645,10 +645,17 @@ Item {
         }
         if (!body.font && !body.screen && !body.clearScreen) return
         var x = new XMLHttpRequest()
+        x.onreadystatechange = function() {
+            if (x.readyState !== XMLHttpRequest.DONE) return
+            if (x.status === 200) root.space.closeSpace()
+            else {
+                root._rmhConfirmApply.visible = false
+                root.refreshFonts()
+                root.refreshScreens()
+            }
+        }
         x.open("POST", root.space.baseUrl + "/apply")
         x.setRequestHeader("Content-Type", "application/json")
         x.send(JSON.stringify(body))
-        // xochitl 即将重启, 先把启动台关掉避免视觉残留
-        root.space.closeSpace()
     }
     }
