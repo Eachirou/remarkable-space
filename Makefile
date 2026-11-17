@@ -9,7 +9,7 @@ KEY_PKG   := github.com/boangs/remarkable-space/internal/space
 # 助手打包直接拿 dist/ 里的产物, 漏了密钥装出来的设备看不到商店且没有任何提示,
 # 所以这里吭一声。自己编着玩不用管。
 ifeq ($(strip $(STORE_KEY)),)
-$(info === 没有 STORE_KEY: 这版取不到官方商店索引 (服务端会 404)。发版请 make STORE_KEY=... ===)
+$(info === STORE_KEY is unset: this build cannot access the official app catalog (the server will return 404). Set STORE_KEY for releases. ===)
 endif
 GO_FLAGS  := -trimpath -ldflags "-s -w -X '$(KEY_PKG).storeKey=$(STORE_KEY)'"
 

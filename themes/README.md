@@ -1,17 +1,19 @@
-# 空间主题
+# Space themes
 
-主题只管外观: 颜色、圆角、描边、图标、默认封面, 以及首页三块区域的替换 QML。功能改动不走主题 (走空间自更新)。
-后台见 `internal/space/theme.go`, 外壳见 `shell/Space.qml` 的 `thDefault` / `loadTheme()`。
+Themes control appearance only: colors, corners, outlines, icons, the default cover image, and replacement QML for
+the three home-screen areas. Feature changes belong in a Space update, not in a theme. See `internal/space/theme.go`
+and `thDefault` / `loadTheme()` in `shell/Space.qml`.
 
-- 空间自带的主题放这里 (`themes/<id>/`), 随空间安装 / 自更新。
-- 商店主题是一个应用: 清单写 `"theme": "theme"` (包里主题目录), 没有 entry, 不进应用格子;
-  装好后链进 `~/.local/share/rmkit-cn/space/themes/<应用 id>`。在「个性化 → 主题」里切换。
+- Built-in themes live in `themes/<id>/` and ship with Space updates.
+- A catalog theme is packaged as an app: set `"theme": "theme"` in its manifest (the directory containing the
+  theme), omit `entry`, and it will not appear in the app grid. Once installed, it is linked under
+  `~/.local/share/rmkit-cn/space/themes/<app-id>`. Select it under **Personalize → Themes**.
 
 ## theme.json
 
 ```json
 {
-  "id": "contrast", "name": "高对比黑白", "name_en": "High contrast", "version": "1.0.0",
+  "id": "contrast", "name": "High contrast", "version": "1.0.0",
   "min_shell": 3,
   "colors": { "line": "#000000", ... },
   "radius": 4, "border": 2,
@@ -22,13 +24,15 @@
 }
 ```
 
-- `colors` 的键 (没写的用默认值): bg 页面底色, card 卡片/磁贴底色, fill 浅灰底, press 按下,
-  line 卡片描边, lineSoft 分隔线/进度槽, lineFaint 更淡的分隔线, text 正文/强调, text2 次要文字,
-  textBody 商店页正文, text3 说明/右侧细节, textNote 卡片里的说明, primary 主按钮/提示条底, primaryText 其上文字。
-  墨水屏不做深色主题: 没写颜色的文字默认黑色, 底色只能是浅色。
-- `hero` 主题自带的封面; 用户自己设了封面时用户的优先。
-- `icons` 替换 kit 图标 (键是 kit/icons 里的文件名去掉 .svg)。
-- `slots` 替换首页区域: hero 顶部大卡, widgets 今日计划/正在进行两张卡, apps「我的应用」标题和格子。
-  替换 QML 的根 Item 要有 `property var space` (外壳本身, 可用 space.th / space.homeApps() / space.open(app) /
-  space.dateLine() / space.localNow() / space.st(key) 等), 并给出 implicitHeight; 宽度由外壳定。
-- 文件改了 (theme.json 的 mtime 变了) 外壳会换新地址重新加载, 不用重启 xochitl。
+- `colors` defaults to the built-in value when omitted: `bg` page background; `card` card/tile background;
+  `fill` light fill; `press` pressed state; `line` card outline; `lineSoft` separators/progress tracks;
+  `lineFaint` subtle separators; `text` primary text; `text2` secondary text; `textBody` store body text;
+  `text3` details; `textNote` card notes; `primary` primary-button or banner background; `primaryText` its text.
+  Dark themes are not supported on e-ink displays: unspecified text defaults to black and backgrounds must remain light.
+- `hero` is the theme's cover image. A user-selected cover takes precedence.
+- `icons` replaces kit icons; keys are filenames in `kit/icons/` without the `.svg` suffix.
+- `slots` replaces home-screen areas: `hero` is the large top card; `widgets` contains today's plan and now-playing
+  cards; `apps` contains the My Apps heading and grid. A replacement QML root Item must expose
+  `property var space` (the shell API, including helpers such as `space.th`, `space.homeApps()`, `space.open(app)`,
+  `space.dateLine()`, `space.localNow()`, and `space.st(key)`) and set `implicitHeight`. The shell controls width.
+- When a theme file changes, the shell reloads it from a new URL; restarting xochitl is not required.

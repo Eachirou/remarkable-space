@@ -1,144 +1,144 @@
-# 空间 (SPACE) — rmkit-cn 启动台
+# Space — reMarkable launcher
 
-「空间」是 reMarkable 上属于你的数字空间：一个首页（时间、天气、今日计划、正在进行）、一组应用、一个应用商店。
-它取代原来的「高级」面板，成为 rmkit-cn 所有功能的统一入口。
+Space is a personal digital home on reMarkable: a home screen (time, weather, today's plan, and now playing), a
+set of apps, and an app catalog. It replaces the rmkit-cn "Advanced" panel as the unified entry point for these
+features.
 
-设计目标只有一句话：**外壳小而稳，应用各自独立，装卸不重启。**
+Design goal: **keep the shell small and stable; keep apps independent; install and remove apps without restarting
+the interface.**
 
+> **Documentation status:** This document originated while Space was being migrated from rmkit-cn. Some paths,
+> server names, and migration notes below are historical. The current implementation is in `shell/`, `apps/`,
+> `internal/`, and `cmd/space-server/`; use the root [README](README.md) and source code when details differ.
+
+```text
+Sidebar "Space" ──▶ Space.qml ──▶ Home / Apps / Discover / Settings
+                         │
+                         ├── GET /space/apps ──▶ app registry
+                         │                          ├── built-in apps (installer-managed)
+                         │                          └── user apps (installed under user data)
+                         │
+                         └── launch app ──▶ Qt.createComponent(main.qml) ──▶ app root Item (property var space)
+                                                └── declared service ──▶ POST /space/apps/{id}/service/start
 ```
-侧栏 「空间」 ──▶ 外壳 Space.qml ──▶ 首页 / 应用 / 发现 / 我的
-                       │
-                       ├── GET /space/apps ──▶ upload-server internal/space (注册表)
-                       │                          ├── /home/root/rmkit-cn/space/apps/<id>/           内置应用 (安装器管理)
-                       │                          └── /home/root/.local/share/rmkit-cn/space/apps/<id>/  用户应用 (绿色安装)
-                       │
-                       └── 点应用 ──▶ Qt.createComponent(file://…/main.qml) ──▶ 应用根 Item (property var space)
-                                          └── 声明了 service ──▶ POST /space/apps/<id>/service/start ──▶ 应用自带后台进程
-```
 
-## 分层与边界
+## Layers and boundaries
 
-| 层 | 位置 | 职责 | 不做什么 |
+| Layer | Location (historical or current path) | Responsibility | Does not |
 |---|---|---|---|
-| 注入器 | `intercept/qml-inject/qml_inject_impl.cpp` | 在侧栏放一个入口；有 `space/.primary` 标记就加载外壳，否则加载旧面板 | 不认识任何应用 |
-| 外壳 | `space/shell/Space.qml` | 首页/标签页、应用的创建与销毁、给应用的 API 对象 | 不含任何业务功能 |
-| 组件库 | `space/kit/` | 磁贴、按钮、单选、列表行、时钟、线性图标 | 不含状态 |
-| 后端 | `upload-server-go/internal/space/` | 扫描清单、绿色安装/卸载、托管应用后台进程、转发商店索引 | 不认识任何应用 |
-| 应用 | `space/apps/<id>/`（内置）或用户目录 | 一个目录：清单 + QML + 图标 + 可选后台 | 不碰外壳内部 id |
+| Injector | `base/intercept/qml-inject/qml_inject_impl.cpp` | Adds a sidebar entry and chooses the Space shell or legacy panel | Know about individual apps |
+| Shell | `shell/Space.qml` | Home and tabs, app creation/destruction, app API | Contain app-specific features |
+| Component library | `kit/` | Tiles, buttons, selection controls, list rows, clocks, line icons | Own app state |
+| Backend | `internal/space/` | Scan manifests, install/remove apps, manage services, serve store data | Know app-specific behavior |
+| Apps | `apps/<id>/` (built-in) or user app directory | Manifest, QML, icon, optional service | Reach into shell internals |
 
-外壳与应用之间只有两条线：注册表 JSON（后端 → 外壳）和 `space` API 对象（外壳 → 应用）。
-应用与自己的后台之间直接走 `space.serviceUrl`，不经过 upload-server；upload-server 只负责拉起和收掉它。
+The shell and apps communicate through the app registry (backend to shell) and the `space` API object (shell to
+app). An app communicates with its own service through `space.serviceUrl`; the backend starts and stops that
+service.
 
-## 应用包
+## App package
 
-```
+```text
 <id>/
-  manifest.json     清单 (必须)
-  main.qml          界面入口 (entry)
-  icon.svg          图标
-  widget.qml        首页小组件 (可选)
-  bin/<service>     自带后台 (可选, 解压时自动加可执行位)
-  assets/…          随意
+  manifest.json     required
+  main.qml          UI entry point (entry)
+  icon.svg          icon
+  widget.qml        optional home-screen widget
+  bin/<service>     optional service executable
+  assets/…          optional app assets
 ```
 
-`manifest.json` 字段（`upload-server-go/internal/space/manifest.go` 是唯一权威）：
+The manifest definition in `internal/space/manifest.go` is authoritative:
 
-```json
+```jsonc
 {
-  "id": "music",                 // 小写字母/数字/-/_, 1-32 位, 也是目录名
-  "name": "音乐", "name_en": "Music", "version": "1.0.0",
-  "description": "一句话说明",
-  "icon": "icon.svg",            // 相对路径 / 绝对路径 / qrc: 或 file: URL
-  "entry": "main.qml",           // 界面入口; 与 launch 至少有一个
-  "widget": "widget.qml",        // 首页小组件 (可选)
-  "widget_size": "half",         // half (半宽卡) / hero (首页顶部整宽大卡, 如天气)
-  "category": "tool",            // system / settings / reader / tool / game / other
-  "order": 10,                   // 同类内排序
-  "arch": ["aarch64"],           // 支持的架构, 空 = 都支持 (rm2 是 armv7)
-  "min_shell": 1,                // 需要的外壳契约版本
-  "service": {                   // 自带后台 (可选)
+  "id": "music",                 // lowercase letters, digits, - or _, 1–32 characters
+  "name": "Music",
+  "version": "1.0.0",
+  "description": "A short description",
+  "icon": "icon.svg",            // relative/absolute path or qrc:/ or file: URL
+  "entry": "main.qml",           // at least one of entry or launch is required
+  "widget": "widget.qml",        // optional home-screen widget
+  "widget_size": "half",         // half or hero
+  "category": "tool",            // system/settings/reader/tool/game/other
+  "order": 10,                   // ordering within a category
+  "arch": ["aarch64"],           // supported architectures; empty means all
+  "min_shell": 1,                // minimum shell contract version
+  "service": {                   // optional background service
     "exec": "bin/music-server", "args": [], "port": 9100, "health": "/health",
-    "keepalive": true,           // 退出界面后继续跑 (后台播放)
-    "autostart": false           // upload-server 启动时自动拉起
+    "keepalive": true,           // keep running after the app UI closes
+    "autostart": false           // start automatically with the server
   },
-  "launch": {                    // 外部程序型应用 (无 QML 界面, 点图标即启动)
-    "type": "post",              // post: 向 upload-server 发 POST; appload: 走 xovi appload 单例
+  "launch": {                    // optional external app without a QML UI
+    "type": "post",              // post or appload
     "path": "/apps/android/launch", "id": "external::koreader",
-    "confirm": "将重启进入 Android，确定？"   // 非空则先弹确认
+    "confirm": "Reboot into Android?"
   }
 }
 ```
 
-后台进程收到的环境变量：`SPACE_APP_ID` `SPACE_APP_DIR` `SPACE_DATA_DIR` `SPACE_PORT` `SPACE_BASE_URL`。
-标准输出/错误写到 `SPACE_DATA_DIR/service.log`。进程组整体收，别自己 fork 出去。
+The service receives `SPACE_APP_ID`, `SPACE_APP_DIR`, `SPACE_DATA_DIR`, `SPACE_PORT`, and `SPACE_BASE_URL`.
+Standard output and error are written to `SPACE_DATA_DIR/service.log`. Keep services in the managed process
+group; do not fork them into a separate process group.
 
-## 应用界面契约 (外壳版本 1)
+## App UI contract (shell version 1)
 
-根元素是一个 `Item`，声明 `property var space`，外壳创建时注入；`anchors.fill: parent` 即占满内容区。
+The root is an `Item` with `property var space`, injected by the shell. Use `anchors.fill: parent` to fill the
+content area.
 
 ```qml
 import QtQuick
-import "file:///home/root/rmkit-cn/space/kit" as Kit   // 共享组件 (可选)
+import "file:///home/root/rmkit-cn/space/kit" as Kit // Optional shared components.
 
 Item {
     id: root
     property var space
     anchors.fill: parent
-    Component.onCompleted: space.get("/bt/status", function(st, r) { … })
+    Component.onCompleted: space.get("/bt/status", function(status, result) { /* ... */ })
 }
 ```
 
-`space` 对象：
+The `space` object exposes:
 
-| 成员 | 说明 |
+| Member | Description |
 |---|---|
-| `baseUrl` | upload-server 地址 `http://127.0.0.1:8080` |
-| `serviceUrl` | 应用自带后台地址（清单声明了 port 才有） |
-| `appId` `appDir` `dataDir` `kitDir` | 目录与标识 |
-| `unit` `fontScale` `largeScreen` `screenWidth` `screenHeight` | 尺寸基准（见下） |
-| `title` | 改它 = 改外壳大标题 |
-| `chrome` | 设为 false 外壳隐藏导航栏和标题，应用全屏自己画（音乐播放页那种） |
-| `onBack` | 赋一个函数；返回 true 表示应用自己消费了返回键 |
-| `exit()` `closeSpace()` `toast(msg)` `openApp(id)` | 退出 / 关启动台 / 提示 / 跳到别的应用 |
-| `get/post(path, cb)` `svcGet/svcPost(path, cb)` `request(method, url, body, cb)` | HTTP 帮手，`cb(status, json)` |
-| `localNow()` | 设备时区的当前时间（系统时区是 UTC，别直接 `new Date()` 显示） |
-| `dataGet(id, key, cb)` `dataPut(id, key, obj, cb)` | 应用数据持久化（`dataDir/<key>.json`，≤1MB JSON），纯 QML 应用也能存配置和缓存 |
+| `baseUrl` | Backend address, usually `http://127.0.0.1:8080` |
+| `serviceUrl` | This app's service address when the manifest declares a port |
+| `appId`, `appDir`, `dataDir`, `kitDir` | App identifiers and directories |
+| `unit`, `fontScale`, `largeScreen`, `screenWidth`, `screenHeight` | Display scaling values |
+| `title` | Set the shell's main title |
+| `chrome` | Set to `false` to hide the shell navigation and title |
+| `onBack` | Assign a function; return `true` when the app handles the back action |
+| `exit()`, `closeSpace()`, `toast(msg)`, `openApp(id)` | Exit, close Space, show a message, or open another app |
+| `get/post(path, cb)`, `svcGet/svcPost(path, cb)`, `request(method, url, body, cb)` | HTTP helpers; callback receives `(status, json)` |
+| `localNow()` | Current time in the device time zone; do not format `new Date()` directly |
+| `dataGet(id, key, cb)`, `dataPut(id, key, obj, cb)` | Persist JSON app data at `dataDir/<key>.json` (up to 1 MB) |
 
-小组件 (`widget.qml`)：根 Item + `property var space` + `property var app`（本应用的注册表条目，含 `serviceUrl` `iconUrl` `dataDir`；`space.serviceUrl` 指的是正在打开的应用，小组件别用它）。外壳把它放进固定高度的卡片里；点开自己用 `space.openApp(app.id)`。
+A widget root is an `Item` with `property var space` and `property var app` (the app's registry entry, including
+`serviceUrl`, `iconUrl`, and `dataDir`). For widgets, `space.serviceUrl` does not refer to the widget's app; use
+`app.serviceUrl`. The shell places widgets in fixed-height cards; open the app with `space.openApp(app.id)`.
 
-### 尺寸不写死
+### Responsive sizing
 
-两台机器（Paper Pro 1620×2160 @229ppi，Paper Pro Move 954×1696 @264ppi）DPI 接近但宽度差近一倍，横竖屏还会换。外壳的做法，应用照抄：
+The Paper Pro (1620×2160) and Paper Pro Move (954×1696) have similar pixel density but very different widths;
+orientation can also change. The shell's sizing approach can be reused by apps:
 
-- `unit = min(width, height) / 954`：Move 竖屏 = 1，Paper Pro ≈ 1.7。边距、卡片高度、间距乘它。
-- `fontScale = 1 + (unit − 1) × 0.35`：字号只温和放大（Paper Pro 24 → 30px）。
-- 列数按内容宽度算：`floor(contentWidth / (最小磁贴宽 × fontScale))`，横屏自动变多列。
+- `unit = min(width, height) / 954`; multiply margins, card heights, and spacing by it.
+- `fontScale = 1 + (unit - 1) × 0.35`; scale text more gently than the rest of the UI.
+- Calculate columns from content width: `floor(contentWidth / (minimum tile width × fontScale))`.
 
-## 多语言
+## Localization
 
-界面语言跟随 reMarkable 的系统设置，应用不用自己判断，也不用自己存偏好。
+The shell follows the tablet's system language and exposes the resolved value as `space.lang`. The historical
+implementation tried `languageSettings.languageCode`, then a backend language value, then English. The current
+supported languages are documented in the root README and shell dictionaries.
 
-外壳按这个顺序定稿，结果放在 `space.lang`（`zh-CN` / `en`）：
+An app can include flat JSON dictionaries:
 
-1. `languageSettings.languageCode` —— xochitl 的实时值，用户在系统设置里选的那个
-2. `/space/apps` 返回的 `lang` —— 外壳读不到上面那个时的兜底，后端按
-   `xochitl.conf` 的 `Language` → `Keyboard` → 环境变量往下猜
-3. `en`
-
-空间支持 `en / de / fr / es / zh-CN / zh-TW / ja / ko`，与原系统自带语言及我们新增的语言一致。
-`zh_CN` / `zh-Hans` / `zh` 归为 `zh-CN`，`zh_TW` / `zh-Hant` / `zh-HK` 归为 `zh-TW`；其他写法按主语言段匹配。
-没有词典的语言只回退 `en`，不使用其他欧洲语言或简体中文代替。
-
-### 应用怎么用
-
-包里加 `i18n/`，一个语言一个 JSON，键值都是平的：
-
-```
+```text
 app/
-  manifest.json
-  main.qml
   i18n/
-    en.json       必备 —— 缺词时回落到它
+    en.json       required fallback
     de.json
     fr.json
     es.json
@@ -148,81 +148,62 @@ app/
     ko.json
 ```
 
-保留 `_app_name` / `_app_description` / `_launch_confirm` 分别给应用名、简介和启动确认文案；
-后端与商店索引也从这些语言文件取值，不在 QML 里另写一套名称。
+Keep `_app_name`, `_app_description`, and `_launch_confirm` for localized app metadata:
 
 ```json
-{ "add_task": "添加任务", "done": "完成", "empty_hint": "还没有任务" }
+{ "add_task": "Add task", "done": "Done", "empty_hint": "No tasks yet" }
 ```
 
-QML 里：
+Use `space.tr("empty_hint")` in an app. Widgets should use `space.trApp(app.id, "key")`, because `space.tr`
+looks up the currently open app's dictionary. When a translation is missing, the shell falls back to `en.json`,
+then to the key itself so missing strings are visible during development.
 
-```qml
-Text { text: space.tr("empty_hint") }
-Button { text: space.tr("add_task") }
-```
+Do not use `qsTr` for app strings: injected QML does not have the relevant Qt translation table. Keep UI copy in
+external JSON so translators can add languages without rebuilding app binaries.
 
-**小组件里要用 `space.trApp(app.id, "key")`，不能用 `space.tr`。** 小组件和应用共用同一个 `space` 对象，而 `space.tr` 查的是「当前打开的应用」的词典 —— 首页上通常没有打开任何应用，会查到空词典（露出 key）或上一个打开的应用的词典。
+## Backend API
 
-```qml
-Text { text: space.trApp(app.id, "now_playing") }
-```
+These are the API routes described by the original design. Check the current server routes in
+`internal/server/` before relying on any path:
 
-`n` 等于 1 时会先找 `<key>_one`（法语也包括 0），英文单复数用得上（`"n_albums": "{n} albums"`, `"n_albums_one": "1 album"`）；中文、日文、韩文词典不用写。
-
-查不到词条时先回落 `en.json`，再回落 key 本身 —— **永远不会显示成空白**，最差也是露出一个英文 key，一眼能看出漏翻了哪条。
-
-词典由外壳**同步读入**（外壳自己的在属性初始化阶段，应用的在 `createComponent` 之前），所以首帧就是正确的文字，应用不用自己等 `space.lang` 就绪。都是本地 `file://` 的几 KB JSON，几毫秒的事。
-
-### 不要用 `qsTr`
-
-注入进来的 QML 查不到 Qt 的翻译表（实测），`qsTr("添加")` 会原样返回中文。一律走 `space.tr()`。
-
-### 为什么文案不放进二进制
-
-实测 `qt_add_qml_module` 编出来的 `.so` 里，QML 源码连注释一起原样可读，并不能保护源码；而把文案留在里面会让「加一种语言」变成「重编两个架构」。所以文案走外部 JSON：翻译的人不碰代码，加语言不用编译。
-
-真要保护的逻辑应当放在 Go 后端（`service.exec`），那里编译后确实读不出源码。
-
-## 后端接口
-
-| 方法 | 路径 | 说明 |
+| Method | Path | Purpose |
 |---|---|---|
-| GET | `/space/apps` | 注册表：`{shell, arch, userDir, apps:[…]}`，每条含解析后的 `entryUrl` `iconUrl` `widgetUrl` `dataDir` `serviceUrl` `builtin` `error` |
-| POST | `/space/apps` | 上传 zip 安装（multipart 字段 `file`，或 body 直接是 zip） |
-| POST | `/space/apps/install-url` | `{"url", "sha256"}` 从网址安装 |
-| DELETE | `/space/apps/{id}` | 卸载（仅用户目录；数据目录保留） |
-| GET/POST | `/space/apps/{id}/service`, `…/service/start`, `…/service/stop` | 应用后台状态 / 拉起（就绪后返回）/ 收掉 |
-| GET/PUT | `/space/apps/{id}/data/{key}` | 应用数据（JSON 文件，`dataDir/<key>.json`） |
-| GET | `/space/store` | 商店索引（设备端拉取 + 缓存 10 分钟；`?refresh=1` 强刷） |
+| GET | `/space/apps` | App registry |
+| POST | `/space/apps` | Install a ZIP (`file` multipart field or ZIP body) |
+| POST | `/space/apps/install-url` | Install from `{"url", "sha256"}` |
+| DELETE | `/space/apps/{id}` | Remove a user app; retain its data |
+| GET/POST | `/space/apps/{id}/service`, `/service/start`, `/service/stop` | Service status, start, and stop |
+| GET/PUT | `/space/apps/{id}/data/{key}` | Read/write app JSON data |
+| GET | `/space/store` | App catalog; cached for 10 minutes, `?refresh=1` forces refresh |
 
-zip 里 `manifest.json` 在根或唯一顶级目录下都行；拒绝路径穿越与符号链接；解压到临时目录校验后原子替换，失败不影响已装版本；同名后台先收掉。
+The installer is expected to reject path traversal and symlinks, validate before replacing an installed app, and
+stop a same-name service before replacing it.
 
-## 应用商店
+## App catalog
 
-索引是一份静态 JSON（默认 `-space-store` 指向 `https://boangs.com/rmkit-space/index.json`，由各应用项目的 build.sh 生成并上传）：
+The original design used a static JSON index, generated by app project build scripts:
 
 ```json
-{"apps": [{"id": "music", "name": "音乐", "version": "1.0.0", "description": "…",
+{"apps": [{"id": "music", "name": "Music", "version": "1.0.0", "description": "...",
            "category": "tool", "arch": ["aarch64"],
-           "zip": "https://…/music-1.0.0.zip", "sha256": "…"}]}
+           "zip": "https://example.invalid/music-1.0.0.zip", "sha256": "..."}]}
 ```
 
-「发现」页按 id 对比本机版本：未装显示「获取」，版本不同显示「更新」，一致显示「已安装」。
+The Discover page compares app IDs and versions to show whether an app can be installed, updated, or is already
+installed. See [docs-store-key.md](docs-store-key.md) for catalog key configuration.
 
-## 迁移路线
+## Migration and local development notes
 
-1. **已完成**：外壳 + 后端 + 组件库；旧面板全部页面已迁成内置应用 —— 设置类（扫码上传、个性化、AI 设置、输入法、蓝牙、Android）在「设置」标签按行列出，游戏/工具（五子棋、国际象棋、华容道、快艇骰子、函数绘图）与 KOReader / 微信读书 在「应用」。旧「高级」面板首页保留一个「空间」磁贴作为过渡入口。
-2. 在设备上落 `/home/root/rmkit-cn/space/.primary`（已重编的注入器会据此把侧栏入口切成「空间」），之后删除 `adv_panel.qml` 与 qmd 版本（qmd/qmldiff 路径不再承载新功能）。
-3. 音乐作为第一个第三方应用（源码在仓库外），验证 service/keepalive/widget 全链路。已完成。
-   天气为第一个自带 hero 小组件的内置应用（Open-Meteo 数据源，多城市，生活指数）。已完成。
-4. 开发模式：`touch ~/.local/share/rmkit-cn/space/.dev` 后外壳打开应用会绕过 QML 组件缓存，改完 QML 重新点开即生效。
+The migration notes below describe an earlier project state and are retained for historical context:
 
-## 本地开发
+1. The shell, backend, and component library were established; legacy panel entries were moved to built-in apps.
+2. The `.primary` marker was used to switch the sidebar entry from the legacy panel to Space.
+3. Music was used to validate the service/keepalive/widget flow; Weather was the first built-in hero widget.
+4. A `.dev` marker bypassed QML component caching during development.
 
-- 开发模式（`touch ~/.local/share/rmkit-cn/space/.dev`）下，外壳与应用的 **QML 文件**改完 `scp` 过去，重新打开「空间」即生效，不用重启 xochitl —— 外壳给每个 QML 的 URL 加了时间戳绕开引擎缓存。
-- **但 .js 与图片资源没有这个待遇**：`import "x.js"` 的 URL 是静态的，SVG/PNG 也按 URL 进 QQuickPixmapCache，改完必须重启一次 xochitl 才会重新读。改 QML 不用，改 JS 或图标/插画要。
-- 注册表里的 `dev` 标记要在 `apps` 赋值之前设好（外壳 `reload()` 里的顺序），否则第一次挂载小组件时还没开免缓存，旧版会被引擎缓存住，之后改 QML 都不生效。
-- 应用加载失败时外壳会把 `Component.errorString()` 直接显示在内容区。
-- `qmllint space/shell/Space.qml` 会因为 Mac 上没有 `device.ui.controls` 和绝对路径 import 报一堆 warning，只看 `Error` 行。
-- 后端：`cd upload-server-go && go test ./internal/space/`。
+In development mode, QML URL cache-busting may allow changed QML to load without restarting xochitl. JavaScript
+imports and image resources can remain cached by Qt and may require an interface restart. The shell displays
+`Component.errorString()` when an app fails to load.
+
+The old note `cd upload-server-go && go test ./internal/space/` is obsolete. Use the root README and current
+Go module layout to select tests for the active implementation.

@@ -4,6 +4,7 @@
   "name_en": "Chess",
   "version": "1.0.0",
   "description": "人机国际象棋",
+  "description_en": "Play chess against the computer",
   "icon": "icon.svg",
   "entry": "main.qml",
   "category": "game",

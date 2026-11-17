@@ -1,35 +1,42 @@
-# 底座 (base)
+# Integration base (base/)
 
-把「空间」接进 reMarkable 系统的那一层：xovi、qmldiff 注入链与 hashtab、运行时注入 `.so`
-(侧栏「空间」入口就是它塞进去的)、新增系统语言 `.qm` 与中文键盘布局 `.rcc`、输入法后端、
-系统升级后的自检与恢复脚本。**砖机风险全在这一层**，只在系统升级逼着改时才动。
+The base layer integrates Space with the reMarkable system. It contains xovi, the qmldiff injection chain and
+hashtabs, runtime injection libraries, added system-language resources, keyboard layouts, an input-method
+backend, and post-update validation and recovery scripts. **This layer carries the device-boot risk.** Change it
+only when a system update requires it.
 
-2026-10-20 从 [boangs/rmkit](https://github.com/boangs/rmkit) (`0f17826`) 迁入，此前的提交历史留在那个仓库。
-目录结构与原仓库一一对应，脚本里的相对路径不用改；设备上的路径也一律不变
-(`/home/root/rmkit-cn/...`、`~/.local/share/rmkit-cn/...`)，改了用户数据会凭空消失。
+> **Legacy implementation:** This base was migrated from [boangs/rmkit](https://github.com/boangs/rmkit)
+> (`0f17826`) on 2026-10-20. The legacy device paths and installer described here are retained for compatibility;
+> use Space Assistant and the root README for the current supported installation workflow.
 
-| 目录 | 内容 |
+Directory layout follows the original repository so its relative script paths remain valid. Device paths also
+remain unchanged (`/home/root/rmkit-cn/...` and `~/.local/share/rmkit-cn/...`) to preserve existing user data.
+
+| Directory | Contents |
 |---|---|
-| `intercept/` | `ime_hook.so` 与运行时注入 `qml-inject/` (薄钩子 + 胖库) |
-| `qmd-src/` `qmd/` | qmldiff 补丁源、中文键盘布局 (`zh_CN.rcc` 的内容) |
-| `installer/` | 设备端脚本：`install.sh`、`precheck.sh` (fail-open)、`fw-upgrade.sh`、`ota-watch.sh` … |
-| `systemd/` | xochitl drop-in 与 OTA / 输入法服务 |
-| `ime-go/` | 纯 Go 输入法后端 (rm2 回退引擎) |
-| `tools/` | `qmd-tool`、`create_rcc.go`、librime / 蓝牙音频交叉编译脚本、hashtab 样本 |
-| `vendor/` | 预编译的 xovi 与扩展、蓝牙音频包 |
-| `scripts/` | 发版体检 (`check-dist.sh`、`lse_scan.py`)、翻译合并工具 |
-| `docs/` | 架构、开发、设备矩阵、升级 SOP |
+| `intercept/` | `ime_hook.so` and runtime `qml-inject/` (thin hook plus Qt-linked library) |
+| `qmd-src/`, `qmd/` | qmldiff patch source and keyboard layout resources |
+| `installer/` | Legacy device-side installation, precheck, firmware-update, and OTA scripts |
+| `systemd/` | xochitl drop-ins and OTA/input-method services |
+| `ime-go/` | Go input-method backend (fallback engine for RM2) |
+| `tools/` | `qmd-tool`, `create_rcc.go`, cross-compilation scripts, hashtab samples |
+| `vendor/` | Prebuilt xovi components, extensions, and audio packages |
+| `scripts/` | Release checks and translation-merging tools |
+| `docs/` | Architecture, development, device matrix, and upgrade procedure |
 
-`installer/install.sh` 是旧的命令行安装器，现在只当参照：助手 (`assistant/internal/deploy`)
-是它的 Go 移植，注释里的行号指向它。它还会去装已退役的 upload-server (`upload-server-go/` 没迁过来)，
-不能再直接跑。
+`installer/install.sh` is a **legacy CLI installer retained for reference**. Do not run it as the current
+installation workflow: it still attempts to install the retired upload-server, which is not part of this
+repository. Use the desktop assistant in `assistant/`.
 
-产物在 `dist/` (不进仓库)，助手打包时取它：`cd assistant && make bundle`。
-librime 源码树 `third_party/` (约 430MB) 也只放本机。
+The procedures in `base/docs/` and older installer-specific notes also describe the predecessor workflow. Treat
+them as historical references; they have not been validated as current Space Assistant instructions.
 
-没迁过来的 (仍在 rmkit 仓库)：Android 双启动 (`android/`)、旧桌面助手 (`desktop/`，已由
-`assistant/` 取代)、旧后端 `upload-server-go/` (已由 `space-server` 取代)、`legacy/`、
-固件 QML 导出 `qml-dump/`、输入法词库的原始语料 `ime-go/tools/build_dict/cpd.txt` (43MB，
-编好的词库已在 `ime-go/pinyin/dict/`)。
+Build artifacts are written to `dist/` and are not tracked. The assistant bundle build consumes them:
+`cd assistant && make bundle`. The librime source tree in `third_party/` (about 430 MB) is also local-only.
 
-第三方代码与许可证见 [NOTICE.md](NOTICE.md) 与 `third-party-licenses/`。
+Components not migrated from the original rmkit repository include Android dual-boot (`android/`), the retired
+desktop assistant (`desktop/`, replaced by `assistant/`), the old `upload-server-go/` backend (replaced by
+`space-server`), `legacy/`, firmware QML exports (`qml-dump/`), and the original 43 MB IME corpus
+(`ime-go/tools/build_dict/cpd.txt`). The compiled dictionary is in `ime-go/pinyin/dict/`.
+
+Third-party code and licenses are listed in [NOTICE.md](NOTICE.md) and `third-party-licenses/`.

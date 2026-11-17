@@ -1,13 +1,13 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>上传到 reMarkable</title>
+<title>Upload to reMarkable</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     margin: 0; padding: 24px 20px;
     background: #f5f5f5; color: #222;
     min-height: 100vh;
@@ -90,76 +90,76 @@
 </head>
 <body>
 <div class="card">
-  <h1>上传到 reMarkable</h1>
-  <p class="subtitle">文档 / 字体 / 壁纸 / 插图 / 音乐 / 应用</p>
+  <h1>Upload to reMarkable</h1>
+  <p class="subtitle">Documents / Fonts / Sleep screens / Artwork / Music / Apps</p>
 
   <div class="tabs">
-    <div class="tab active" data-target="doc">文档</div>
-    <div class="tab" data-target="font">字体</div>
-    <div class="tab" data-target="screen">壁纸</div>
-    <div class="tab" data-target="hero">插图</div>
-    <div class="tab" data-target="music">音乐</div>
-    <div class="tab" data-target="space">应用</div>
+    <div class="tab active" data-target="doc">Documents</div>
+    <div class="tab" data-target="font">Fonts</div>
+    <div class="tab" data-target="screen">Sleep screens</div>
+    <div class="tab" data-target="hero">Artwork</div>
+    <div class="tab" data-target="music">Music</div>
+    <div class="tab" data-target="space">Apps</div>
     <div class="tab" data-target="ai">AI</div>
   </div>
 
   <div class="panel active" id="panel-doc">
-    <label class="pick" for="file-doc">📄 选择 PDF / EPUB / rmdoc</label>
+    <label class="pick" for="file-doc">📄 Choose PDF / EPUB / rmdoc</label>
     <input type="file" id="file-doc" data-endpoint="/documents"
            accept=".pdf,.epub,.rmdoc,application/pdf,application/epub+zip">
-    <p class="hint">上传完成后会自动出现在设备首页</p>
+    <p class="hint">Uploaded documents appear automatically on your device's home screen.</p>
   </div>
 
   <div class="panel" id="panel-font">
-    <label class="pick" for="file-font">🔤 选择 TTF / OTF</label>
+    <label class="pick" for="file-font">🔤 Choose TTF / OTF</label>
     <input type="file" id="file-font" data-endpoint="/fonts"
            accept=".ttf,.otf,font/ttf,font/otf">
-    <p class="hint">上传后到设备「高级」面板里选择启用，启用会重启界面</p>
+    <p class="hint">After uploading, enable the font from the device's Advanced panel. Enabling it restarts the interface.</p>
     <ul class="file-list" data-list="/fonts"></ul>
   </div>
 
   <div class="panel" id="panel-screen">
-    <label class="pick" for="file-screen">🖼️ 选择 PNG 图片</label>
+    <label class="pick" for="file-screen">🖼️ Choose a PNG image</label>
     <input type="file" id="file-screen" data-endpoint="/screens"
            accept=".png,image/png">
-    <p class="hint">上传后到设备「高级」面板里选作休眠壁纸，下次休眠生效</p>
+    <p class="hint">After uploading, select it as the sleep screen from the device's Advanced panel. It takes effect the next time the device sleeps.</p>
     <ul class="file-list" data-list="/screens"></ul>
   </div>
 
   <div class="panel" id="panel-hero">
-    <label class="pick" for="file-hero">🖼️ 选择插图 (JPG / PNG)</label>
+    <label class="pick" for="file-hero">🖼️ Choose artwork (JPG / PNG)</label>
     <input type="file" id="file-hero" data-endpoint="/hero"
            accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple>
-    <p class="hint">「空间」首页顶部那张大卡的垫图，传完到设备上「空间 → 设置 → 首页插图」里选。
-       横幅比例（宽约为高的两倍）最合适，太高的会被裁掉上下。</p>
+    <p class="hint">Artwork for the large card at the top of the Space home screen. After uploading, select it on the device under Space → Settings → Home artwork.
+       A landscape image (about twice as wide as it is tall) works best; taller images are cropped at the top and bottom.</p>
     <ul class="file-list" data-list="/hero"></ul>
   </div>
 
   <div class="panel" id="panel-music">
-    <label class="pick" for="file-music">🎵 选择音乐文件</label>
+    <label class="pick" for="file-music">🎵 Choose music files</label>
     <input type="file" id="file-music" data-endpoint="/music"
            accept=".mp3,.m4a,.flac,.wav,.ogg,audio/*" multiple>
-    <p class="hint">传到设备后在「音乐」应用里就能看到；mp3 支持最好，其余格式视解码器而定</p>
+    <p class="hint">Uploaded files appear in the Music app. MP3 has the best support; other formats depend on the available decoders.</p>
     <ul class="file-list" data-list="/music"></ul>
   </div>
 
   <div class="panel" id="panel-space">
-    <label class="pick" for="file-space">📦 选择应用包 (zip)</label>
+    <label class="pick" for="file-space">📦 Choose an app bundle (ZIP)</label>
     <input type="file" id="file-space" data-endpoint="/space/apps"
            accept=".zip,application/zip">
-    <p class="hint">「空间」应用绿色安装：上传即装，删除即卸；内置应用随 rmkit-cn 管理，不能在此删除</p>
+    <p class="hint">Space apps are installed when uploaded and uninstalled when deleted. Built-in apps are managed by rmkit-cn and cannot be deleted here.</p>
     <ul class="file-list" data-list="/space/apps"></ul>
   </div>
 
   <div class="panel" id="panel-ai">
     <div class="form-row">
-      <label class="lbl">服务商预设</label>
+      <label class="lbl">Provider preset</label>
       <select id="ai-preset">
-        <option value="custom">自定义 (OpenAI 兼容)</option>
+        <option value="custom">Custom (OpenAI-compatible)</option>
         <option value="deepseek">DeepSeek</option>
-        <option value="kimi">Kimi (月之暗面)</option>
-        <option value="qwen">通义千问</option>
-        <option value="zhipu">智谱 GLM</option>
+        <option value="kimi">Kimi</option>
+        <option value="qwen">Qwen</option>
+        <option value="zhipu">Zhipu GLM</option>
         <option value="openrouter">OpenRouter</option>
         <option value="openai">OpenAI</option>
         <option value="anthropic">Anthropic</option>
@@ -173,37 +173,36 @@
       <label class="lbl">API Key</label>
       <div class="key-wrap">
         <input type="password" id="ai-key" placeholder="sk-..." autocomplete="off">
-        <button type="button" class="toggle-eye" id="ai-key-toggle">显示</button>
+        <button type="button" class="toggle-eye" id="ai-key-toggle">Show</button>
       </div>
-      <p class="hint" style="margin-top:6px;text-align:left;">留空保留原值</p>
+      <p class="hint" style="margin-top:6px;text-align:left;">Leave blank to keep the current value.</p>
     </div>
     <div class="form-row">
-      <label class="lbl">模型</label>
+      <label class="lbl">Model</label>
       <input type="text" id="ai-model" placeholder="gpt-4o-mini" autocomplete="off">
     </div>
-    <button class="save" id="ai-save">保存</button>
-    <p class="hint">保存后到平板「高级 → AI 设置」点测试连接</p>
+    <button class="save" id="ai-save">Save</button>
+    <p class="hint">After saving, test the connection on the device under Advanced → AI Settings.</p>
   </div>
 
   <div class="progress-wrap" id="progressWrap">
     <div class="progress"><div class="progress-bar" id="progressBar"></div></div>
-    <div class="progress-text" id="progressText">准备上传…</div>
+    <div class="progress-text" id="progressText">Preparing upload…</div>
   </div>
 
   <div class="result" id="result"></div>
 </div>
 
 <script>
-// 应用登记的上传标签页 (manifest.uploads → GET /space/uploads): 先拼进页面, 再走下面的通用初始化
+// Add app-defined upload tabs (manifest.uploads → GET /space/uploads) before initializing the shared controls.
 function addAppSlots(slots) {
-  const zh = (navigator.language || 'zh').toLowerCase().startsWith('zh');
   const tabBar = document.querySelector('.tabs');
   const anchor = document.getElementById('panel-ai');
   (slots || []).forEach(sl => {
     const key = 'app-' + sl.app + '-' + sl.id;
     const ep = '/space/apps/' + encodeURIComponent(sl.app) + '/upload/' + encodeURIComponent(sl.id);
-    const label = (!zh && sl.label_en) ? sl.label_en : sl.label;
-    const hint = (!zh && sl.hint_en) ? sl.hint_en : (sl.hint || '');
+    const label = sl.label_en || sl.id;
+    const hint = sl.hint_en || '';
     const tab = document.createElement('div');
     tab.className = 'tab'; tab.dataset.target = key; tab.dataset.focus = sl.app + '.' + sl.id; tab.textContent = label;
     tabBar.appendChild(tab);
@@ -211,7 +210,7 @@ function addAppSlots(slots) {
     panel.className = 'panel'; panel.id = 'panel-' + key;
     const pick = document.createElement('label');
     pick.className = 'pick'; pick.htmlFor = 'file-' + key;
-    pick.textContent = '📎 ' + (zh ? '选择文件' : 'Choose file') + ' (' + sl.accept.join(' / ') + ')';
+    pick.textContent = '📎 Choose file (' + sl.accept.join(' / ') + ')';
     const input = document.createElement('input');
     input.type = 'file'; input.id = 'file-' + key; input.dataset.endpoint = ep;
     input.accept = sl.accept.join(','); input.multiple = !!sl.multiple;
@@ -257,7 +256,7 @@ function initPage() {
     labels.forEach(l => {
       l.classList.toggle('disabled', busy);
       if (busy) l.dataset.original = l.dataset.original || l.textContent;
-      l.textContent = busy ? (busyText || '上传中…') : (l.dataset.original || l.textContent);
+      l.textContent = busy ? (busyText || 'Uploading…') : (l.dataset.original || l.textContent);
     });
   }
 
@@ -271,12 +270,12 @@ function initPage() {
     });
   });
 
-  // 多选时逐个上传 (设备端一次只收一个 file 字段), 全部完成后刷新列表
+  // Upload multiple files one at a time (the device accepts one file field per request), then refresh the list.
   function uploadAll(files, endpoint) {
     let i = 0, okCount = 0;
     const next = () => {
       if (i >= files.length) {
-        if (files.length > 1) showResult(okCount === files.length, (okCount === files.length ? '✅ ' : '⚠️ ') + '已上传 ' + okCount + '/' + files.length + ' 个文件');
+        if (files.length > 1) showResult(okCount === files.length, (okCount === files.length ? '✅ ' : '⚠️ ') + 'Uploaded ' + okCount + ' of ' + files.length + ' files');
         loadList(endpoint);
         return;
       }
@@ -286,32 +285,32 @@ function initPage() {
     next();
   }
 
-  // 每个标签下的文件列表 (字体/壁纸共用): GET <endpoint> 列表, DELETE <endpoint>/<name> 删除; 使用中的不让删
+  // File lists use GET <endpoint>; DELETE <endpoint>/<name> removes an item. Active items cannot be deleted.
   const fileLists = Array.from(document.querySelectorAll('.file-list'));
   function fmtSize(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB'; }
   function loadList(endpoint) {
     const ul = fileLists.find(u => u.dataset.list === endpoint);
     if (!ul) return;
     fetch(endpoint).then(r => r.json()).then(items => {
-      // /space/apps 返回 {apps:[...]}: 映射成通用列表项 (name 用作删除路径, label 显示)
+      // /space/apps returns {apps:[...]}; map it to the shared list format.
       if (items && !Array.isArray(items) && Array.isArray(items.apps)) {
-        items = items.apps.map(a => ({ name: a.id, label: a.name + ' ' + (a.version || '') + (a.builtin ? '（内置）' : ''), size: a.size, active: a.builtin }));
+        items = items.apps.map(a => ({ name: a.id, label: a.name + ' ' + (a.version || '') + (a.builtin ? ' (built-in)' : ''), size: a.size, active: a.builtin }));
       }
       ul.innerHTML = '';
       (items || []).forEach(it => {
         const li = document.createElement('li');
         const span = document.createElement('span'); span.textContent = it.label || it.name;
         li.appendChild(span);
-        if (it.active) { const a = document.createElement('em'); a.className = 'active'; a.textContent = '使用中'; li.appendChild(a); }
+        if (it.active) { const a = document.createElement('em'); a.className = 'active'; a.textContent = 'Active'; li.appendChild(a); }
         const small = document.createElement('small'); small.textContent = fmtSize(it.size || 0); li.appendChild(small);
-        const btn = document.createElement('button'); btn.textContent = '删除'; btn.disabled = !!it.active;
+        const btn = document.createElement('button'); btn.textContent = 'Delete'; btn.disabled = !!it.active;
         btn.addEventListener('click', () => {
           fetch(endpoint + '/' + encodeURIComponent(it.name), { method: 'DELETE' }).then(() => loadList(endpoint));
         });
         li.appendChild(btn);
         ul.appendChild(li);
       });
-      if (!ul.children.length) { const li = document.createElement('li'); li.textContent = '还没有文件'; ul.appendChild(li); }
+      if (!ul.children.length) {       const li = document.createElement('li'); li.textContent = 'No files yet'; ul.appendChild(li); }
     }).catch(() => {});
   }
   fileLists.forEach(u => loadList(u.dataset.list));
@@ -320,7 +319,7 @@ function initPage() {
     result.style.display = 'none';
     progressWrap.style.display = 'block';
     progressBar.style.width = '0%';
-    progressText.textContent = '上传中 0%';
+    progressText.textContent = 'Uploading 0%';
     setBusy(true);
 
     const fd = new FormData();
@@ -332,7 +331,7 @@ function initPage() {
       if (!e.lengthComputable) return;
       const pct = Math.round((e.loaded / e.total) * 100);
       progressBar.style.width = pct + '%';
-      progressText.textContent = (prefix || '') + '上传中 ' + pct + '%';
+      progressText.textContent = (prefix || '') + 'Uploading ' + pct + '%';
     };
     xhr.onload = () => {
       progressWrap.style.display = 'none';
@@ -343,11 +342,11 @@ function initPage() {
           const j = JSON.parse(xhr.responseText);
           if (j && typeof j.name === 'string' && j.name) displayName = j.name;
         } catch (_) {}
-        showResult(true, '✅ 已上传：' + displayName);
+        showResult(true, '✅ Uploaded: ' + displayName);
         loadList(endpoint);
         if (done) done(true);
       } else {
-        let msg = '上传失败 (' + xhr.status + ')';
+        let msg = 'Upload failed (' + xhr.status + ')';
         try {
           const j = JSON.parse(xhr.responseText);
           if (j.detail) msg = '❌ ' + j.detail;
@@ -359,13 +358,13 @@ function initPage() {
     xhr.onerror = () => {
       progressWrap.style.display = 'none';
       setBusy(false);
-      showResult(false, '❌ 网络错误，请确认与 reMarkable 在同一 Wi-Fi');
+      showResult(false, '❌ Network error. Make sure your computer and reMarkable are on the same Wi-Fi network.');
       if (done) done(false);
     };
     xhr.send(fd);
   }
 
-  // ─── AI 设置 ────────────────────────────────────────────────
+  // ─── AI settings ────────────────────────────────────────────
   const PRESETS = {
     deepseek:   { kind: 'openai',    url: 'https://api.deepseek.com/v1',                          model: 'deepseek-chat' },
     kimi:       { kind: 'openai',    url: 'https://api.moonshot.cn/v1',                           model: 'moonshot-v1-8k' },
@@ -383,18 +382,18 @@ function initPage() {
   const aiSave   = document.getElementById('ai-save');
   const aiKeyToggle = document.getElementById('ai-key-toggle');
 
-  // currentKind: 跟踪从磁盘读出来的 kind, 切预设时同步更新.
-  // 自定义预设不动 kind, 维持原值.
+  // Track the saved kind and update it when a provider preset is selected.
+  // The custom preset leaves the current kind unchanged.
   let currentKind = 'openai';
 
   aiKeyToggle.addEventListener('click', () => {
-    if (aiKey.type === 'password') { aiKey.type = 'text'; aiKeyToggle.textContent = '隐藏'; }
-    else { aiKey.type = 'password'; aiKeyToggle.textContent = '显示'; }
+    if (aiKey.type === 'password') { aiKey.type = 'text'; aiKeyToggle.textContent = 'Hide'; }
+    else { aiKey.type = 'password'; aiKeyToggle.textContent = 'Show'; }
   });
 
   aiPreset.addEventListener('change', () => {
     const p = PRESETS[aiPreset.value];
-    if (!p) return; // custom: 不动
+    if (!p) return; // Custom: leave the current values unchanged.
     aiUrl.value = p.url;
     aiModel.value = p.model;
     currentKind = p.kind;
@@ -410,10 +409,10 @@ function initPage() {
         currentKind  = j.kind  || 'openai';
         aiUrl.value  = j.url   || '';
         aiModel.value = j.model || '';
-        // key 故意不回填, 避免在公开环境暴露; 留空保留原值
+        // Do not return the key to the browser; leaving it blank preserves the saved value.
         aiKey.value = '';
-        aiKey.placeholder = j.key ? '已保存 (留空保留)' : 'sk-...';
-        // 根据当前 url+model 命中哪个预设
+        aiKey.placeholder = j.key ? 'Saved (leave blank to keep)' : 'sk-...';
+        // Match the current URL and model to a provider preset.
         const hit = Object.entries(PRESETS).find(([_, v]) => v.url === j.url && v.kind === currentKind);
         aiPreset.value = hit ? hit[0] : 'custom';
       } catch (_) {}
@@ -423,11 +422,11 @@ function initPage() {
 
   aiSave.addEventListener('click', () => {
     aiSave.disabled = true;
-    aiSave.textContent = '保存中…';
+    aiSave.textContent = 'Saving…';
     const body = JSON.stringify({
       kind:  currentKind,
       url:   aiUrl.value.trim(),
-      key:   aiKey.value,        // 不 trim, 保留原始 key
+      key:   aiKey.value,        // Do not trim the key.
       model: aiModel.value.trim(),
     });
     const xhr = new XMLHttpRequest();
@@ -435,13 +434,13 @@ function initPage() {
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.onload = () => {
       aiSave.disabled = false;
-      aiSave.textContent = '保存';
+      aiSave.textContent = 'Save';
       if (xhr.status >= 200 && xhr.status < 300) {
-        showResult(true, '✅ AI 配置已保存');
-        // 重新加载, 把 placeholder 更新为"已保存"
+        showResult(true, '✅ AI settings saved.');
+        // Reload to update the key placeholder.
         loadAIConfig();
       } else {
-        let msg = '保存失败 (' + xhr.status + ')';
+        let msg = 'Save failed (' + xhr.status + ')';
         try {
           const j = JSON.parse(xhr.responseText);
           if (j.detail) msg = '❌ ' + j.detail;
@@ -451,8 +450,8 @@ function initPage() {
     };
     xhr.onerror = () => {
       aiSave.disabled = false;
-      aiSave.textContent = '保存';
-      showResult(false, '❌ 网络错误');
+      aiSave.textContent = 'Save';
+      showResult(false, '❌ Network error.');
     };
     xhr.send(body);
   });

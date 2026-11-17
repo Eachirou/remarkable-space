@@ -1,6 +1,6 @@
 # reMarkable Space
 
-English · [简体中文](README.zh-CN.md)
+English · [Simplified Chinese](README.zh-CN.md)
 
 reMarkable Space is an app launcher and home screen for supported reMarkable tablets. Its home screen can show
 cards supplied by installed apps—such as a plan, weather, or playback status—and its catalog lets users install
@@ -117,10 +117,10 @@ files, not additional manifest fields.
 ```jsonc
 {
   "id": "weather",              // unique; 1-32 lowercase letters, digits, - or _
-  "name": "天气",
+  "name": "Weather",
   "name_en": "Weather",
   "version": "1.0.0",          // required
-  "description": "天气预报",
+  "description": "Weather forecast",
   "description_en": "Weather forecast",
   "entry": "main.qml",          // QML entry point; without it, use launch
   "widget": "widget.qml",       // optional home-screen widget

@@ -4,6 +4,7 @@
   "name_en": "Plot",
   "version": "1.0.0",
   "description": "函数图像绘制",
+  "description_en": "Plot mathematical functions",
   "icon": "icon.svg",
   "entry": "main.qml",
   "category": "game",

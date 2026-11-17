@@ -7,5 +7,5 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": { "name": "boangs" },
-  "info": { "productName": "空间助手", "productVersion": "1.0.0", "comments": "reMarkable 「空间」与中文化安装助手 (仅走 USB/局域网直连, 无服务器)" }
+  "info": { "productName": "Space Assistant", "productVersion": "1.0.0", "comments": "Installer for reMarkable Space (direct USB or local-network connection; no server)" }
 }

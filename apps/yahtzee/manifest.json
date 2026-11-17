@@ -4,6 +4,7 @@
   "name_en": "Yahtzee",
   "version": "1.0.0",
   "description": "快艇骰子 (Yahtzee)",
+  "description_en": "Play Yahtzee",
   "icon": "icon.svg",
   "entry": "main.qml",
   "category": "game",
