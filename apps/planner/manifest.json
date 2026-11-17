@@ -1,0 +1,15 @@
+{
+  "id": "planner",
+  "name": "Planner",
+  "name_en": "Planner",
+  "version": "0.1.0",
+  "description": "A simple daily planner stored on the tablet",
+  "description_en": "A simple daily planner stored on the tablet",
+  "icon": "qrc:/ark/icons/calendar",
+  "entry": "main.qml",
+  "widget": "widget.qml",
+  "widget_size": "half",
+  "category": "tool",
+  "order": 10,
+  "arch": ["armv7", "aarch64"]
+}

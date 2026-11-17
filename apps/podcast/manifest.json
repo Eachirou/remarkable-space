@@ -1,0 +1,13 @@
+{
+  "id": "podcast",
+  "name": "Podcast",
+  "name_en": "Podcast",
+  "version": "0.1.0",
+  "description": "Browse RSS podcasts and play them over WLAN",
+  "description_en": "Browse RSS podcasts and play them over WLAN",
+  "icon": "qrc:/ark/icons/microphone",
+  "entry": "main.qml",
+  "category": "tool",
+  "order": 35,
+  "arch": ["armv7", "aarch64"]
+}

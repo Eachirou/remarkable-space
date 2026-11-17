@@ -1,0 +1,13 @@
+{
+  "id": "radio",
+  "name": "Radio",
+  "name_en": "Radio",
+  "version": "0.1.0",
+  "description": "Play internet radio stations over WLAN",
+  "description_en": "Play internet radio stations over WLAN",
+  "icon": "qrc:/ark/icons/radio",
+  "entry": "main.qml",
+  "category": "tool",
+  "order": 40,
+  "arch": ["armv7", "aarch64"]
+}

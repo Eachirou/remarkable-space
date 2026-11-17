@@ -1,0 +1,15 @@
+{
+  "id": "weather",
+  "name": "Weather",
+  "name_en": "Weather",
+  "version": "0.1.0",
+  "description": "A lightweight WLAN weather forecast",
+  "description_en": "A lightweight WLAN weather forecast",
+  "icon": "qrc:/ark/icons/weather",
+  "entry": "main.qml",
+  "widget": "widget.qml",
+  "widget_size": "hero",
+  "category": "tool",
+  "order": 20,
+  "arch": ["armv7", "aarch64"]
+}
