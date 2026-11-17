@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "description": "A lightweight WLAN weather forecast",
   "description_en": "A lightweight WLAN weather forecast",
-  "icon": "qrc:/ark/icons/weather",
+  "icon": "icon.svg",
   "entry": "main.qml",
   "widget": "widget.qml",
   "widget_size": "hero",

@@ -308,6 +308,19 @@ echo '  ✓ xovi '`+i18n.T("部署完成", "deployed"), path.Base(p.xoviTar)), n
 	if err := c.RunLogged(ctx, "cd /home/root/rmkit-cn/space 2>/dev/null && rm -rf hooks themes shell kit rel shell.prev kit.prev; true", nil); err != nil {
 		return err
 	}
+	// 商店版应用落在用户目录，并且用户目录优先于内置目录。把本次随空间发布的
+	// 应用先移到带时间戳的备份目录，避免旧版同名应用遮住新 bundle；应用数据目录不动。
+	if err := c.RunLogged(ctx, `set -eu
+U=/home/root/.local/share/rmkit-cn/space/apps
+if [ -d "$U" ]; then
+  B="$U/.legacy-backup-$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$B"
+  for id in almanac news podcast radio weather; do
+    if [ -d "$U/$id" ]; then mv "$U/$id" "$B/$id"; fi
+  done
+fi`, nil); err != nil {
+		return err
+	}
 
 	// install.sh 543-566: 单次 tar 流式传输
 	log(fmt.Sprintf(i18n.T("传输文件 (%d 个文件, %.1f MB, 单次 SSH 流式)...", "Transferring files (%d files, %.1f MB, single SSH stream)..."), len(p.Files), float64(p.TotalBytes)/1e6))

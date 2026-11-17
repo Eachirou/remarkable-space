@@ -1284,6 +1284,7 @@ Rectangle {
     Item {
         id: appNav
         visible: space.chrome && space.current !== null
+        z: 30
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right

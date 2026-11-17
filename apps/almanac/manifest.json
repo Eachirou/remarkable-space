@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "description": "Référence saisonnière hors ligne",
   "description_en": "An offline seasonal reference",
-  "icon": "qrc:/ark/icons/restore",
+  "icon": "icon.svg",
   "entry": "main.qml",
   "category": "reader",
   "order": 37,

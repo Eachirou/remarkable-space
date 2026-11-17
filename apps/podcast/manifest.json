@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "description": "Browse RSS podcasts and play them over WLAN",
   "description_en": "Browse RSS podcasts and play them over WLAN",
-  "icon": "qrc:/ark/icons/microphone",
+  "icon": "icon.svg",
   "entry": "main.qml",
   "category": "tool",
   "order": 35,

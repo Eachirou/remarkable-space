@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "description": "Play internet radio stations over WLAN",
   "description_en": "Play internet radio stations over WLAN",
-  "icon": "qrc:/ark/icons/radio",
+  "icon": "icon.svg",
   "entry": "main.qml",
   "category": "tool",
   "order": 40,

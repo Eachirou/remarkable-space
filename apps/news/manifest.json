@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "description": "Lire des articles depuis des flux RSS",
   "description_en": "Read articles from RSS feeds",
-  "icon": "qrc:/ark/icons/restore",
+  "icon": "icon.svg",
   "entry": "main.qml",
   "category": "reader",
   "order": 36,
