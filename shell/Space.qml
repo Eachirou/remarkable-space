@@ -1429,7 +1429,7 @@ Rectangle {
                     clip: true
                     Item {
                         anchors.fill: parent
-                        visible: !space.heroWidgetEnabled() || space.heroWidgetApp() === null
+                    visible: true
                         // 没装 hero 小组件 (比如天气被删掉了) 时的默认样子: 一幅山水垫底,
                         // 日期时间压在上面。素材是 2:1 的横幅, 贴着底边按原比例铺开 ——
                         // 上面留出的白正好垫文字, 两者不重叠, 所以不需要蒙版或渐隐。
@@ -1528,7 +1528,7 @@ Rectangle {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: space.vpx(350)
+                        Layout.preferredHeight: space.vpx(390)
                         radius: space.th.radius; border.color: space.th.line; border.width: space.th.border; color: space.th.card; clip: true
                         readonly property var planApp: space.slotWidgetApp("plan")
 
@@ -1570,7 +1570,7 @@ Rectangle {
 
                             Item {
                                 width: parent.width
-                                height: space.vpx(92)
+                                height: space.vpx(120)
                                 visible: parent.parent.hasRecent
                                 Image {
                                     id: bookIcon
@@ -1584,7 +1584,7 @@ Rectangle {
                                     anchors.left: bookIcon.right; anchors.leftMargin: space.px(16)
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
-                                    spacing: space.vpx(8)
+                                    spacing: space.vpx(6)
                                     Text {
                                         width: parent.width
                                         text: space.recentDoc ? space.recentDoc.name : ""
@@ -1594,7 +1594,7 @@ Rectangle {
                                         text: space.recentDoc && space.recentDoc.pages > 0
                                               ? space.st("reading_progress", { pct: space.recentDoc.percent })
                                               : (space.recentDoc ? space.st("reading_page", { page: space.recentDoc.page }) : "")
-                                        font.pixelSize: space.fpx(21); color: space.th.textNote
+                                        font.pixelSize: space.fpx(19); color: space.th.textNote
                                     }
                                     Rectangle {
                                         width: parent.width; height: 4; radius: 2; color: space.th.lineSoft

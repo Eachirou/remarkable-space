@@ -91,8 +91,8 @@ Item {
         id: _rmhApply
         visible: root._rmhDirty
         z: 2
-        anchors.bottom: parent.top
-        anchors.bottomMargin: Math.round(48 * root.space.unit)
+        anchors.top: parent.top
+        anchors.topMargin: Math.round(8 * root.space.unit)
         anchors.right: parent.right
         iconSource: "qrc:/ark/icons/checkmark"
         title: space.tr("apply")
