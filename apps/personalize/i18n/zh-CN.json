@@ -7,6 +7,7 @@
   "font_empty": "暂无字体，请先扫码上传",
   "active": "当前生效",
   "wallpaper_empty": "暂无壁纸，请先扫码上传",
+  "wallpaper_default": "reMarkable 默认布局",
   "hero_title": "空间首页插图",
   "hero_hint_1": "首页顶部那张大卡垫什么。装了天气时可以让天气接管，也可以固定用一幅画。",
   "hero_hint_2": "插图经扫码上传页的「插图」那栏传进来，横幅比例（宽约为高的两倍）最合适。",

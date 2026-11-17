@@ -7,6 +7,7 @@
   "font_empty": "No fonts yet — upload some by scanning the QR code",
   "active": "In use",
   "wallpaper_empty": "No wallpapers yet — upload some by scanning the QR code",
+  "wallpaper_default": "Normal reMarkable layout",
   "hero_title": "Space home artwork",
   "hero_hint_1": "What sits behind the big card at the top of the home screen. With Weather installed you can let it take over, or always use a picture.",
   "hero_hint_2": "Upload artwork from the Artwork section of the upload page. A banner shape works best — about twice as wide as it is tall.",

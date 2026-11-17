@@ -1,0 +1,13 @@
+{
+  "id": "almanac",
+  "name": "Almanach",
+  "name_en": "Almanac",
+  "version": "0.1.0",
+  "description": "Référence saisonnière hors ligne",
+  "description_en": "An offline seasonal reference",
+  "icon": "qrc:/ark/icons/restore",
+  "entry": "main.qml",
+  "category": "reader",
+  "order": 37,
+  "arch": ["armv7", "aarch64"]
+}

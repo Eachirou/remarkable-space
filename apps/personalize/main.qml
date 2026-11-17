@@ -356,7 +356,7 @@ Item {
                             Image {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 200
-                                source: root.space.baseUrl
+                                source: _rmhScreenCell.rowName === "" ? "" : root.space.baseUrl
                                     + "/screens/" + _rmhScreenCell.rowName + "/preview"
                                 cache: false
                                 fillMode: Image.PreserveAspectFit
@@ -365,7 +365,7 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 horizontalAlignment: Text.AlignHCenter
-                                text: _rmhScreenCell.rowName
+                                text: _rmhScreenCell.rowName === "" ? space.tr("wallpaper_default") : _rmhScreenCell.rowName
                                 font.pixelSize: 18
                                 font.weight: _rmhScreenCell.rowSelected ? Font.Medium : Font.Normal
                                 elide: Text.ElideMiddle
@@ -584,6 +584,7 @@ Item {
             try {
                 var arr = JSON.parse(x.responseText)
                 var active = ""
+                _rmhScreensModel.append({ rowName: "" })
                 for (var i = 0; i < arr.length; i++) {
                     _rmhFontsModel.append({ rowName: arr[i].name })
                     if (arr[i].active) active = arr[i].name
@@ -639,9 +640,10 @@ Item {
             body.font = root._rmhSelectedFont
         }
         if (root._rmhSelectedScreen !== root._rmhAppliedScreen) {
-            body.screen = root._rmhSelectedScreen
+            if (root._rmhSelectedScreen === "") body.clearScreen = true
+            else body.screen = root._rmhSelectedScreen
         }
-        if (!body.font && !body.screen) return
+        if (!body.font && !body.screen && !body.clearScreen) return
         var x = new XMLHttpRequest()
         x.open("POST", root.space.baseUrl + "/apply")
         x.setRequestHeader("Content-Type", "application/json")

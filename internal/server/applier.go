@@ -452,8 +452,9 @@ func (s *Server) applyScreenInternal(name string) (string, error) {
 // body: {"font": "name.ttf", "screen": "name.png"}, 任一字段可省/为空.
 func (s *Server) applyAll(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Font   string `json:"font"`
-		Screen string `json:"screen"`
+		Font        string `json:"font"`
+		Screen      string `json:"screen"`
+		ClearScreen bool   `json:"clearScreen"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -461,7 +462,7 @@ func (s *Server) applyAll(w http.ResponseWriter, r *http.Request) {
 	body.Font = strings.TrimSpace(body.Font)
 	body.Screen = strings.TrimSpace(body.Screen)
 
-	if body.Font == "" && body.Screen == "" {
+	if body.Font == "" && body.Screen == "" && !body.ClearScreen {
 		httpError(w, http.StatusBadRequest, "font 和 screen 至少需要一个")
 		return
 	}
@@ -484,6 +485,13 @@ func (s *Server) applyAll(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp["screen"] = applied
+	}
+	if body.ClearScreen {
+		if err := writeSleepScreenPath(s.cfg.XochitlConf, ""); err != nil {
+			httpError(w, http.StatusInternalServerError, fmt.Sprintf("清除壁纸配置失败: %v", err))
+			return
+		}
+		resp["screen"] = ""
 	}
 	resp["restart"] = true
 

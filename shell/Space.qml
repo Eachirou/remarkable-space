@@ -27,6 +27,23 @@ Rectangle {
     // 两层都要: MouseArea 接合成鼠标 (第一指 / 笔), MultiPointTouchArea 接多指触摸。
     MouseArea { anchors.fill: parent; onPressed: (mouse) => { mouse.accepted = true } }
     MultiPointTouchArea { anchors.fill: parent; mouseEnabled: false }
+    MouseArea {
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: Math.max(140, space.vpx(180))
+        z: 20
+        visible: space.current !== null
+        property real startY: 0
+        onPressed: (mouse) => {
+            startY = mouse.y
+            mouse.accepted = true
+        }
+        onReleased: (mouse) => {
+            if (mouse.y - startY >= space.vpx(90)) space.closeApp()
+            mouse.accepted = true
+        }
+    }
 
     // 2: 文件库桥 (/space/library/*: 热导入、建文件夹/笔记本, 外壳调 requestLoadEntry)。
     //    用到它的应用 (如手写画布 lib/ink) 在 manifest 里写 min_shell: 2
@@ -2223,7 +2240,7 @@ Rectangle {
                     interactive: !!(space.upd && space.upd.available)
                     onClicked: space.gotoSystemUpdates()
                 }
-                // 关于空间下面: 作者的小红书二维码, 居中, 文字在下面
+                // 关于空间下面: 作者的 GitHub 二维码, 居中, 文字在下面
                 Column {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.topMargin: space.fpx(48)
@@ -2231,12 +2248,12 @@ Rectangle {
                     Image {
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: space.fpx(300); height: width
-                        source: space.kitDir + "/images/xhs-qr.png?v=4"   // 换图要改这个号: xochitl 按地址缓存图片, 不改地址换了文件也不重读
+                        source: space.kitDir + "/images/github-qr.png?v=1"
                         sourceSize.width: 600; sourceSize.height: 600
                         fillMode: Image.PreserveAspectFit
                     }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("about_xhs"); font.pixelSize: space.fpx(24); color: space.th.text }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("about_xhs_id"); font.pixelSize: space.fpx(20); color: space.th.text }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("about_github"); font.pixelSize: space.fpx(24); color: space.th.text }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: space.st("about_author"); font.pixelSize: space.fpx(20); color: space.th.text }
                 }
             }
         }
