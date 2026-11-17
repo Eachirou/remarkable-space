@@ -153,7 +153,11 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // 应用包和索引归同一道门管: 只挡索引是漏的, 链接一旦被记下来 (旧版索引、抓包),
 // 不带凭证照样能一直下。
 func (r *Registry) InstallFromURL(url, sha256hex string, hdr http.Header, sup *Supervisor) (App, error) {
-	tmp, err := os.CreateTemp("", "space-app-*.zip")
+	tmpDir := r.DataDir
+	if tmpDir == "" {
+		tmpDir = os.TempDir()
+	}
+	tmp, err := os.CreateTemp(tmpDir, "space-app-*.zip")
 	if err != nil {
 		return App{}, err
 	}

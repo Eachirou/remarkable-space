@@ -822,7 +822,9 @@ Rectangle {
     function playApps() {
         return filterApps(function(a) { return !a.error && space.isPlayApp(a) })
     }
-    function settingsApps() { return filterApps(isSetting) }
+    // Unsupported device-specific entries remain in the backend registry for diagnostics,
+    // but must not appear as usable settings on this device.
+    function settingsApps() { return filterApps(function(a) { return !a.error && isSetting(a) }) }
     // 声明了 widget_slot 的小组件由外壳指定位置 (如 "plan" → 今日计划那张卡)
     function slotWidgetApp(slot) {
         var l = filterApps(function(a) { return space.hasWidget(a) && a.widget_slot === slot && !a.error })
