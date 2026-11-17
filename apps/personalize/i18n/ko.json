@@ -25,5 +25,15 @@
   "theme_hint": "Space의 모양 변경: 색상, 윤곽선 및 홈 화면. 전환하려면 탭하세요, 재시작 불필요.",
   "theme_more": "스토어에서 더 많은 테마",
   "_app_name": "개인화",
-  "_app_description": "시스템 글꼴 및 절전 화면 배경화면"
+  "_app_description": "시스템 글꼴 및 절전 화면 배경화면",
+  "contact_panel_hint": "Create a sleep screen with a white panel for contact information. The selected image will be used as the background.",
+  "contact_panel_name": "Name",
+  "contact_panel_email": "Email",
+  "contact_panel_phone": "Phone",
+  "contact_panel_message": "Message",
+  "contact_panel_create": "Create white panel",
+  "contact_panel_creating": "Creating...",
+  "contact_panel_created": "Panel created. Select its thumbnail, then Apply.",
+  "contact_panel_failed": "Could not create the panel.",
+  "contact_panel_empty": "Enter at least one piece of information."
 }

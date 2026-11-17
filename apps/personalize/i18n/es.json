@@ -25,5 +25,15 @@
   "theme_hint": "Cambia cómo se ve Space: colores, contornos y la página de inicio. Toca uno para cambiar, no se necesita reiniciar.",
   "theme_more": "Más temas en la tienda",
   "_app_name": "Personalizar",
-  "_app_description": "Fuentes del sistema y fondos de pantalla de la pantalla de bloqueo"
+  "_app_description": "Fuentes del sistema y fondos de pantalla de la pantalla de bloqueo",
+  "contact_panel_hint": "Create a sleep screen with a white panel for contact information. The selected image will be used as the background.",
+  "contact_panel_name": "Name",
+  "contact_panel_email": "Email",
+  "contact_panel_phone": "Phone",
+  "contact_panel_message": "Message",
+  "contact_panel_create": "Create white panel",
+  "contact_panel_creating": "Creating...",
+  "contact_panel_created": "Panel created. Select its thumbnail, then Apply.",
+  "contact_panel_failed": "Could not create the panel.",
+  "contact_panel_empty": "Enter at least one piece of information."
 }

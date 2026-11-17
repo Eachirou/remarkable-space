@@ -25,5 +25,15 @@
   "theme_hint": "Space の見た目を変更：色、アウトライン、ホームページ。切り替えるにはタップ、再起動は不要。",
   "theme_more": "ストアでさらにテーマを入手",
   "_app_name": "パーソナライズ",
-  "_app_description": "システムフォントとスリープ画面の壁紙"
+  "_app_description": "システムフォントとスリープ画面の壁紙",
+  "contact_panel_hint": "Create a sleep screen with a white panel for contact information. The selected image will be used as the background.",
+  "contact_panel_name": "Name",
+  "contact_panel_email": "Email",
+  "contact_panel_phone": "Phone",
+  "contact_panel_message": "Message",
+  "contact_panel_create": "Create white panel",
+  "contact_panel_creating": "Creating...",
+  "contact_panel_created": "Panel created. Select its thumbnail, then Apply.",
+  "contact_panel_failed": "Could not create the panel.",
+  "contact_panel_empty": "Enter at least one piece of information."
 }

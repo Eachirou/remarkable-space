@@ -141,6 +141,7 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("GET /screens", s.listScreens)
 	mux.HandleFunc("POST /screens", s.uploadScreen)
+	mux.HandleFunc("POST /screens/contact-panel", s.createContactPanel)
 	mux.HandleFunc("GET /hero", s.listHero)
 	mux.HandleFunc("POST /hero", s.uploadHero)
 	mux.HandleFunc("GET /hero/{name}", s.previewHero)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -140,6 +141,34 @@ func TestUploadScreenWrongFormat(t *testing.T) {
 	h.ServeHTTP(rr, req)
 	if rr.Code != 400 {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body)
+	}
+}
+
+func TestCreateContactPanel(t *testing.T) {
+	_, h, root := newTestServer(t)
+	body := strings.NewReader(`{"name":"Ervan Achirou","email":"ervan@example.com","phone":"+33 6 12 34 56 78","message":"If found, please contact me."}`)
+	req := httptest.NewRequest("POST", "/screens/contact-panel", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body)
+	}
+	var result map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(filepath.Join(root, "screens", result["name"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	img, err := png.Decode(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := img.Bounds().Size(); got.X != panelWidth || got.Y != panelHeight {
+		t.Fatalf("size=%v, want %dx%d", got, panelWidth, panelHeight)
 	}
 }
 

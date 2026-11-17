@@ -10,12 +10,19 @@ Item {
     id: root
     property var space          // 外壳注入的 API 对象 (见 space/README.md)
     anchors.fill: parent
+    property string message: ""
 
     // 已生效 (从后端拉到) vs 选中 (用户在页内的临时选择)
     property string _rmhAppliedFont: ""
     property string _rmhAppliedScreen: ""
     property string _rmhSelectedFont: ""
     property string _rmhSelectedScreen: ""
+    property string _rmhSelectAfterRefresh: ""
+    property string _rmhPanelName: ""
+    property string _rmhPanelEmail: ""
+    property string _rmhPanelPhone: ""
+    property string _rmhPanelMessage: ""
+    property bool _rmhPanelBusy: false
     readonly property bool _rmhDirty:
         _rmhSelectedFont !== _rmhAppliedFont ||
         _rmhSelectedScreen !== _rmhAppliedScreen
@@ -324,6 +331,62 @@ Item {
                 Layout.fillWidth: true
             }
 
+            Text {
+                visible: root.sect === "screen"
+                Layout.fillWidth: true
+                text: space.tr("contact_panel_hint")
+                font.pixelSize: 22
+                wrapMode: Text.WordWrap
+            }
+            Text { visible: root.sect === "screen"; text: space.tr("contact_panel_name"); font.pixelSize: 20 }
+            TextInput {
+                visible: root.sect === "screen"
+                Layout.fillWidth: true
+                text: root._rmhPanelName
+                font.pixelSize: 22
+                onTextChanged: root._rmhPanelName = text
+            }
+            Text { visible: root.sect === "screen"; text: space.tr("contact_panel_email"); font.pixelSize: 20 }
+            TextInput {
+                visible: root.sect === "screen"
+                Layout.fillWidth: true
+                text: root._rmhPanelEmail
+                font.pixelSize: 22
+                onTextChanged: root._rmhPanelEmail = text
+            }
+            Text { visible: root.sect === "screen"; text: space.tr("contact_panel_phone"); font.pixelSize: 20 }
+            TextInput {
+                visible: root.sect === "screen"
+                Layout.fillWidth: true
+                text: root._rmhPanelPhone
+                font.pixelSize: 22
+                onTextChanged: root._rmhPanelPhone = text
+            }
+            Text { visible: root.sect === "screen"; text: space.tr("contact_panel_message"); font.pixelSize: 20 }
+            TextInput {
+                visible: root.sect === "screen"
+                Layout.fillWidth: true
+                text: root._rmhPanelMessage
+                font.pixelSize: 22
+                onTextChanged: root._rmhPanelMessage = text
+            }
+            Kit.SButton {
+                visible: root.sect === "screen"
+                text: root._rmhPanelBusy ? space.tr("contact_panel_creating") : space.tr("contact_panel_create")
+                th: space.th
+                ui: space.fs
+                primary: true
+                enabled: !root._rmhPanelBusy
+                onClicked: root.createContactPanel()
+            }
+            Text {
+                visible: root.sect === "screen" && root.message !== ""
+                Layout.fillWidth: true
+                text: root.message
+                font.pixelSize: 20
+                wrapMode: Text.WordWrap
+            }
+
             Flow {
                 visible: root.sect === "screen"
                 Layout.fillWidth: true
@@ -610,8 +673,43 @@ Item {
                     if (arr[i].active) active = arr[i].name
                 }
                 root._rmhAppliedScreen = active
-                root._rmhSelectedScreen = active
+                root._rmhSelectedScreen = root._rmhSelectAfterRefresh !== "" ? root._rmhSelectAfterRefresh : active
+                root._rmhSelectAfterRefresh = ""
             } catch (e) {}
+        }
+        function createContactPanel() {
+            if (root._rmhPanelName.trim() === "" && root._rmhPanelEmail.trim() === "" &&
+                    root._rmhPanelPhone.trim() === "" && root._rmhPanelMessage.trim() === "") {
+                root.message = space.tr("contact_panel_empty")
+                return
+            }
+            root._rmhPanelBusy = true
+            var x = new XMLHttpRequest()
+            x.onreadystatechange = function() {
+                if (x.readyState !== XMLHttpRequest.DONE) return
+                root._rmhPanelBusy = false
+                if (x.status !== 200) {
+                    root.message = space.tr("contact_panel_failed")
+                    return
+                }
+                try {
+                    var result = JSON.parse(x.responseText)
+                    root._rmhSelectAfterRefresh = result.name || ""
+                    root.refreshScreens()
+                    root.message = space.tr("contact_panel_created")
+                } catch (e) {
+                    root.message = space.tr("contact_panel_failed")
+                }
+            }
+            x.open("POST", root.space.baseUrl + "/screens/contact-panel")
+            x.setRequestHeader("Content-Type", "application/json")
+            x.send(JSON.stringify({
+                name: root._rmhPanelName,
+                email: root._rmhPanelEmail,
+                phone: root._rmhPanelPhone,
+                message: root._rmhPanelMessage,
+                background: root._rmhSelectedScreen
+            }))
         }
         x.open("GET", root.space.baseUrl + "/screens")
         x.send()

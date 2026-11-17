@@ -25,5 +25,15 @@
   "theme_hint": "換空間的外觀：顏色、線框、首頁樣式。點一下就換，不用重啟。",
   "theme_more": "去商店找更多主題",
   "_app_name": "個性化",
-  "_app_description": "系統字型與休眠桌布"
+  "_app_description": "系統字型與休眠桌布",
+  "contact_panel_hint": "Create a sleep screen with a white panel for contact information. The selected image will be used as the background.",
+  "contact_panel_name": "Name",
+  "contact_panel_email": "Email",
+  "contact_panel_phone": "Phone",
+  "contact_panel_message": "Message",
+  "contact_panel_create": "Create white panel",
+  "contact_panel_creating": "Creating...",
+  "contact_panel_created": "Panel created. Select its thumbnail, then Apply.",
+  "contact_panel_failed": "Could not create the panel.",
+  "contact_panel_empty": "Enter at least one piece of information."
 }
