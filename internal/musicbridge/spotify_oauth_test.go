@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -114,5 +115,80 @@ func TestSpotifyOAuthRejectsMismatchedState(t *testing.T) {
 	}
 	if err := oauth.CompleteAuthorization(context.Background(), "wrong-state", "code"); err == nil {
 		t.Fatal("CompleteAuthorization accepted an unknown state")
+	}
+}
+
+func TestSpotifyAPIUnauthorizedRefreshesAndRetries(t *testing.T) {
+	apiRequests := 0
+	tokenRequests := 0
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1/me/player":
+			apiRequests++
+			if apiRequests == 1 {
+				if got := req.Header.Get("Authorization"); got != "Bearer expired-access" {
+					t.Fatalf("first API authorization = %q", got)
+				}
+				return &http.Response{
+					StatusCode: http.StatusUnauthorized,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"expired"}}`)),
+					Request:    req,
+				}, nil
+			}
+			if got := req.Header.Get("Authorization"); got != "Bearer refreshed-access" {
+				t.Fatalf("retry API authorization = %q", got)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"is_playing":true,"item":{"name":"Test track"}}`)),
+				Request:    req,
+			}, nil
+		case "/api/token":
+			tokenRequests++
+			if err := req.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if req.Form.Get("grant_type") != "refresh_token" {
+				t.Fatalf("token grant_type = %q", req.Form.Get("grant_type"))
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"access_token":"refreshed-access","expires_in":3600}`)),
+				Request:    req,
+			}, nil
+		default:
+			t.Fatalf("unexpected request URL %s", req.URL)
+			return nil, nil
+		}
+	})}
+	oauth, err := NewSpotifyOAuth("client-id", "http://127.0.0.1:9120/oauth/callback", "", client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oauth.token = spotifyToken{
+		AccessToken:  "expired-access",
+		RefreshToken: "refresh-token",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}
+	s := &Server{BridgeToken: "device-token", SpotifyOAuth: oauth, Client: client}
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer device-token")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status response = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var status Status
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if !status.Playing || status.Track != "Test track" {
+		t.Fatalf("status = %+v, want playing Test track", status)
+	}
+	if apiRequests != 2 || tokenRequests != 1 {
+		t.Fatalf("API requests = %d, token refresh requests = %d; want 2 and 1", apiRequests, tokenRequests)
 	}
 }

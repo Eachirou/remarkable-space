@@ -76,7 +76,10 @@ Item {
             var value = null
             try { value = JSON.parse(x.responseText) } catch (e) {}
             if (x.status !== 200 || !value || !value.token) {
-                root.message = value && value.error ? value.error : space.tr("pair_failed")
+                if (x.status === 401) root.message = space.tr("invalid_pairing_code")
+                else if (x.status === 410) root.message = space.tr("pairing_expired")
+                else if (x.status === 429) root.message = space.tr("pairing_attempts_exceeded")
+                else root.message = value && value.error ? value.error : space.tr("pair_failed")
                 return
             }
             root.token = value.token

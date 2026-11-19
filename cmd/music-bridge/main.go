@@ -35,6 +35,9 @@ func main() {
 	if err := os.MkdirAll(*configDir, 0o700); err != nil {
 		log.Fatalf("cannot create private config directory: %v", err)
 	}
+	if err := os.Chmod(*configDir, 0o700); err != nil {
+		log.Fatalf("cannot secure private config directory: %v", err)
+	}
 
 	client := &http.Client{Timeout: 8 * time.Second}
 	var oauth *musicbridge.SpotifyOAuth

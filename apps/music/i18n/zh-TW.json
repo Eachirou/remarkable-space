@@ -19,6 +19,8 @@
   "paired": "裝置已配對，可以使用 Spotify。",
   "pair_failed": "無法與橋接服務配對。",
   "invalid_pairing_code": "請輸入橋接終端機中顯示的 8 位數配對碼。",
+  "pairing_expired": "配對碼已過期或已使用。請重新啟動橋接服務以取得新碼。",
+  "pairing_attempts_exceeded": "嘗試次數過多。請重新啟動橋接服務以取得新碼。",
   "token": "橋接權杖",
   "save": "儲存",
   "saved": "連線已儲存",

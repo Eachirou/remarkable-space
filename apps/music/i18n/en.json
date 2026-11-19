@@ -19,6 +19,8 @@
   "paired": "Device paired. Spotify is ready.",
   "pair_failed": "Could not pair with the bridge.",
   "invalid_pairing_code": "Enter the 8-digit pairing code shown in the bridge terminal.",
+  "pairing_expired": "The code expired or was used. Restart the bridge to get a new code.",
+  "pairing_attempts_exceeded": "Too many attempts. Restart the bridge to get a new code.",
   "token": "Bridge token",
   "save": "Save",
   "saved": "Connection saved",

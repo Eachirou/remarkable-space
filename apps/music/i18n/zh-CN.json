@@ -19,6 +19,8 @@
   "paired": "设备已配对，可以使用 Spotify。",
   "pair_failed": "无法与桥接服务配对。",
   "invalid_pairing_code": "请输入桥接终端中显示的 8 位配对码。",
+  "pairing_expired": "配对码已过期或已使用。请重启桥接服务以获取新码。",
+  "pairing_attempts_exceeded": "尝试次数过多。请重启桥接服务以获取新码。",
   "token": "桥接令牌",
   "save": "保存",
   "saved": "连接已保存",

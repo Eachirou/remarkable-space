@@ -41,8 +41,8 @@ Run the bridge on the computer's network interfaces so the tablet can reach it:
 The terminal prints an 8-digit, one-time pairing code, valid for 10 minutes, and a local Spotify authorization
 URL. Open that URL in a browser **on the computer running the bridge**, sign in, and approve the requested
 permissions. The callback page confirms authorization; the bridge stores the refresh token in
-`~/.config/remarkable-space/music-bridge/spotify.json` with owner-only permissions and refreshes access tokens
-automatically.
+`<user-config-dir>/remarkable-space/music-bridge/spotify.json` with owner-only permissions (on Linux,
+`~/.config/remarkable-space/music-bridge/spotify.json`) and refreshes access tokens automatically.
 
 Keep the bridge terminal open while using the app. If the pairing code expires, restart the bridge to get a new
 one. A previously paired device remains paired across bridge restarts.

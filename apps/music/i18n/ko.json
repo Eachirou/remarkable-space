@@ -19,6 +19,8 @@
   "paired": "기기가 페어링되었습니다. Spotify를 사용할 수 있습니다.",
   "pair_failed": "브리지와 페어링할 수 없습니다.",
   "invalid_pairing_code": "브리지 터미널에 표시된 8자리 코드를 입력하세요.",
+  "pairing_expired": "코드가 만료되었거나 이미 사용되었습니다. 브리지를 다시 시작해 새 코드를 받으세요.",
+  "pairing_attempts_exceeded": "시도 횟수가 너무 많습니다. 브리지를 다시 시작해 새 코드를 받으세요.",
   "token": "브리지 토큰",
   "save": "저장",
   "saved": "연결 저장됨",

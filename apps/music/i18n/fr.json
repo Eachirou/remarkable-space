@@ -19,6 +19,8 @@
   "paired": "Appareil associé. Spotify est prêt.",
   "pair_failed": "Impossible d’associer l’appareil au pont.",
   "invalid_pairing_code": "Saisissez le code d’association à 8 chiffres affiché dans le terminal.",
+  "pairing_expired": "Le code a expiré ou a déjà été utilisé. Redémarrez le pont pour en obtenir un nouveau.",
+  "pairing_attempts_exceeded": "Trop de tentatives. Redémarrez le pont pour obtenir un nouveau code.",
   "token": "Jeton du pont",
   "save": "Enregistrer",
   "saved": "Connexion enregistrée",

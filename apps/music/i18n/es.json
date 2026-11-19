@@ -19,6 +19,8 @@
   "paired": "Dispositivo emparejado. Spotify está listo.",
   "pair_failed": "No se pudo emparejar con el puente.",
   "invalid_pairing_code": "Introduce el código de emparejamiento de 8 dígitos del terminal.",
+  "pairing_expired": "El código caducó o ya se usó. Reinicia el puente para obtener otro.",
+  "pairing_attempts_exceeded": "Demasiados intentos. Reinicia el puente para obtener un código nuevo.",
   "token": "Token del puente",
   "save": "Guardar",
   "saved": "Conexión guardada",
