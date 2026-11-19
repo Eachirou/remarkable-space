@@ -10,6 +10,7 @@ Item {
 
     property string bridgeUrl: ""
     property string token: ""
+    property string pairingCode: ""
     property string message: ""
     property var playback: ({})
     property bool busy: false
@@ -18,12 +19,21 @@ Item {
 
     function request(method, path, body, cb) {
         var x = new XMLHttpRequest()
+        var finished = false
+        x.timeout = 12000
         x.onreadystatechange = function() {
-            if (x.readyState !== XMLHttpRequest.DONE) return
+            if (x.readyState !== XMLHttpRequest.DONE || finished) return
+            finished = true
             var value = null
             try { value = JSON.parse(x.responseText) } catch (e) {}
             cb(x.status, value)
         }
+        x.onerror = function() {
+            if (finished) return
+            finished = true
+            cb(0, { error: space.tr("bridge_unavailable") })
+        }
+        x.ontimeout = x.onerror
         x.open(method, root.bridgeUrl + path)
         x.setRequestHeader("Authorization", "Bearer " + root.token)
         if (body !== null) x.setRequestHeader("Content-Type", "application/json")
@@ -40,16 +50,56 @@ Item {
         })
     }
 
-    function saveConfig() {
-        if (root.bridgeUrl.indexOf("http://") !== 0 && root.bridgeUrl.indexOf("https://") !== 0) {
+    function validBridgeUrl() {
+        return root.bridgeUrl.indexOf("http://") === 0 || root.bridgeUrl.indexOf("https://") === 0
+    }
+
+    function pair() {
+        if (!validBridgeUrl()) {
             root.message = space.tr("invalid_url")
             return
         }
+        var code = root.pairingCode.trim()
+        if (!/^[0-9]{8}$/.test(code)) {
+            root.message = space.tr("invalid_pairing_code")
+            return
+        }
         while (root.bridgeUrl.endsWith("/")) root.bridgeUrl = root.bridgeUrl.slice(0, -1)
-        space.dataPut("music", "config", { bridgeUrl: root.bridgeUrl, token: root.token }, function(st, _) {
-            root.message = st === 200 ? space.tr("saved") : space.tr("save_failed")
-            if (st === 200) root.refresh()
-        })
+        root.busy = true
+        var x = new XMLHttpRequest()
+        var finished = false
+        x.timeout = 12000
+        x.onreadystatechange = function() {
+            if (x.readyState !== XMLHttpRequest.DONE || finished) return
+            finished = true
+            root.busy = false
+            var value = null
+            try { value = JSON.parse(x.responseText) } catch (e) {}
+            if (x.status !== 200 || !value || !value.token) {
+                root.message = value && value.error ? value.error : space.tr("pair_failed")
+                return
+            }
+            root.token = value.token
+            space.dataPut("music", "config", { bridgeUrl: root.bridgeUrl, token: root.token }, function(st, _) {
+                if (st !== 200) {
+                    root.message = space.tr("save_failed")
+                    return
+                }
+                root.pairingCode = ""
+                root.message = space.tr("paired")
+                root.refresh()
+            })
+        }
+        x.onerror = function() {
+            if (finished) return
+            finished = true
+            root.busy = false
+            root.message = space.tr("bridge_unavailable")
+        }
+        x.ontimeout = x.onerror
+        x.open("POST", root.bridgeUrl + "/api/pair")
+        x.setRequestHeader("Content-Type", "application/json")
+        x.send(JSON.stringify({ code: code }))
     }
 
     function refresh() {
@@ -57,7 +107,11 @@ Item {
         root.request("GET", "/api/status", null, function(st, value) {
             root.busy = false
             if (st !== 200 || !value) {
-                root.message = st === 401 ? space.tr("invalid_token") : space.tr("bridge_unavailable")
+                if (value && value.error) {
+                    root.message = value.error === "invalid bridge token" ? space.tr("invalid_token") : value.error
+                } else {
+                    root.message = space.tr("bridge_unavailable")
+                }
                 return
             }
             root.playback = value
@@ -66,7 +120,7 @@ Item {
     }
 
     function control(action) {
-        if (root.bridgeUrl === "") {
+        if (root.bridgeUrl === "" || root.token === "") {
             root.message = space.tr("configure_first")
             return
         }
@@ -152,22 +206,35 @@ Item {
             selectByMouse: true
             onTextChanged: root.bridgeUrl = text
         }
-        Text { text: space.tr("token"); font.pixelSize: 20 }
+        Text {
+            Layout.fillWidth: true
+            text: space.tr("bridge_url_hint")
+            font.pixelSize: 17
+            wrapMode: Text.WordWrap
+        }
+        Text { text: space.tr("pairing_code"); font.pixelSize: 20 }
         TextInput {
             Layout.fillWidth: true
-            text: root.token
+            text: root.pairingCode
             font.pixelSize: 22
-            echoMode: TextInput.Password
+            inputMethodHints: Qt.ImhDigitsOnly
+            maximumLength: 8
             selectByMouse: true
-            onTextChanged: root.token = text
+            onTextChanged: root.pairingCode = text
+        }
+        Text {
+            Layout.fillWidth: true
+            text: space.tr("pairing_hint")
+            font.pixelSize: 17
+            wrapMode: Text.WordWrap
         }
         Kit.SButton {
-            text: space.tr("save")
+            text: space.tr("pair")
             th: space.th
             ui: space.fs
             primary: true
             enabled: !root.busy
-            onClicked: root.saveConfig()
+            onClicked: root.pair()
         }
     }
 }
